@@ -22,6 +22,7 @@ routes = [
 AXIOM_DATASET = "vynalth-log"
 # Log every request. Lower temporarily only if volume requires sampling.
 LOG_SAMPLE_RATE = "1"
+TELEGRAM_CHAT_ID = "-1003851949025"
 
 [observability]
 enabled = true
