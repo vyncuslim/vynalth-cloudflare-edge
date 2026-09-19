@@ -3,9 +3,19 @@ main = "src/index.js"
 compatibility_date = "2026-09-19"
 workers_dev = true
 
+# A route only sends traffic to this Worker. The explicit host allowlist in
+# src/index.js decides whether it has an approved origin; unknown hosts return 404.
 routes = [
   { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
-  { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" }
+  { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" },
+  { pattern = "sleepsomno.com/*", zone_name = "sleepsomno.com" },
+  { pattern = "*.sleepsomno.com/*", zone_name = "sleepsomno.com" },
+  { pattern = "vitamindai.online/*", zone_name = "vitamindai.online" },
+  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" },
+  { pattern = "vyncuslim.com/*", zone_name = "vyncuslim.com" },
+  { pattern = "*.vyncuslim.com/*", zone_name = "vyncuslim.com" },
+  { pattern = "powiismunc.com/*", zone_name = "powiismunc.com" },
+  { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" }
 ]
 
 [vars]
