@@ -1,12 +1,33 @@
-const ROOT_DOMAIN = "vynalthai.com";
-const ORIGIN_HOST = "somno-ai-digital-sleep-lab.vercel.app";
+const ORIGINS = Object.freeze({
+  "vynalthai.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "www.vynalthai.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "trust.vynalthai.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "status.vynalthai.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "partner.vynalthai.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "cf-test.vynalthai.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "vynova.vynalthai.com": "social-puce-nine.vercel.app",
+  "shield.vynalthai.com": "vita-shield.vercel.app",
+  "navigator.vynalthai.com": "vynalth-ai-navigator.vercel.app",
+  "pedia.vynalthai.com": "pedia-peach.vercel.app",
+  "search.vynalthai.com": "vynalth-ai-search.vercel.app",
+  "sleepsomno.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "www.sleepsomno.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "trust.sleepsomno.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "status.sleepsomno.com": "somno-ai-digital-sleep-lab.vercel.app",
+  "shield.sleepsomno.com": "vita-shield.vercel.app",
+  "vitamindai.online": "somno-ai-digital-sleep-lab.vercel.app",
+  "vyncuslim.com": "vv-seven-tau.vercel.app",
+  "www.vyncuslim.com": "vv-seven-tau.vercel.app",
+  "powiismunc.com": "powiis-mun-2027.vercel.app",
+  "www.powiismunc.com": "powiis-mun-2027.vercel.app",
+});
+
 const REQUEST_ID_HEADER = "x-vynalth-request-id";
 const RAY_ID_HEADER = "x-vynalth-ray-id";
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 
-function isAllowedHostname(hostname) {
-  const normalized = hostname.toLowerCase();
-  return normalized === ROOT_DOMAIN || normalized.endsWith(`.${ROOT_DOMAIN}`);
+function getOriginHost(hostname) {
+  return ORIGINS[hostname.toLowerCase()] ?? null;
 }
 
 function getRequestId(request) {
@@ -57,18 +78,16 @@ async function ingestEdgeLog(event, env) {
     },
   );
 
-  if (!result.ok) {
-    console.error("Axiom edge log ingestion failed", result.status);
-  }
+  if (!result.ok) console.error("Axiom edge log ingestion failed", result.status);
 }
 
-function rewriteRedirect(location, incomingUrl) {
+function rewriteRedirect(location, incomingUrl, originHost) {
   if (!location) return null;
 
   try {
-    const redirectUrl = new URL(location, `https://${ORIGIN_HOST}`);
+    const redirectUrl = new URL(location, `https://${originHost}`);
 
-    if (redirectUrl.hostname === ORIGIN_HOST) {
+    if (redirectUrl.hostname === originHost) {
       redirectUrl.protocol = incomingUrl.protocol;
       redirectUrl.hostname = incomingUrl.hostname;
       redirectUrl.port = "";
@@ -86,25 +105,20 @@ export default {
     const startedAt = Date.now();
     const incomingUrl = new URL(request.url);
 
-    // Cloudflare-owned endpoints must bypass the proxy and must not be logged here.
+    // Cloudflare-owned endpoints must bypass the proxy and are logged by Cloudflare.
     if (incomingUrl.pathname.startsWith("/cdn-cgi/")) return fetch(request);
 
-    // Accept the production apex and any subdomain below vynalthai.com.
-    if (!isAllowedHostname(incomingUrl.hostname)) {
-      return new Response("Not Found", { status: 404 });
-    }
+    const originHost = getOriginHost(incomingUrl.hostname);
+    if (!originHost) return new Response("Not Found", { status: 404 });
 
     const requestId = getRequestId(request);
     const rayId = request.headers.get("cf-ray");
     const originUrl = new URL(request.url);
     originUrl.protocol = "https:";
-    originUrl.hostname = ORIGIN_HOST;
+    originUrl.hostname = originHost;
     originUrl.port = "";
 
     const headers = new Headers(request.headers);
-
-    // Preserve the public hostname for application-side logging/routing without
-    // forcing the HTTP Host header back to vynalthai.com (which would recurse).
     headers.set("x-forwarded-host", incomingUrl.host);
     headers.set("x-vynalth-edge-host", incomingUrl.host);
     headers.set(REQUEST_ID_HEADER, requestId);
@@ -129,8 +143,6 @@ export default {
       originResponse = null;
     }
 
-    // The log is deliberately non-blocking. It contains no body, cookies,
-    // authorization headers, query string, full referer or raw IP address.
     if (Math.random() < getSampleRate(env)) {
       const clientIp = request.headers.get("cf-connecting-ip");
       ctx.waitUntil(
@@ -139,6 +151,7 @@ export default {
             {
               timestamp: new Date().toISOString(),
               source: "cloudflare-edge",
+              site: incomingUrl.hostname.split(".").slice(-2).join("."),
               request_id: requestId,
               ray_id: rayId,
               host: incomingUrl.hostname,
@@ -172,16 +185,19 @@ export default {
           "cache-control": "no-store",
           [REQUEST_ID_HEADER]: requestId,
           ...(rayId ? { [RAY_ID_HEADER]: rayId } : {}),
+          "x-vynalth-edge": "cloudflare-worker",
         },
       });
     }
 
     const responseHeaders = new Headers(originResponse.headers);
-    const rewrittenLocation = rewriteRedirect(responseHeaders.get("location"), incomingUrl);
+    const rewrittenLocation = rewriteRedirect(
+      responseHeaders.get("location"),
+      incomingUrl,
+      originHost,
+    );
 
     if (rewrittenLocation) responseHeaders.set("location", rewrittenLocation);
-
-    // Browser, backend, Axiom and Telegram can all use these IDs for one trace.
     responseHeaders.set(REQUEST_ID_HEADER, requestId);
     if (rayId) responseHeaders.set(RAY_ID_HEADER, rayId);
     responseHeaders.set("x-vynalth-edge", "cloudflare-worker");
