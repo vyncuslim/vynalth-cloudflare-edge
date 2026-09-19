@@ -10,7 +10,7 @@ Every accepted request receives an `x-vynalth-request-id` at Cloudflare's edge. 
 - `x-vynalth-ray-id`
 - `x-vynalth-edge: cloudflare-worker`
 
-It asynchronously writes one event to Axiom's `vynalth-log` dataset, including `site`, `host`, path (without query string), method, status, duration, country, ASN, cache state and a salted IP hash. It never records raw IPs, query strings, cookies, authorization headers, bodies, or full referers.
+It asynchronously writes one event to Axiom's `vynalth-log` dataset and sends one Telegram notification for every accepted request. Both include `site`, `host`, path (without query string), method, status, country, ASN, Request ID and Ray ID. It never records raw IPs, query strings, cookies, authorization headers, bodies, or full referers.
 
 Only exact hostnames listed in `src/index.js` receive an origin. An unknown hostname returns 404 instead of being sent to the wrong website. Add a hostname and its correct Vercel Origin together in a pull request.
 
@@ -35,7 +35,7 @@ Only exact hostnames listed in `src/index.js` receive an origin. An unknown host
 Set these on the **vynalth-cloudflare-edge** Worker as runtime secrets; never commit them.
 
 - `AXIOM_TOKEN` — ingest-only token restricted to `vynalth-log`.
-- `IP_HASH_SALT` — long, random stable salt. Replace it immediately if it has been exposed.
+- `IP_HASH_SALT` — long, random stable salt. Replace it immediately if it has been exposed.\n- `TELEGRAM_BOT_TOKEN` — Telegram Bot API token for the notification bot.\n- `TELEGRAM_CHAT_ID` — destination chat or group ID. Every accepted Worker request sends one message here.
 
 Non-secret variables in `wrangler.toml`:
 
