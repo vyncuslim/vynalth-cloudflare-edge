@@ -1,69 +1,74 @@
 # Vynalth Cloudflare Edge
 
-Cloudflare edge proxy and request-observability layer for the production Vynalth AI site.
+Cloudflare edge proxy and privacy-safe request-observability layer for Vynalth AI and its approved public domains.
 
-## Request correlation and privacy
+## What this Worker does
 
-Every public request receives an `x-vynalth-request-id` at Cloudflare's edge. The same value, together with the Cloudflare Ray ID, is forwarded to the Vercel origin and returned in the browser response:
+Every accepted request receives an `x-vynalth-request-id` at Cloudflare's edge. The Worker forwards it and Cloudflare's Ray ID to Vercel, and returns both to the browser:
 
 - `x-vynalth-request-id`
 - `x-vynalth-ray-id`
+- `x-vynalth-edge: cloudflare-worker`
 
-Use these fields in backend structured logs and Telegram security alerts to trace one request from Cloudflare → Vercel API → Axiom → alert.
+It asynchronously writes one event to Axiom's `vynalth-log` dataset, including `site`, `host`, path (without query string), method, status, duration, country, ASN, cache state and a salted IP hash. It never records raw IPs, query strings, cookies, authorization headers, bodies, or full referers.
 
-The Worker sends one non-blocking event to the `vynalth-log` Axiom dataset. It records timestamp, host, path, method, status, duration, country, ASN, cache state and a salted IP hash. It never records query strings, cookies, authorisation headers, request/response bodies, raw IP addresses or full referers.
+Only exact hostnames listed in `src/index.js` receive an origin. An unknown hostname returns 404 instead of being sent to the wrong website. Add a hostname and its correct Vercel Origin together in a pull request.
+
+## Approved origins
+
+| Public host group | Vercel Origin |
+| --- | --- |
+| Vynalth AI main, www, trust, status, partner, cf-test | `somno-ai-digital-sleep-lab.vercel.app` |
+| Vynova | `social-puce-nine.vercel.app` |
+| Shield | `vita-shield.vercel.app` |
+| Navigator | `vynalth-ai-navigator.vercel.app` |
+| Pedia | `pedia-peach.vercel.app` |
+| Search | `vynalth-ai-search.vercel.app` |
+| SleepSomno main, www, trust, status | `somno-ai-digital-sleep-lab.vercel.app` |
+| SleepSomno Shield | `vita-shield.vercel.app` |
+| VitaminD AI | `somno-ai-digital-sleep-lab.vercel.app` |
+| Vyncus Lim main and www | `vv-seven-tau.vercel.app` |
+| POWIIS MUN main and www | `powiis-mun-2027.vercel.app` |
 
 ## Required Cloudflare secrets
 
-Add these as Worker runtime secrets in the **vynalth-cloudflare-edge** Worker dashboard. Do not commit them to this repository.
+Set these on the **vynalth-cloudflare-edge** Worker as runtime secrets; never commit them.
 
-- `AXIOM_TOKEN` — Axiom ingest-only token restricted to `vynalth-log`.
-- `IP_HASH_SALT` — long stable random secret for irreversible IP hashing.
+- `AXIOM_TOKEN` — ingest-only token restricted to `vynalth-log`.
+- `IP_HASH_SALT` — long, random stable salt. Replace it immediately if it has been exposed.
 
-The non-secret Worker variables live in `wrangler.toml`:
+Non-secret variables in `wrangler.toml`:
 
 - `AXIOM_DATASET=vynalth-log`
 - `LOG_SAMPLE_RATE=1`
 
-## Architecture
+## Deploy and verify
 
-```text
-Browser
-  -> https://vynalthai.com
-  -> Cloudflare WAF / rules
-  -> vynalth-cloudflare-edge
-  -> Axiom vynalth-log (non-blocking)
-  -> https://somno-ai-digital-sleep-lab.vercel.app
-```
+Merge the pull request, then ensure every listed DNS record is proxied (orange cloud) in its own Cloudflare Zone. The Worker routes declared in `wrangler.toml` cover the five zones.
 
-The public domain remains `vynalthai.com`. The Worker deliberately uses the stable Vercel production alias as its origin. Do **not** change `ORIGIN_HOST` to `vynalthai.com`, because once the apex is proxied through this Worker that would create a proxy loop.
-
-## Verification
-
-After deployment:
+For each public hostname:
 
 ```bash
-curl -I https://vynalthai.com
+curl -I https://HOSTNAME
 ```
 
-Expected response headers include:
+Expected response headers:
 
 ```text
 cf-ray: ...
 x-vynalth-edge: cloudflare-worker
-x-vynalth-origin: vercel
 x-vynalth-request-id: ...
 x-vynalth-ray-id: ...
 ```
 
-Search Axiom for the returned `x-vynalth-request-id` to find the matching edge event.
+Search Axiom for the returned `x-vynalth-request-id`. Its matching edge event must have the same `request_id`, `ray_id`, `host` and `site`.
 
 ## Retention and access control
 
-- Keep routine edge logs for 30 days; keep confirmed security incidents and audit records for 90 days.
-- Limit `vynalth-log` query access to security administrators.
-- Use a separate ingest-only Axiom token; rotate it and the IP salt after suspected exposure.
-- Axiom failure is fail-open: visitor traffic continues even when logging is unavailable.
+- Keep routine edge logs for 30 days; retain confirmed security incidents and audit records for 90 days.
+- Restrict `vynalth-log` queries to security administrators.
+- Use a distinct ingest-only Axiom token and rotate it and the salt after suspected exposure.
+- Logging is fail-open: an Axiom outage never blocks visitors.
 
 ## Local commands
 
