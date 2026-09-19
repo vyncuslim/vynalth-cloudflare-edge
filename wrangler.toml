@@ -1,7 +1,7 @@
 name = "vynalth-cloudflare-edge"
 main = "src/index.js"
 compatibility_date = "2026-09-19"
-workers_dev = true
+workers_dev = false
 
 # A route only sends traffic to this Worker. The explicit host allowlist in
 # src/index.js decides whether it has an approved origin; unknown hosts return 404.
