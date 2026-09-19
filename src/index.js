@@ -35,6 +35,11 @@ function getRequestId(request) {
   return supplied && REQUEST_ID_PATTERN.test(supplied) ? supplied : crypto.randomUUID();
 }
 
+function shouldNotifyTelegram(pathname) {
+  // Internal log-centre reads and refreshes are auditable, but never alert-worthy.
+  return pathname !== "/api/admin/logs";
+}
+
 function getSampleRate(env) {
   const configured = Number(env.LOG_SAMPLE_RATE ?? "1");
   return Number.isFinite(configured) ? Math.max(0, Math.min(1, configured)) : 1;
@@ -204,7 +209,9 @@ export default {
     ctx.waitUntil(
       Promise.allSettled([
         Math.random() < getSampleRate(env) ? ingestEdgeLog(edgeEvent, env) : Promise.resolve(),
-        sendTelegramRequestNotice(edgeEvent, env),
+        shouldNotifyTelegram(incomingUrl.pathname)
+          ? sendTelegramRequestNotice(edgeEvent, env)
+          : Promise.resolve(),
       ]),
     );
 
