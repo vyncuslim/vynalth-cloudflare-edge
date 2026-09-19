@@ -81,6 +81,38 @@ async function ingestEdgeLog(event, env) {
   if (!result.ok) console.error("Axiom edge log ingestion failed", result.status);
 }
 
+async function sendTelegramRequestNotice(event, env) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
+
+  const message = [
+    "📡 Vynalth Edge Request",
+    `Site: ${event.site}`,
+    `Host: ${event.host}`,
+    `Path: ${event.path}`,
+    `Method: ${event.method}`,
+    `Status: ${event.status}`,
+    `Country: ${event.country ?? "unknown"}`,
+    `ASN: ${event.asn ?? "unknown"}`,
+    `Request ID: ${event.request_id}`,
+    `Ray ID: ${event.ray_id ?? "unavailable"}`,
+  ].join("\n");
+
+  const response = await fetch(
+    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: env.TELEGRAM_CHAT_ID,
+        text: message,
+        disable_web_page_preview: true,
+      }),
+    },
+  );
+
+  if (!response.ok) console.error("Telegram edge notification failed", response.status);
+}
+
 function rewriteRedirect(location, incomingUrl, originHost) {
   if (!location) return null;
 
@@ -143,39 +175,38 @@ export default {
       originResponse = null;
     }
 
-    if (Math.random() < getSampleRate(env)) {
-      const clientIp = request.headers.get("cf-connecting-ip");
-      ctx.waitUntil(
-        (async () => {
-          await ingestEdgeLog(
-            {
-              timestamp: new Date().toISOString(),
-              source: "cloudflare-edge",
-              site: incomingUrl.hostname.split(".").slice(-2).join("."),
-              request_id: requestId,
-              ray_id: rayId,
-              host: incomingUrl.hostname,
-              path: incomingUrl.pathname,
-              method: request.method,
-              status,
-              duration_ms: Date.now() - startedAt,
-              country: request.cf?.country ?? null,
-              region: request.cf?.region ?? null,
-              city: request.cf?.city ?? null,
-              colo: request.cf?.colo ?? null,
-              asn: request.cf?.asn ?? null,
-              as_organization: request.cf?.asOrganization ?? null,
-              ip_hash: await hashIp(clientIp, env.IP_HASH_SALT),
-              user_agent: truncate(request.headers.get("user-agent"), 512),
-              referer_origin: getRefererOrigin(request.headers.get("referer")),
-              cache_status: originResponse?.headers.get("cf-cache-status") ?? null,
-              content_type: truncate(originResponse?.headers.get("content-type") ?? null, 128),
-            },
-            env,
-          );
-        })(),
-      );
-    }
+    const clientIp = request.headers.get("cf-connecting-ip");
+    const edgeEvent = {
+      timestamp: new Date().toISOString(),
+      source: "cloudflare-edge",
+      site: incomingUrl.hostname.split(".").slice(-2).join("."),
+      request_id: requestId,
+      ray_id: rayId,
+      host: incomingUrl.hostname,
+      path: incomingUrl.pathname,
+      method: request.method,
+      status,
+      duration_ms: Date.now() - startedAt,
+      country: request.cf?.country ?? null,
+      region: request.cf?.region ?? null,
+      city: request.cf?.city ?? null,
+      colo: request.cf?.colo ?? null,
+      asn: request.cf?.asn ?? null,
+      as_organization: request.cf?.asOrganization ?? null,
+      ip_hash: await hashIp(clientIp, env.IP_HASH_SALT),
+      user_agent: truncate(request.headers.get("user-agent"), 512),
+      referer_origin: getRefererOrigin(request.headers.get("referer")),
+      cache_status: originResponse?.headers.get("cf-cache-status") ?? null,
+      content_type: truncate(originResponse?.headers.get("content-type") ?? null, 128),
+    };
+
+    // Axiom and Telegram are non-blocking: a destination outage never blocks visitors.
+    ctx.waitUntil(
+      Promise.allSettled([
+        Math.random() < getSampleRate(env) ? ingestEdgeLog(edgeEvent, env) : Promise.resolve(),
+        sendTelegramRequestNotice(edgeEvent, env),
+      ]),
+    );
 
     if (!originResponse) {
       return new Response("Bad Gateway", {
