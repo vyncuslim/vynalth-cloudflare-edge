@@ -8,5 +8,10 @@ routes = [
   { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" }
 ]
 
+[vars]
+AXIOM_DATASET = "vynalth-log"
+# Log every request. Lower temporarily only if volume requires sampling.
+LOG_SAMPLE_RATE = "1"
+
 [observability]
 enabled = true
