@@ -1,4 +1,10 @@
+const ROOT_DOMAIN = "vynalthai.com";
 const ORIGIN_HOST = "somno-ai-digital-sleep-lab.vercel.app";
+
+function isAllowedHostname(hostname) {
+  const normalized = hostname.toLowerCase();
+  return normalized === ROOT_DOMAIN || normalized.endsWith(`.${ROOT_DOMAIN}`);
+}
 
 function rewriteRedirect(location, incomingUrl) {
   if (!location) return null;
@@ -23,8 +29,8 @@ export default {
   async fetch(request) {
     const incomingUrl = new URL(request.url);
 
-    // This Worker is only intended to front the production apex domain.
-    if (incomingUrl.hostname !== "vynalthai.com") {
+    // Accept the production apex and any subdomain below vynalthai.com.
+    if (!isAllowedHostname(incomingUrl.hostname)) {
       return new Response("Not Found", { status: 404 });
     }
 
