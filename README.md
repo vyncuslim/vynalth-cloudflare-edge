@@ -1,94 +1,74 @@
 # Vynalth Cloudflare Edge
 
-Cloudflare edge proxy for the production Vynalth AI site.
+Cloudflare edge proxy and privacy-safe request-observability layer for Vynalth AI and its approved public domains.
 
-## Architecture
+## What this Worker does
 
-```text
-Browser
-  -> https://vynalthai.com
-  -> Cloudflare edge
-     -> DDoS protection
-     -> WAF / custom rules
-     -> IP and country controls
-     -> rate limiting
-  -> Cloudflare Worker
-  -> https://somno-ai-digital-sleep-lab.vercel.app
-  -> Vercel production application
+Every accepted request receives an `x-vynalth-request-id` at Cloudflare's edge. The Worker forwards it and Cloudflare's Ray ID to Vercel, and returns both to the browser:
+
+- `x-vynalth-request-id`
+- `x-vynalth-ray-id`
+- `x-vynalth-edge: cloudflare-worker`
+
+It asynchronously writes one event to Axiom's `vynalth-log` dataset and sends one Telegram notification for every accepted request. Both include `site`, `host`, path (without query string), method, status, country, ASN, Request ID and Ray ID. It never records raw IPs, query strings, cookies, authorization headers, bodies, or full referers.
+
+Only exact hostnames listed in `src/index.js` receive an origin. An unknown hostname returns 404 instead of being sent to the wrong website. Add a hostname and its correct Vercel Origin together in a pull request.
+
+## Approved origins
+
+| Public host group | Vercel Origin |
+| --- | --- |
+| Vynalth AI main, www, trust, status, partner, cf-test | `somno-ai-digital-sleep-lab.vercel.app` |
+| Vynova | `social-puce-nine.vercel.app` |
+| Shield | `vita-shield.vercel.app` |
+| Navigator | `vynalth-ai-navigator.vercel.app` |
+| Pedia | `pedia-peach.vercel.app` |
+| Search | `vynalth-ai-search.vercel.app` |
+| SleepSomno main, www, trust, status | `somno-ai-digital-sleep-lab.vercel.app` |
+| SleepSomno Shield | `vita-shield.vercel.app` |
+| VitaminD AI | `somno-ai-digital-sleep-lab.vercel.app` |
+| Vyncus Lim main and www | `vv-seven-tau.vercel.app` |
+| POWIIS MUN main and www | `powiis-mun-2027.vercel.app` |
+
+## Required Cloudflare secrets
+
+Set these on the **vynalth-cloudflare-edge** Worker as runtime secrets; never commit them.
+
+- `AXIOM_TOKEN` — ingest-only token restricted to `vynalth-log`.
+- `IP_HASH_SALT` — long, random stable salt. Replace it immediately if it has been exposed.\n- `TELEGRAM_BOT_TOKEN` — Telegram Bot API token for the notification bot.\n- `TELEGRAM_CHAT_ID` — destination chat or group ID. Every accepted Worker request sends one message here.
+
+Non-secret variables in `wrangler.toml`:
+
+- `AXIOM_DATASET=vynalth-log`
+- `LOG_SAMPLE_RATE=1`
+
+## Deploy and verify
+
+Merge the pull request, then ensure every listed DNS record is proxied (orange cloud) in its own Cloudflare Zone. The Worker routes declared in `wrangler.toml` cover the five zones.
+
+For each public hostname:
+
+```bash
+curl -I https://HOSTNAME
 ```
 
-The public domain remains `vynalthai.com`. The Worker deliberately uses the stable Vercel production alias as its origin. Do **not** change `ORIGIN_HOST` to `vynalthai.com`, because once the apex is proxied through this Worker that would create a proxy loop.
-
-## Files
-
-- `src/index.js` — reverse proxy Worker.
-- `wrangler.toml` — Worker and `vynalthai.com/*` route configuration.
-- `.github/workflows/deploy.yml` — GitHub Actions deployment.
-
-## GitHub repository secrets
-
-Configure these repository secrets before automatic deployment:
+Expected response headers:
 
 ```text
-CLOUDFLARE_API_TOKEN
-CLOUDFLARE_ACCOUNT_ID
-```
-
-The API token must be able to deploy Workers and manage the Worker route for the `vynalthai.com` zone.
-
-If the secrets are not configured, the GitHub Action exits successfully and skips deployment instead of failing.
-
-## Cloudflare zone
-
-The Cloudflare zone must contain a proxied record for the apex hostname. For the current Vercel origin configuration:
-
-```text
-Type: A
-Name: @
-Target: 216.198.79.1
-Proxy status: Proxied
-```
-
-The Worker route is defined as:
-
-```text
-vynalthai.com/*
-```
-
-Cloudflare WAF and other edge security controls are evaluated before requests are sent to the Worker.
-
-## Partial DNS setup
-
-Because the authoritative nameservers currently remain outside Cloudflare, the authoritative DNS provider must send the apex hostname into Cloudflare's partial/CNAME setup before the Worker route can receive production traffic.
-
-For a provider that supports apex ANAME/ALIAS flattening, the intended target is:
-
-```text
-vynalthai.com.cdn.cloudflare.net
-```
-
-Do not remove the currently working Vercel apex record until the Cloudflare partial hostname is verified and the replacement apex record can be tested immediately. If the authoritative DNS returns NODATA after the switch, restore the working Vercel apex A record.
-
-## Verification
-
-After Cloudflare is in the traffic path:
-
-```powershell
-ipconfig /flushdns
-curl.exe -I https://vynalthai.com
-curl.exe https://vynalthai.com/cdn-cgi/trace
-```
-
-Expected indicators include:
-
-```text
-server: cloudflare
 cf-ray: ...
 x-vynalth-edge: cloudflare-worker
-x-vynalth-origin: vercel
+x-vynalth-request-id: ...
+x-vynalth-ray-id: ...
 ```
 
-The `x-vynalth-edge` and `x-vynalth-origin` headers are added by this Worker to make routing verification easy.
+Search Axiom for the returned `x-vynalth-request-id`. Its matching edge event must have the same `request_id`, `ray_id`, `host` and `site`.
+
+## Retention and access control
+
+- Keep routine edge logs for 30 days; retain confirmed security incidents and audit records for 90 days.
+- Restrict `vynalth-log` queries to security administrators.
+- Use a distinct ingest-only Axiom token and rotate it and the salt after suspected exposure.
+- Logging is fail-open: an Axiom outage never blocks visitors.
 
 ## Local commands
 
