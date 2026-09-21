@@ -160,6 +160,12 @@ export default {
     headers.set("x-vynalth-edge-host", incomingUrl.host);
     headers.set(REQUEST_ID_HEADER, requestId);
     if (rayId) headers.set(RAY_ID_HEADER, rayId);
+    const asn = request.cf?.asn;
+    if (asn !== undefined && asn !== null) {
+      headers.set("x-vynalth-asn", String(asn));
+    } else {
+      headers.delete("x-vynalth-asn");
+    }
     headers.delete("host");
 
     const originRequest = new Request(originUrl.toString(), {
