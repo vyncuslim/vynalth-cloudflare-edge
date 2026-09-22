@@ -1,18 +1,24 @@
-const ROOT_DOMAIN = "vynalthai.com";
-const WWW_HOST = `www.${ROOT_DOMAIN}`;
+const ROOT_DOMAINS = [
+  "vynalthai.com",
+  "vyncuslim.com",
+  "sleepsomno.com",
+  "powiismunc.com",
+  "vitamindai.online",
+];
 
-const VERCEL_HOSTS = new Set([
-  ROOT_DOMAIN,
-  WWW_HOST,
-  `partner.${ROOT_DOMAIN}`,
-  `status.${ROOT_DOMAIN}`,
-  `trust.${ROOT_DOMAIN}`,
-  `cf-test.${ROOT_DOMAIN}`,
-]);
+const VYNALTH_APEX = "vynalthai.com";
+const VYNALTH_WWW = `www.${VYNALTH_APEX}`;
 
-function isAllowedHostname(hostname) {
+function getRootDomain(hostname) {
   const normalized = hostname.toLowerCase();
-  return normalized === ROOT_DOMAIN || normalized.endsWith(`.${ROOT_DOMAIN}`);
+
+  for (const root of ROOT_DOMAINS) {
+    if (normalized === root || normalized.endsWith(`.${root}`)) {
+      return root;
+    }
+  }
+
+  return null;
 }
 
 function isValidationPath(pathname) {
@@ -22,28 +28,32 @@ function isValidationPath(pathname) {
   );
 }
 
-function buildEdgeHeaders(existingHeaders, request, incomingUrl, requestId) {
+function detectOrigin(headers) {
+  if (headers.has("x-vercel-id")) return "vercel";
+  if (headers.has("x-served-by") && headers.get("x-served-by")?.toLowerCase().includes("fastly")) {
+    return "fastly";
+  }
+  return "dns-origin";
+}
+
+function buildEdgeHeaders(existingHeaders, request, incomingUrl, requestId, rootDomain) {
   const headers = new Headers(existingHeaders);
-  const hostname = incomingUrl.hostname.toLowerCase();
   const cfRay = request.headers.get("cf-ray");
 
   headers.set("x-vynalth-edge", "cloudflare-worker");
   headers.set("x-vynalth-edge-host", incomingUrl.host);
+  headers.set("x-vynalth-zone", rootDomain);
   headers.set("x-vynalth-request-id", requestId);
+  headers.set("x-vynalth-origin", detectOrigin(existingHeaders));
 
   if (cfRay) {
     headers.set("x-vynalth-ray-id", cfRay.split("-")[0]);
   }
 
-  headers.set(
-    "x-vynalth-origin",
-    VERCEL_HOSTS.has(hostname) ? "vercel" : "dns-origin",
-  );
-
   return headers;
 }
 
-function edgeResponse(response, request, incomingUrl, requestId) {
+function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -52,6 +62,7 @@ function edgeResponse(response, request, incomingUrl, requestId) {
       request,
       incomingUrl,
       requestId,
+      rootDomain,
     ),
   });
 }
@@ -60,22 +71,21 @@ export default {
   async fetch(request) {
     const incomingUrl = new URL(request.url);
     const hostname = incomingUrl.hostname.toLowerCase();
+    const rootDomain = getRootDomain(hostname);
     const requestId = crypto.randomUUID();
 
-    if (!isAllowedHostname(hostname)) {
-      return edgeResponse(
-        new Response("Not Found", { status: 404 }),
-        request,
-        incomingUrl,
-        requestId,
-      );
+    if (!rootDomain) {
+      return new Response("Not Found", { status: 404 });
     }
 
-    // Canonicalize www to the apex, but never interfere with certificate or
-    // Vercel ownership validation paths.
-    if (hostname === WWW_HOST && !isValidationPath(incomingUrl.pathname)) {
+    // Keep the existing canonical redirect only for the Vynalth AI website.
+    // Validation endpoints must remain untouched for certificate/domain checks.
+    if (
+      hostname === VYNALTH_WWW &&
+      !isValidationPath(incomingUrl.pathname)
+    ) {
       const target = new URL(request.url);
-      target.hostname = ROOT_DOMAIN;
+      target.hostname = VYNALTH_APEX;
       target.port = "";
 
       return edgeResponse(
@@ -86,19 +96,25 @@ export default {
         request,
         incomingUrl,
         requestId,
+        rootDomain,
       );
     }
 
     let originResponse;
 
     try {
-      // Keep the original public hostname and Host header. Cloudflare DNS is
-      // responsible for selecting the configured origin for each hostname.
+      // Preserve the original hostname and Host header. Cloudflare DNS for the
+      // matching zone decides the real origin, so every domain/subdomain can
+      // keep its own backend while sharing one edge Worker.
       originResponse = await fetch(request, {
         redirect: "manual",
       });
     } catch (error) {
-      console.error("Origin request failed", error);
+      console.error("Origin request failed", {
+        hostname,
+        requestId,
+        error,
+      });
 
       return edgeResponse(
         new Response("Bad Gateway", {
@@ -111,6 +127,7 @@ export default {
         request,
         incomingUrl,
         requestId,
+        rootDomain,
       );
     }
 
@@ -119,6 +136,7 @@ export default {
       request,
       incomingUrl,
       requestId,
+      rootDomain,
     );
   },
 };
