@@ -1,67 +1,49 @@
 const ROOT_DOMAIN = "vynalthai.com";
-const ORIGIN_HOST = "somno-ai-digital-sleep-lab.vercel.app";
+const WWW_HOST = `www.${ROOT_DOMAIN}`;
 
 function isAllowedHostname(hostname) {
   const normalized = hostname.toLowerCase();
   return normalized === ROOT_DOMAIN || normalized.endsWith(`.${ROOT_DOMAIN}`);
 }
 
-function rewriteRedirect(location, incomingUrl) {
-  if (!location) return null;
-
-  try {
-    const redirectUrl = new URL(location, `https://${ORIGIN_HOST}`);
-
-    if (redirectUrl.hostname === ORIGIN_HOST) {
-      redirectUrl.protocol = incomingUrl.protocol;
-      redirectUrl.hostname = incomingUrl.hostname;
-      redirectUrl.port = "";
-      return redirectUrl.toString();
-    }
-  } catch {
-    // Keep the original Location header if it cannot be parsed.
-  }
-
-  return location;
+function isValidationPath(pathname) {
+  return (
+    pathname.startsWith("/.well-known/acme-challenge/") ||
+    pathname.startsWith("/.well-known/vercel/")
+  );
 }
 
 export default {
   async fetch(request) {
     const incomingUrl = new URL(request.url);
+    const hostname = incomingUrl.hostname.toLowerCase();
 
-    // Accept the production apex and any subdomain below vynalthai.com.
-    if (!isAllowedHostname(incomingUrl.hostname)) {
+    // Only serve the production apex and subdomains below vynalthai.com.
+    if (!isAllowedHostname(hostname)) {
       return new Response("Not Found", { status: 404 });
     }
 
-    const originUrl = new URL(request.url);
-    originUrl.protocol = "https:";
-    originUrl.hostname = ORIGIN_HOST;
-    originUrl.port = "";
-
-    const headers = new Headers(request.headers);
-
-    // Preserve the public hostname for application-side logging/routing without
-    // forcing the HTTP Host header back to vynalthai.com (which would recurse).
-    headers.set("x-forwarded-host", incomingUrl.host);
-    headers.set("x-vynalth-edge-host", incomingUrl.host);
-    headers.delete("host");
-
-    const originRequest = new Request(originUrl.toString(), {
-      method: request.method,
-      headers,
-      body: request.body,
-      redirect: "manual",
-    });
+    // Canonicalize www to the apex, but never interfere with certificate or
+    // Vercel ownership validation paths.
+    if (hostname === WWW_HOST && !isValidationPath(incomingUrl.pathname)) {
+      const target = new URL(request.url);
+      target.hostname = ROOT_DOMAIN;
+      target.port = "";
+      return Response.redirect(target.toString(), 301);
+    }
 
     let originResponse;
 
     try {
-      originResponse = await fetch(originRequest, {
+      // Keep the original public hostname and Host header. Cloudflare DNS is
+      // responsible for selecting the configured origin for each hostname.
+      // Rewriting the URL to the *.vercel.app alias causes Vercel to issue a
+      // canonical redirect back to vynalthai.com, which creates an apex loop.
+      originResponse = await fetch(request, {
         redirect: "manual",
       });
     } catch (error) {
-      console.error("Vercel origin request failed", error);
+      console.error("Origin request failed", error);
       return new Response("Bad Gateway", {
         status: 502,
         headers: {
@@ -72,18 +54,11 @@ export default {
     }
 
     const responseHeaders = new Headers(originResponse.headers);
-    const rewrittenLocation = rewriteRedirect(
-      responseHeaders.get("location"),
-      incomingUrl,
-    );
 
-    if (rewrittenLocation) {
-      responseHeaders.set("location", rewrittenLocation);
-    }
-
-    // Useful for confirming that traffic reached the Cloudflare Worker.
+    // Useful for confirming the request traversed the Vynalth Cloudflare edge.
     responseHeaders.set("x-vynalth-edge", "cloudflare-worker");
     responseHeaders.set("x-vynalth-origin", "vercel");
+    responseHeaders.set("x-vynalth-edge-host", incomingUrl.host);
 
     return new Response(originResponse.body, {
       status: originResponse.status,
