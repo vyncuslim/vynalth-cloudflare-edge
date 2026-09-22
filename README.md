@@ -1,94 +1,157 @@
 # Vynalth Cloudflare Edge
 
-Cloudflare edge proxy for the production Vynalth AI site.
+Unified Cloudflare edge Worker for Vynalth-managed web properties.
+
+## Managed zones
+
+The Worker is configured for the apex and all HTTP/HTTPS subdomains of:
+
+- `vynalthai.com`
+- `vyncuslim.com`
+- `sleepsomno.com`
+- `powiismunc.com`
+- `vitamindai.online`
+
+Mail transport hostnames that are used for SMTP/IMAP/POP should remain DNS-only and are not expected to use HTTP response headers.
 
 ## Architecture
 
 ```text
-Browser
-  -> https://vynalthai.com
+Browser / API client
   -> Cloudflare edge
      -> DDoS protection
      -> WAF / custom rules
-     -> IP and country controls
-     -> rate limiting
-  -> Cloudflare Worker
-  -> https://somno-ai-digital-sleep-lab.vercel.app
-  -> Vercel production application
+     -> bot and rate-limit controls
+     -> zone security policy
+  -> Vynalth Cloudflare Edge Worker
+     -> preserves the original public hostname / Host header
+     -> adds x-vynalth-* tracing headers
+  -> the hostname's configured Cloudflare DNS origin
+  -> application origin (Vercel or another backend)
 ```
 
-The public domain remains `vynalthai.com`. The Worker deliberately uses the stable Vercel production alias as its origin. Do **not** change `ORIGIN_HOST` to `vynalthai.com`, because once the apex is proxied through this Worker that would create a proxy loop.
+The Worker does not hard-code a single Vercel hostname. Each domain and subdomain keeps its own DNS origin, so multiple sites can safely share the same edge Worker.
+
+## Response tracing headers
+
+HTTP/HTTPS responses traversing the Worker receive:
+
+```text
+x-vynalth-edge: cloudflare-worker
+x-vynalth-edge-host: <public hostname>
+x-vynalth-zone: <root zone>
+x-vynalth-request-id: <unique UUID>
+x-vynalth-ray-id: <Cloudflare Ray ID when available>
+x-vynalth-origin: vercel | fastly | dns-origin
+```
+
+`x-vynalth-request-id` is generated at the edge for every request.
+
+## Canonical redirect
+
+Only `www.vynalthai.com` is canonicalized by this Worker:
+
+```text
+https://www.vynalthai.com/*
+  -> 301
+https://vynalthai.com/*
+```
+
+Certificate and Vercel ownership validation paths are exempt from this redirect:
+
+```text
+/.well-known/acme-challenge/*
+/.well-known/vercel/*
+```
+
+## Worker routes
+
+`wrangler.toml` attaches this Worker to both the apex and wildcard route for every managed zone:
+
+```text
+vynalthai.com/*
+*.vynalthai.com/*
+
+vyncuslim.com/*
+*.vyncuslim.com/*
+
+sleepsomno.com/*
+*.sleepsomno.com/*
+
+powiismunc.com/*
+*.powiismunc.com/*
+
+vitamindai.online/*
+*.vitamindai.online/*
+```
+
+A hostname must still have a valid Cloudflare DNS record and its HTTP/HTTPS traffic must actually enter Cloudflare for the Worker route to execute.
+
+## vynalthai.com partial DNS setup
+
+`vynalthai.com` currently uses a Cloudflare Partial/CNAME setup with Dynadot remaining authoritative.
+
+External authoritative DNS should send proxied web hostnames to Cloudflare's partial hostname. Examples:
+
+```text
+@            ANAME -> vynalthai.com.cdn.cloudflare.net
+www          CNAME -> www.vynalthai.com.cdn.cloudflare.net
+partner      CNAME -> partner.vynalthai.com.cdn.cloudflare.net
+status       CNAME -> status.vynalthai.com.cdn.cloudflare.net
+```
+
+Inside the Cloudflare zone, each hostname keeps its real application origin, for example a Vercel CNAME.
+
+Do not point public authoritative DNS directly at Vercel if the hostname is intended to traverse Vynalth Edge.
+
+## Other managed zones
+
+For zones using Cloudflare as authoritative DNS, web-facing A/AAAA/CNAME records should normally be proxied (orange cloud) when they are intended to use Vynalth Edge.
+
+Do not proxy ordinary mail transport records such as MX targets used for SMTP/IMAP/POP.
 
 ## Files
 
-- `src/index.js` — reverse proxy Worker.
-- `wrangler.toml` — Worker and `vynalthai.com/*` route configuration.
-- `.github/workflows/deploy.yml` — GitHub Actions deployment.
+- `src/index.js` — multi-zone edge Worker and tracing logic.
+- `wrangler.toml` — Worker configuration and multi-zone routes.
+- `.github/workflows/deploy.yml` — GitHub Actions deployment workflow.
 
 ## GitHub repository secrets
 
-Configure these repository secrets before automatic deployment:
+Automatic deployment requires:
 
 ```text
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
 
-The API token must be able to deploy Workers and manage the Worker route for the `vynalthai.com` zone.
-
-If the secrets are not configured, the GitHub Action exits successfully and skips deployment instead of failing.
-
-## Cloudflare zone
-
-The Cloudflare zone must contain a proxied record for the apex hostname. For the current Vercel origin configuration:
-
-```text
-Type: A
-Name: @
-Target: 216.198.79.1
-Proxy status: Proxied
-```
-
-The Worker route is defined as:
-
-```text
-vynalthai.com/*
-```
-
-Cloudflare WAF and other edge security controls are evaluated before requests are sent to the Worker.
-
-## Partial DNS setup
-
-Because the authoritative nameservers currently remain outside Cloudflare, the authoritative DNS provider must send the apex hostname into Cloudflare's partial/CNAME setup before the Worker route can receive production traffic.
-
-For a provider that supports apex ANAME/ALIAS flattening, the intended target is:
-
-```text
-vynalthai.com.cdn.cloudflare.net
-```
-
-Do not remove the currently working Vercel apex record until the Cloudflare partial hostname is verified and the replacement apex record can be tested immediately. If the authoritative DNS returns NODATA after the switch, restore the working Vercel apex A record.
+The Cloudflare API token must be allowed to deploy Workers and manage Worker routes for all managed zones.
 
 ## Verification
 
-After Cloudflare is in the traffic path:
+Examples:
 
 ```powershell
-ipconfig /flushdns
 curl.exe -I https://vynalthai.com
-curl.exe https://vynalthai.com/cdn-cgi/trace
+curl.exe -I https://vyncuslim.com
+curl.exe -I https://sleepsomno.com
+curl.exe -I https://powiismunc.com
+curl.exe -I https://vitamindai.online
+curl.exe -I https://partner.vynalthai.com
 ```
 
-Expected indicators include:
+Expected Cloudflare/Vynalth indicators include:
 
 ```text
 server: cloudflare
 cf-ray: ...
 x-vynalth-edge: cloudflare-worker
-x-vynalth-origin: vercel
+x-vynalth-edge-host: ...
+x-vynalth-zone: ...
+x-vynalth-request-id: ...
+x-vynalth-ray-id: ...
+x-vynalth-origin: ...
 ```
-
-The `x-vynalth-edge` and `x-vynalth-origin` headers are added by this Worker to make routing verification easy.
 
 ## Local commands
 
