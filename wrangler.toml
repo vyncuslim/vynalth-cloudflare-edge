@@ -5,7 +5,15 @@ workers_dev = true
 
 routes = [
   { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
-  { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" }
+  { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" },
+  { pattern = "vyncuslim.com/*", zone_name = "vyncuslim.com" },
+  { pattern = "*.vyncuslim.com/*", zone_name = "vyncuslim.com" },
+  { pattern = "sleepsomno.com/*", zone_name = "sleepsomno.com" },
+  { pattern = "*.sleepsomno.com/*", zone_name = "sleepsomno.com" },
+  { pattern = "powiismunc.com/*", zone_name = "powiismunc.com" },
+  { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" },
+  { pattern = "vitamindai.online/*", zone_name = "vitamindai.online" },
+  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" }
 ]
 
 [observability]
