@@ -1,6 +1,15 @@
 const ROOT_DOMAIN = "vynalthai.com";
 const WWW_HOST = `www.${ROOT_DOMAIN}`;
 
+const VERCEL_HOSTS = new Set([
+  ROOT_DOMAIN,
+  WWW_HOST,
+  `partner.${ROOT_DOMAIN}`,
+  `status.${ROOT_DOMAIN}`,
+  `trust.${ROOT_DOMAIN}`,
+  `cf-test.${ROOT_DOMAIN}`,
+]);
+
 function isAllowedHostname(hostname) {
   const normalized = hostname.toLowerCase();
   return normalized === ROOT_DOMAIN || normalized.endsWith(`.${ROOT_DOMAIN}`);
@@ -13,14 +22,53 @@ function isValidationPath(pathname) {
   );
 }
 
+function buildEdgeHeaders(existingHeaders, request, incomingUrl, requestId) {
+  const headers = new Headers(existingHeaders);
+  const hostname = incomingUrl.hostname.toLowerCase();
+  const cfRay = request.headers.get("cf-ray");
+
+  headers.set("x-vynalth-edge", "cloudflare-worker");
+  headers.set("x-vynalth-edge-host", incomingUrl.host);
+  headers.set("x-vynalth-request-id", requestId);
+
+  if (cfRay) {
+    headers.set("x-vynalth-ray-id", cfRay.split("-")[0]);
+  }
+
+  headers.set(
+    "x-vynalth-origin",
+    VERCEL_HOSTS.has(hostname) ? "vercel" : "dns-origin",
+  );
+
+  return headers;
+}
+
+function edgeResponse(response, request, incomingUrl, requestId) {
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: buildEdgeHeaders(
+      response.headers,
+      request,
+      incomingUrl,
+      requestId,
+    ),
+  });
+}
+
 export default {
   async fetch(request) {
     const incomingUrl = new URL(request.url);
     const hostname = incomingUrl.hostname.toLowerCase();
+    const requestId = crypto.randomUUID();
 
-    // Only serve the production apex and subdomains below vynalthai.com.
     if (!isAllowedHostname(hostname)) {
-      return new Response("Not Found", { status: 404 });
+      return edgeResponse(
+        new Response("Not Found", { status: 404 }),
+        request,
+        incomingUrl,
+        requestId,
+      );
     }
 
     // Canonicalize www to the apex, but never interfere with certificate or
@@ -29,7 +77,16 @@ export default {
       const target = new URL(request.url);
       target.hostname = ROOT_DOMAIN;
       target.port = "";
-      return Response.redirect(target.toString(), 301);
+
+      return edgeResponse(
+        new Response(null, {
+          status: 301,
+          headers: { location: target.toString() },
+        }),
+        request,
+        incomingUrl,
+        requestId,
+      );
     }
 
     let originResponse;
@@ -37,33 +94,31 @@ export default {
     try {
       // Keep the original public hostname and Host header. Cloudflare DNS is
       // responsible for selecting the configured origin for each hostname.
-      // Rewriting the URL to the *.vercel.app alias causes Vercel to issue a
-      // canonical redirect back to vynalthai.com, which creates an apex loop.
       originResponse = await fetch(request, {
         redirect: "manual",
       });
     } catch (error) {
       console.error("Origin request failed", error);
-      return new Response("Bad Gateway", {
-        status: 502,
-        headers: {
-          "content-type": "text/plain; charset=utf-8",
-          "cache-control": "no-store",
-        },
-      });
+
+      return edgeResponse(
+        new Response("Bad Gateway", {
+          status: 502,
+          headers: {
+            "content-type": "text/plain; charset=utf-8",
+            "cache-control": "no-store",
+          },
+        }),
+        request,
+        incomingUrl,
+        requestId,
+      );
     }
 
-    const responseHeaders = new Headers(originResponse.headers);
-
-    // Useful for confirming the request traversed the Vynalth Cloudflare edge.
-    responseHeaders.set("x-vynalth-edge", "cloudflare-worker");
-    responseHeaders.set("x-vynalth-origin", "vercel");
-    responseHeaders.set("x-vynalth-edge-host", incomingUrl.host);
-
-    return new Response(originResponse.body, {
-      status: originResponse.status,
-      statusText: originResponse.statusText,
-      headers: responseHeaders,
-    });
+    return edgeResponse(
+      originResponse,
+      request,
+      incomingUrl,
+      requestId,
+    );
   },
 };
