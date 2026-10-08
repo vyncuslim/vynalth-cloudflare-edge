@@ -10,8 +10,7 @@ Account-level WAF custom rulesets typically require Cloudflare Enterprise, so th
 handles each of the five configured zones separately.
 
 ## Inputs / prerequisites
-- Cloudflare account API token with least-privilege **Account Filter Lists Read**
-  and **Zone WAF Edit** for the specified zones. Never commit it.
+- Cloudflare API token scoped to the intended account and zones, with **Account Filter Lists Read**, **Zone Read**, and **Zone WAF Read/Edit** as required by the list, zone verification and WAF rules endpoints. Never commit it.
 - \`CLOUDFLARE_ACCOUNT_ID\`, \`CLOUDFLARE_API_TOKEN\`
 - Zone IDs verified in Cloudflare dashboard. Copy \`security/zone-ids.example.json\`
   to a private local JSON config and replace each placeholder. Set
