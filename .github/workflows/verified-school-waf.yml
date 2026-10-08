@@ -1,0 +1,22 @@
+name: Verified School WAF Checks
+on:
+  pull_request:
+    paths:
+      - "security/setup-verified-school-waf.mjs"
+      - "security/setup-verified-school-waf.test.mjs"
+      - ".github/workflows/verified-school-waf.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate syntax
+        run: node --check security/setup-verified-school-waf.mjs
+      - name: Dry-run and fail-safe policy
+        run: node --test security/setup-verified-school-waf.test.mjs
