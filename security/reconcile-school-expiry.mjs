@@ -5,6 +5,8 @@
  * DRY-RUN by default; --apply requires explicit confirmation & API token.
  */
 import { isIP } from "node:net";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 const ACCOUNT = process.env.CLOUDFLARE_ACCOUNT_ID || "";
 const LIST = process.env.CLOUDFLARE_IP_LIST_ID || "";
@@ -100,7 +102,9 @@ async function main() {
   }
   console.log("Confirmed removal of " + expired.length + " expired verified egress entries.");
 }
-main().catch(err => {
-  console.error("SCHOOL_EXPIRY:", err.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(err => {
+    console.error("SCHOOL_EXPIRY:", err.message);
+    process.exitCode = 1;
+  });
+}
