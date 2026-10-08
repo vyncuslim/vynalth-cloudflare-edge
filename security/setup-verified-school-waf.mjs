@@ -6,6 +6,7 @@
  * Prerequisite: the dedicated account IP List is already populated by trusted approvals.
  */
 import { readFile } from "node:fs/promises";
+import { isIP } from "node:net";
 
 const ZONES = Object.freeze([
   "vynalthai.com",
@@ -25,7 +26,7 @@ const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
 const token = process.env.CLOUDFLARE_API_TOKEN;
 
 const zoneMapFile = process.env.VYNALTH_CF_ZONE_MAP_FILE || "security/zone-ids.example.json";
-const zoneMap = JSON.parse(await readFile(zoneMapFile, "utf8"));
+
 function fail(msg) { throw new Error(msg); }
 function requireFullZoneMap(map) {
   if (!map || typeof map !== "object" || Array.isArray(map)) fail("Zone map object required");
@@ -41,7 +42,10 @@ function isVerifiedFreshListItem(item, now) {
   const comment = String(item?.comment || "");
   const match = /^POWIIS\|exp=([^|]+)\|ref=([A-Za-z0-9_-]{8,64})$/.exec(comment);
   if (!match) return false;
-  if (!(typeof item.ip === "string") || item.ip.includes("/16") || item.ip.includes("/64")) return false;
+  if (typeof item.ip !== "string") return false;
+  const [ip, prefix] = item.ip.split("/");
+  if (!((isIP(ip) === 4 && (prefix === undefined || prefix === "32")) ||
+        (isIP(ip) === 6 && (prefix === undefined || prefix === "128")))) return false;
   const expiry = Date.parse(match[1]);
   return Number.isFinite(expiry) && expiry > now && expiry <= now + 12 * 60 * 60 * 1000;
 }
@@ -141,6 +145,7 @@ async function main() {
     }, null, 2));
     return;
   }
+  const zoneMap = JSON.parse(await readFile(zoneMapFile, "utf8"));
   requireFullZoneMap(zoneMap);
   if (!/^[a-f0-9]{32}$/.test(accountId || "") || !token) {
     fail("Valid CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN required");
