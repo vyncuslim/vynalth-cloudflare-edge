@@ -101,35 +101,45 @@ async function listItems(listId) {
 function desiredRule() {
   return { description: RULE_NAME, expression: EXPRESSION, action: "block", enabled: true };
 }
-async function applyZone(domain, zoneId) {
+async function preflightZone(domain, zoneId) {
   const zone = await api("/zones/" + zoneId);
   if (zone.name !== domain || zone.status !== "active") {
     fail("Wrong or inactive zone: " + domain);
   }
   const ruleset = await api("/zones/" + zoneId + "/rulesets/phases/" + PHASE + "/entrypoint");
-  if (ruleset) {
-    if (ruleset.kind !== "zone" || ruleset.phase !== PHASE || !Array.isArray(ruleset.rules)) {
-      fail("Unexpected ruleset for " + domain);
+  if (!ruleset) return { domain, zoneId, operation: "create" };
+  if (ruleset.kind !== "zone" || ruleset.phase !== PHASE || !Array.isArray(ruleset.rules)) {
+    fail("Unexpected ruleset for " + domain);
+  }
+  const match = ruleset.rules.filter(x => x.description === RULE_NAME);
+  if (match.length > 1) fail("Duplicate school deny rules at " + domain);
+  if (match.length === 1) {
+    const r = match[0];
+    if (r.expression !== EXPRESSION || r.action !== "block" || r.enabled === false) {
+      fail("Existing school deny rule differs on " + domain + " – manual review required");
     }
-    const match = ruleset.rules.filter(x => x.description === RULE_NAME);
-    if (match.length > 1) fail("Duplicate school deny rules at " + domain);
-    if (match.length === 1) {
-      const r = match[0];
-      if (r.expression !== EXPRESSION || r.action !== "block" || r.enabled === false) {
-        fail("Existing school deny rule differs on " + domain + " – manual review required");
-      }
-      console.log("Already configured: " + domain);
-      return;
-    }
-    await api("/zones/" + zoneId + "/rulesets/" + ruleset.id + "/rules",
+    return { domain, zoneId, operation: "skip" };
+  }
+  return { domain, zoneId, operation: "append", rulesetId: ruleset.id };
+}
+async function applyZone(plan) {
+  const { domain, zoneId, operation, rulesetId } = plan;
+  if (operation === "skip") {
+    console.log("Already configured: " + domain);
+    return;
+  }
+  if (operation === "append") {
+    await api("/zones/" + zoneId + "/rulesets/" + rulesetId + "/rules",
       "POST", desiredRule());
-  } else {
+  } else if (operation === "create") {
     await api("/zones/" + zoneId + "/rulesets", "POST", {
       name: "Vynalth Shield zone WAF",
       kind: "zone",
       phase: PHASE,
       rules: [desiredRule()]
     });
+  } else {
+    fail("Unrecognized operation");
   }
   console.log("Created: " + domain);
 }
@@ -159,8 +169,14 @@ async function main() {
     fail("Refusing to enable: list empty or contains unknown/expired entries");
   }
   console.log("Validated " + items.length + " currently approved exact addresses.");
+  // Preflight ALL zones before making ANY WAF changes to reduce partial rollout risk.
+  const plans = [];
   for (const domain of ZONES) {
-    await applyZone(domain, zoneMap[domain]);
+    plans.push(await preflightZone(domain, zoneMap[domain]));
+  }
+  console.log("Preflight passed for " + plans.length + " verified zones.");
+  for (const plan of plans) {
+    await applyZone(plan);
   }
   console.log("Zone WAF rules created/verified. Validate proxied DNS and real HTTP responses.");
 }
