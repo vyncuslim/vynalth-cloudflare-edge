@@ -98,8 +98,16 @@ async function listItems(listId) {
   } while (cursor);
   return all;
 }
+let custom403 = null;
 function desiredRule() {
-  return { description: RULE_NAME, expression: EXPRESSION, action: "block", enabled: true };
+  return {
+    description: RULE_NAME, expression: EXPRESSION, action: "block", enabled: true,
+    ...(custom403 ? {
+      action_parameters: { response: {
+        status_code: 403, content_type: "text/html", content: custom403
+      }}
+    } : {})
+  };
 }
 async function preflightZone(domain, zoneId) {
   const zone = await api("/zones/" + zoneId);
@@ -115,7 +123,10 @@ async function preflightZone(domain, zoneId) {
   if (match.length > 1) fail("Duplicate school deny rules at " + domain);
   if (match.length === 1) {
     const r = match[0];
-    if (r.expression !== EXPRESSION || r.action !== "block" || r.enabled === false) {
+    if (r.expression !== EXPRESSION || r.action !== "block" || r.enabled === false ||
+      (custom403 !== null &&
+        (r.action_parameters?.response?.content !== custom403 ||
+         r.action_parameters?.response?.status_code !== 403))) {
       fail("Existing school deny rule differs on " + domain + " – manual review required");
     }
     return { domain, zoneId, operation: "skip" };
@@ -157,6 +168,12 @@ async function main() {
   }
   const zoneMap = JSON.parse(await readFile(zoneMapFile, "utf8"));
   requireFullZoneMap(zoneMap);
+  if (process.env.VYNALTH_WAF_CUSTOM_403 === "true") {
+    custom403 = await readFile("security/school-access-403.html", "utf8");
+    if (Buffer.byteLength(custom403, "utf8") > 2048) {
+      fail("Custom 403 page must be <= 2KB UTF-8");
+    }
+  }
   if (!/^[a-f0-9]{32}$/.test(accountId || "") || !token) {
     fail("Valid CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN required");
   }
