@@ -72,3 +72,31 @@ This cannot identify all school members when they use a personal network, VPN or
 unrelated anonymous account. Identity blocking requires a verified server-side school
 organization claim or an explicitly confirmed restricted account. Do not infer identity
 from a client header or user-editable Supabase user_metadata.
+
+
+## Owner-managed IP changes, 403 and automatic expiry
+- The Vynalth Shield owner admin panel is added in frontend PR #37 and backend PR #51.
+  It can add exact, evidenced, 1–12 hour IP entries via Cloudflare's Lists API and revoke
+  only items tagged with its \`POWIIS|exp=...|ref=...\` ownership comment.
+- Deploy five zone WAF rules with \`security/setup-verified-school-waf.mjs --apply\`
+  only after all zone IDs and fresh approved list items are independently confirmed.
+- On Cloudflare Pro or higher, set \`VYNALTH_WAF_CUSTOM_403=true\` to embed the static
+  \`security/school-access-403.html\` multilingual Vynalth Shield HTML in a WAF Block
+  custom response (max 2 KB). On Free, use the normal Cloudflare block page and still
+  return HTTP 403. This installer will not mutate a pre-existing rule whose HTML differs.
+- Cloudflare Lists **do not natively expire** items based on comment text. Hourly removal
+  is therefore a distinct critical control in
+  \`.github/workflows/school-egress-expiry.yml\` and
+  \`security/reconcile-school-expiry.mjs\`. This workflow is NOT active while only on
+  a draft PR. After merging to the default branch, configure the GitHub Actions
+  repository secrets \`CLOUDFLARE_ACCOUNT_ID\`, \`CLOUDFLARE_IP_LIST_ID\`,
+  \`CLOUDFLARE_API_TOKEN\`, allow scheduled workflows, and verify initial runs.
+- The expiry script only deletes exact, marked, expired IP items; no broad or unmanaged
+  IP entries are modified. Cloudflare bulk operations are asynchronous and at most one
+  list operation per account may be outstanding; error conditions must be reviewed,
+  never interpreted as successful revocation without a confirmed readback.
+- Until the hourly cleanup is actually running, make short-lived school approvals only
+  under direct owner supervision and revoke manually as soon as verification expires.
+- The admin API **does not prove** each zone's WAF rule is deployed; it explicitly
+  returns \`zoneRuleStatus: not_verified_by_this_endpoint\`. Verify the zone rules and
+  HTTP 403 behavior independently before claiming full protection.
