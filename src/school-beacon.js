@@ -154,7 +154,7 @@ export async function handleCampusBeacon(request, env) {
     if(current && !exactManagedComment(current.comment))return json(409,{error:"UNMANAGED_IP_PRESENT"});
     const match=current?exactManagedComment(current.comment):null;
     const refresh=(match && match.expires-now*1000>MIN_REFRESH_SECONDS*1000);
-    if(refresh)return json(200,{status:"already_protected",renewalRequired:false});
+    if(refresh)return json(200,{status:"already_listed_not_waf_verified",renewalRequired:false});
 
     if(!current) {
       const key="campus:pending:"+data.deviceId+":"+ip;
@@ -186,7 +186,7 @@ export async function handleCampusBeacon(request, env) {
     }
     await store.put(lastKey,String(now),{expirationTtl:3600});
     await store.delete("campus:pending:"+data.deviceId+":"+ip);
-    return json(200,{status:current?"renewed":"new_exact_ip_protected",lifetimeHours:EXPIRE_HOURS});
+    return json(200,{status:current?"renewed_in_list_not_waf_verified":"new_exact_ip_listed_not_waf_verified",lifetimeHours:EXPIRE_HOURS});
   }catch(e) {
     console.error("Campus beacon Cloudflare list update error",String(e instanceof Error?e.message:e));
     return json(503,{error:"SCHOOL_AUTO_UPDATE_FAILED"});
