@@ -62,7 +62,7 @@ test("default disabled: existing origin and headers remain", async () => {
 
 test("legacy policy health response cannot trigger recursion", async () => {
   await withOrigin(async count => {
-    const s = binding({ version: undefined, block: true });
+    const s = binding({ version: "legacy-protocol", block: true });
     const response = await edge.fetch(req(), {
       SCHOOL_POLICY_ENABLED: "true", SCHOOL_POLICY: s
     });
