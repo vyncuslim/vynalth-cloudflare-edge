@@ -7,6 +7,8 @@ const ROOT_DOMAINS = [
   "sleepsomno.com",
   "powiismunc.com",
   "vitamindai.online",
+  "vynalthai.si",
+  "vyncuslim.si",
 ];
 
 const VYNALTH_APEX = "vynalthai.com";
@@ -70,8 +72,43 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
   });
 }
 
+
+// Only activate after operator verification and an explicit config change.
+// Health handshake ensures stale policy Worker cannot loop back into edge.
+async function checkSchoolPolicy(request, env) {
+  if (env?.SCHOOL_POLICY_ENABLED !== "true") return null;
+  if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
+  const clientIp = request.headers.get("CF-Connecting-IP");
+  if (!clientIp) return null;
+  try {
+    const health = await env.SCHOOL_POLICY.fetch(
+      new Request("https://website-block-by-school-powiis.ongyuze1401.workers.dev/health")
+    );
+    if (health.status !== 200) return null;
+    const protocol = await health.json();
+    if (protocol?.policyProtocol !== "internal-204-v1" ||
+        protocol?.kvBound !== true) {
+      console.warn("School policy incompatible; failing open");
+      return null;
+    }
+    const uri = new URL(request.url);
+    uri.search = "";
+    uri.hash = "";
+    const decision = await env.SCHOOL_POLICY.fetch(new Request(uri.toString(), {
+      method: request.method,
+      headers: { "X-Vynalth-Policy-Client-IP": clientIp }
+    }));
+    if (decision.status === 403 &&
+        decision.headers.get("X-School-Policy") === "blocked") return decision;
+    if (decision.status !== 204) console.warn("Unexpected school policy status", decision.status);
+  } catch (error) {
+    console.warn("School policy unavailable; failing open", String(error));
+  }
+  return null;
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const incomingUrl = new URL(request.url);
     // Narrow authenticated enrollment endpoint. The WAF exception is only
     // for this exact path on vynalthai.com; all other URLs remain protected.
@@ -93,6 +130,12 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Existing signed beacon / volunteer report handlers run above this policy.
+    if (!isValidationPath(incomingUrl.pathname)) {
+      const denial = await checkSchoolPolicy(request, env);
+      if (denial) return edgeResponse(denial, request, incomingUrl, requestId, rootDomain);
     }
 
     // Keep the existing canonical redirect only for the Vynalth AI website.
