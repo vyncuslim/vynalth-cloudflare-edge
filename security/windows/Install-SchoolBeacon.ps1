@@ -46,6 +46,12 @@ try {
     Write-Host ('Scheduled task: '+$taskName+' every 10 minutes when you are logged in.')
     Write-Host 'The task reports ONLY on the exact POWIIS_Student SSID with no detected VPN route.'
     Write-Host 'No school IP can be auto-blocked until the Cloudflare Worker, IP List and WAF are configured.'
+} catch {
+    # A failed task registration must not leave a half-provisioned local identity
+    # that prevents re-running the installer.
+    Remove-Item -LiteralPath $configPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $reportPath -ErrorAction SilentlyContinue
+    throw
 } finally {
     [Array]::Clear($secret,0,$secret.Length)
     $keyHex=$null
