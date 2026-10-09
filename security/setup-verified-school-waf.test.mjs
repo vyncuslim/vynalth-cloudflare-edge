@@ -14,7 +14,7 @@ test("dry-run requires no Cloudflare token or zone config and makes no changes",
   assert.equal(result.status, 0, result.stderr);
   const data = JSON.parse(result.stdout);
   assert.equal(data.mode, "DRY_RUN");
-  assert.equal(data.expression, "ip.src in $powiis_verified_egress");
+  assert.equal(data.expression, 'ip.src in $powiis_verified_egress and not (http.host eq "vynalthai.com" and http.request.uri.path eq "/__shield/campus-beacon")');
   assert.equal(data.zones.length, 5);
 });
 
