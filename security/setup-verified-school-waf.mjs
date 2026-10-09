@@ -17,7 +17,7 @@ const ZONES = Object.freeze([
 ]);
 const RULE_NAME = "VYNALTH_SHIELD_VERIFIED_SCHOOL_EGRESS_DENY_V1";
 const LIST_NAME = "powiis_verified_egress";
-const EXPRESSION = "ip.src in $powiis_verified_egress";
+const EXPRESSION = 'ip.src in $powiis_verified_egress and not (http.host eq "vynalthai.com" and http.request.uri.path eq "/__shield/campus-beacon")';
 const PHASE = "http_request_firewall_custom";
 const PREFIX = "POWIIS|";
 const API = "https://api.cloudflare.com/client/v4";
