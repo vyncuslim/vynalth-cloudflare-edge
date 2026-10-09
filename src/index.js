@@ -4,6 +4,8 @@ const ROOT_DOMAINS = [
   "sleepsomno.com",
   "powiismunc.com",
   "vitamindai.online",
+  "vynalthai.si",
+  "vyncuslim.si",
 ];
 
 const VYNALTH_APEX = "vynalthai.com";
@@ -67,8 +69,43 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
   });
 }
 
+
+// A Cloudflare Service Binding makes policy decisions without overwriting any
+// route, Host header, existing Shield rules, redirects or application handler.
+async function checkSchoolPolicy(request, env) {
+  if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
+
+  // The upstream CF-Connecting-IP is authoritative for this edge request.
+  // Construct an internal request and DO NOT pass browser-provided policy headers.
+  const sourceIp = request.headers.get("CF-Connecting-IP");
+  if (!sourceIp) return null;
+
+  const url = new URL(request.url);
+  url.search = ""; // Do not forward sensitive URL query parameters to policy Worker.
+  url.hash = "";
+
+  const policyRequest = new Request(url.toString(), {
+    method: request.method,
+    headers: { "X-Vynalth-Policy-Client-IP": sourceIp },
+  });
+
+  try {
+    const decision = await env.SCHOOL_POLICY.fetch(policyRequest);
+    if (
+      decision.status === 403 &&
+      decision.headers.get("X-School-Policy") === "blocked"
+    ) return decision;
+    if (decision.status !== 204) {
+      console.warn("Unexpected School Policy status; failing open", decision.status);
+    }
+  } catch (error) {
+    console.error("School Policy binding unavailable; failing open", String(error));
+  }
+  return null;
+}
+
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const incomingUrl = new URL(request.url);
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
@@ -76,6 +113,15 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Preserve domain validation/ACME checks; apply the policy to all other
+    // requests while leaving existing public site behavior untouched in observe.
+    if (!isValidationPath(incomingUrl.pathname)) {
+      const denial = await checkSchoolPolicy(request, env);
+      if (denial) {
+        return edgeResponse(denial, request, incomingUrl, requestId, rootDomain);
+      }
     }
 
     // Keep the existing canonical redirect only for the Vynalth AI website.

@@ -13,8 +13,18 @@ routes = [
   { pattern = "powiismunc.com/*", zone_name = "powiismunc.com" },
   { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" },
   { pattern = "vitamindai.online/*", zone_name = "vitamindai.online" },
-  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" }
+  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" },
+  { pattern = "vynalthai.si/*", zone_name = "vynalthai.si" },
+  { pattern = "*.vynalthai.si/*", zone_name = "vynalthai.si" },
+  { pattern = "vyncuslim.si/*", zone_name = "vyncuslim.si" },
+  { pattern = "*.vyncuslim.si/*", zone_name = "vyncuslim.si" }
 ]
+
+# The existing edge Worker owns HTTP routes. The policy Worker has no routes:
+# it is called privately, so the origin and security/tracing logic is preserved.
+[[services]]
+binding = "SCHOOL_POLICY"
+service = "website-block-by-school-powiis"
 
 [observability]
 enabled = true

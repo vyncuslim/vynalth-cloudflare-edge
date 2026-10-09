@@ -11,6 +11,8 @@ The Worker is configured for the apex and all HTTP/HTTPS subdomains of:
 - `sleepsomno.com`
 - `powiismunc.com`
 - `vitamindai.online`
+- `vynalthai.si`
+- `vyncuslim.si`
 
 Mail transport hostnames that are used for SMTP/IMAP/POP should remain DNS-only and are not expected to use HTTP response headers.
 
@@ -161,3 +163,16 @@ npm run dev
 npm run deploy
 npm run tail
 ```
+
+## POWIIS candidate IP policy integration (observe only)
+
+This Worker owns all **seven** configured zone Routes. It calls the separate `website-block-by-school-powiis` policy Worker through an internal **SCHOOL_POLICY** Service Binding, rather than assigning the policy Worker a Custom Domain over an existing website.
+
+1. The policy Worker has the `SCHOOL_IP_KV` binding to namespace `website-block-by-school-powiis-school-ip-kv`.
+2. The edge Worker passes only the Cloudflare-observed source IP, the hostname, path and HTTP method; URL query parameters, cookies and request bodies are not forwarded.
+3. The policy Worker records only unverified candidate IPs on root GET requests and reports an allowed response (204). It can return a tagged 403 only if `MODE=enforce` **and** a `blocked:IP` key is manually created.
+4. The edge Worker retains the existing origin proxy, tracing headers, redirects, validation-path exceptions and all upstream Cloudflare WAF controls. Unknown policy failures fail open to avoid taking down the website.
+5. The added `.si` routes activate only on hosts with Cloudflare-proxied web DNS records and correct zone permissions. Never point SMTP/IMAP/MX transport hostnames to Workers.
+6. Review Cloudflare deployment / GitHub Actions logs to confirm routes actually deployed. Updating a GitHub config does not alone prove the live Cloudflare routes changed.
+
+The service binding and routes are declared in `wrangler.toml`. Test before deployment with `npm test`.
