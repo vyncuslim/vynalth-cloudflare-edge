@@ -1,3 +1,4 @@
+import { handleCampusBeacon } from "./school-beacon.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -68,8 +69,14 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const incomingUrl = new URL(request.url);
+    // Narrow authenticated enrollment endpoint. The WAF exception is only
+    // for this exact path on vynalthai.com; all other URLs remain protected.
+    if (incomingUrl.hostname === "vynalthai.com" &&
+        incomingUrl.pathname === "/__shield/campus-beacon") {
+      return handleCampusBeacon(request, env);
+    }
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
     const requestId = crypto.randomUUID();
