@@ -72,8 +72,10 @@ school NAT IP block affects *everyone* using that NAT (including school guests a
    `preview_urls` exposure are disabled. Test the signed endpoint from the trusted
    campus computer: first valid report should return
    `awaiting_independent_second_observation`; second report after >=5 minutes
-   should result in `new_exact_ip_protected` after Cloudflare completion.
+   should result in `new_exact_ip_listed_not_waf_verified` after Cloudflare completion.
    The endpoint must reject any forged/unsigned report.
+   A successful list API reply is **NOT proof of active zone WAF**. Confirm all five
+   actual custom WAF rule deployments and HTTP 403 behavior independently.
 7. Create the five WAF rules through reviewed
    `security/setup-verified-school-waf.mjs --apply`, with verified zone-ID map
    and list already containing an approved current school IP.
