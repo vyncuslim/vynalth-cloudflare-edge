@@ -173,3 +173,12 @@ The feature gate is SCHOOL_POLICY_ENABLED=false in wrangler.toml. Requests are u
 Review checklist: (1) verify deployment of the policy Worker and KV binding, (2) remove incorrectly added policy Worker zone routes, (3) confirm Cloudflare build-token route permissions for all seven zones, (4) confirm existing school beacon and volunteer reporting exceptions, (5) test off-campus and on-campus without automatic unverified IP blocks, (6) test local bundle with npm test and npx wrangler deploy --dry-run, (7) retain an independent rollback path.
 
 Do not merge into the live main branch before build errors and differences with the currently active Cloudflare production version are resolved.
+
+
+### /admin/ip runtime enforcement integration (draft rollout)
+
+This draft branch's `wrangler.toml` sets `SCHOOL_POLICY_ENABLED="true"` so the Edge Worker can consult the existing `SCHOOL_POLICY` Service Binding. **This only enables checking the policy; it does not by itself block anyone.** The policy Worker's `MODE=observe` and no runtime activation mean allow by default. From its authenticated `/admin/ip` page, the owner may subsequently activate the manually curated exact-IP KV deny list for at most one hour. A persistent emergency OFF control and logical expiry guard exist in the Policy Worker.
+
+**DO NOT deploy/merge before review.** This branch has additional school-beacon and volunteer routes that must be preserved and tested. Check the Cloudflare project binding, all 14 required zone routes (apex + wildcard across 7 domains), and health protocol `internal-204-v1` after deploying. If Edge binding/health fails, the Edge Worker fails open. If Cloudflare Worker route is missing, a visitor can still reach the origin unaffected. Web/app functioning must be verified with both nonblocked and explicitly listed test addresses. WAF IP lists are separate from this KV control.
+
+The draft PR only changes GitHub; it does **not** change the already deployed production `SCHOOL_POLICY_ENABLED=false` value. Explicitly resolve deployment failures and validate the release before calling any website blocked.
