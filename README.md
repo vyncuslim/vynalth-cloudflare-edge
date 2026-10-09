@@ -11,6 +11,8 @@ The Worker is configured for the apex and all HTTP/HTTPS subdomains of:
 - `sleepsomno.com`
 - `powiismunc.com`
 - `vitamindai.online`
+- `vynalthai.si`
+- `vyncuslim.si`
 
 Mail transport hostnames that are used for SMTP/IMAP/POP should remain DNS-only and are not expected to use HTTP response headers.
 
@@ -161,3 +163,13 @@ npm run dev
 npm run deploy
 npm run tail
 ```
+
+## Staged policy integration (review branch)
+
+This branch preserves the existing opt-in school reporting route, signed campus beacon, security tests, and disabled direct workers.dev/preview origins. It configures seven zones on the existing edge Worker and an internal SCHOOL_POLICY Service Binding to the separate policy Worker.
+
+The feature gate is SCHOOL_POLICY_ENABLED=false in wrangler.toml. Requests are untouched until a separate operator-reviewed change enables it. The code validates /health policyProtocol=internal-204-v1 and kvBound=true on every enabled request, refusing to forward a policy request into an incompatible older Worker. A bad or missing response fails open, protecting website availability.
+
+Review checklist: (1) verify deployment of the policy Worker and KV binding, (2) remove incorrectly added policy Worker zone routes, (3) confirm Cloudflare build-token route permissions for all seven zones, (4) confirm existing school beacon and volunteer reporting exceptions, (5) test off-campus and on-campus without automatic unverified IP blocks, (6) test local bundle with npm test and npx wrangler deploy --dry-run, (7) retain an independent rollback path.
+
+Do not merge into the live main branch before build errors and differences with the currently active Cloudflare production version are resolved.
