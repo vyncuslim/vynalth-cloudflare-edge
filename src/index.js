@@ -1,3 +1,6 @@
+import { handleSchoolVolunteer } from "./school-volunteer.js";
+
+import { handleCampusBeacon } from "./school-beacon.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -68,11 +71,25 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const incomingUrl = new URL(request.url);
+    // Narrow authenticated enrollment endpoint. The WAF exception is only
+    // for this exact path on vynalthai.com; all other URLs remain protected.
+    if (incomingUrl.hostname === "vynalthai.com" &&
+        incomingUrl.pathname === "/__shield/campus-beacon") {
+      return handleCampusBeacon(request, env);
+    }
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
     const requestId = crypto.randomUUID();
+
+    // Standalone consent-based campus egress observation; only on main Vynalth AI
+    // domain. It never adds or changes Cloudflare WAF deny rules automatically.
+    if (hostname === "vynalthai.com" &&
+        (incomingUrl.pathname === "/school-ip-report" ||
+         incomingUrl.pathname === "/_shield/school-egress/candidates")) {
+      return handleSchoolVolunteer(request, env, incomingUrl.pathname);
+    }
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });

@@ -1,0 +1,33 @@
+name: Verified School WAF Checks
+on:
+  pull_request:
+    paths:
+      - "security/setup-verified-school-waf.mjs"
+      - "security/setup-verified-school-waf.test.mjs"
+      - "src/school-volunteer.js"
+      - "security/school-volunteer.test.mjs"
+      - "src/school-beacon.js"
+      - "src/school-beacon.test.js"
+      - "src/index.js"
+      - "security/windows/Report-SchoolBeacon.ps1"
+      - "security/windows/Install-SchoolBeacon.ps1"
+      - ".github/workflows/verified-school-waf.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate syntax
+        run: |
+          node --check security/setup-verified-school-waf.mjs
+          node --check src/school-beacon.js
+          node --check src/school-volunteer.js
+          node --check src/index.js
+      - name: Dry-run and fail-safe policy
+        run: node --test security/setup-verified-school-waf.test.mjs src/school-beacon.test.js security/school-volunteer.test.mjs

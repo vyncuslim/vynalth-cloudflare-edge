@@ -1,0 +1,28 @@
+name: School Verified Egress Expiry
+on:
+  schedule:
+    - cron: "12 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vynalth-school-cloudflare-list
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify tool syntax
+        run: node --check security/reconcile-school-expiry.mjs
+      - name: Remove expired, owner-verified IPs only
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_IP_LIST_ID: ${{ secrets.CLOUDFLARE_IP_LIST_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          VYNALTH_SCHOOL_EXPIRY_CONFIRM: DELETE_EXPIRED_VERIFIED_IPS
+        run: node security/reconcile-school-expiry.mjs --apply
