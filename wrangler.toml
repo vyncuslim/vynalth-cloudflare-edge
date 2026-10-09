@@ -14,8 +14,19 @@ routes = [
   { pattern = "powiismunc.com/*", zone_name = "powiismunc.com" },
   { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" },
   { pattern = "vitamindai.online/*", zone_name = "vitamindai.online" },
-  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" }
+  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" },
+  { pattern = "vynalthai.si/*", zone_name = "vynalthai.si" },
+  { pattern = "*.vynalthai.si/*", zone_name = "vynalthai.si" },
+  { pattern = "vyncuslim.si/*", zone_name = "vyncuslim.si" },
+  { pattern = "*.vyncuslim.si/*", zone_name = "vyncuslim.si" }
 ]
+
+[vars]
+SCHOOL_POLICY_ENABLED = "false"
+
+[[services]]
+binding = "SCHOOL_POLICY"
+service = "website-block-by-school-powiis"
 
 [observability]
 enabled = true
