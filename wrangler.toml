@@ -22,7 +22,7 @@ routes = [
 ]
 
 [vars]
-SCHOOL_POLICY_ENABLED = "false"
+SCHOOL_POLICY_ENABLED = "true"
 
 [[services]]
 binding = "SCHOOL_POLICY"
