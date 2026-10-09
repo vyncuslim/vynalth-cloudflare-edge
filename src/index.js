@@ -1,3 +1,6 @@
+import { handleSchoolVolunteer } from "./school-volunteer.js";
+
+import { handleCampusBeacon } from "./school-beacon.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -70,36 +73,36 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
 }
 
 
-// A Cloudflare Service Binding makes policy decisions without overwriting any
-// route, Host header, existing Shield rules, redirects or application handler.
+// Only activate after operator verification and an explicit config change.
+// Health handshake ensures stale policy Worker cannot loop back into edge.
 async function checkSchoolPolicy(request, env) {
+  if (env?.SCHOOL_POLICY_ENABLED !== "true") return null;
   if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
-
-  // The upstream CF-Connecting-IP is authoritative for this edge request.
-  // Construct an internal request and DO NOT pass browser-provided policy headers.
-  const sourceIp = request.headers.get("CF-Connecting-IP");
-  if (!sourceIp) return null;
-
-  const url = new URL(request.url);
-  url.search = ""; // Do not forward sensitive URL query parameters to policy Worker.
-  url.hash = "";
-
-  const policyRequest = new Request(url.toString(), {
-    method: request.method,
-    headers: { "X-Vynalth-Policy-Client-IP": sourceIp },
-  });
-
+  const clientIp = request.headers.get("CF-Connecting-IP");
+  if (!clientIp) return null;
   try {
-    const decision = await env.SCHOOL_POLICY.fetch(policyRequest);
-    if (
-      decision.status === 403 &&
-      decision.headers.get("X-School-Policy") === "blocked"
-    ) return decision;
-    if (decision.status !== 204) {
-      console.warn("Unexpected School Policy status; failing open", decision.status);
+    const health = await env.SCHOOL_POLICY.fetch(
+      new Request("https://website-block-by-school-powiis.ongyuze1401.workers.dev/health")
+    );
+    if (health.status !== 200) return null;
+    const protocol = await health.json();
+    if (protocol?.policyProtocol !== "internal-204-v1" ||
+        protocol?.kvBound !== true) {
+      console.warn("School policy incompatible; failing open");
+      return null;
     }
+    const uri = new URL(request.url);
+    uri.search = "";
+    uri.hash = "";
+    const decision = await env.SCHOOL_POLICY.fetch(new Request(uri.toString(), {
+      method: request.method,
+      headers: { "X-Vynalth-Policy-Client-IP": clientIp }
+    }));
+    if (decision.status === 403 &&
+        decision.headers.get("X-School-Policy") === "blocked") return decision;
+    if (decision.status !== 204) console.warn("Unexpected school policy status", decision.status);
   } catch (error) {
-    console.error("School Policy binding unavailable; failing open", String(error));
+    console.warn("School policy unavailable; failing open", String(error));
   }
   return null;
 }
@@ -107,21 +110,32 @@ async function checkSchoolPolicy(request, env) {
 export default {
   async fetch(request, env, ctx) {
     const incomingUrl = new URL(request.url);
+    // Narrow authenticated enrollment endpoint. The WAF exception is only
+    // for this exact path on vynalthai.com; all other URLs remain protected.
+    if (incomingUrl.hostname === "vynalthai.com" &&
+        incomingUrl.pathname === "/__shield/campus-beacon") {
+      return handleCampusBeacon(request, env);
+    }
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
     const requestId = crypto.randomUUID();
+
+    // Standalone consent-based campus egress observation; only on main Vynalth AI
+    // domain. It never adds or changes Cloudflare WAF deny rules automatically.
+    if (hostname === "vynalthai.com" &&
+        (incomingUrl.pathname === "/school-ip-report" ||
+         incomingUrl.pathname === "/_shield/school-egress/candidates")) {
+      return handleSchoolVolunteer(request, env, incomingUrl.pathname);
+    }
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
     }
 
-    // Preserve domain validation/ACME checks; apply the policy to all other
-    // requests while leaving existing public site behavior untouched in observe.
+    // Existing signed beacon / volunteer report handlers run above this policy.
     if (!isValidationPath(incomingUrl.pathname)) {
       const denial = await checkSchoolPolicy(request, env);
-      if (denial) {
-        return edgeResponse(denial, request, incomingUrl, requestId, rootDomain);
-      }
+      if (denial) return edgeResponse(denial, request, incomingUrl, requestId, rootDomain);
     }
 
     // Keep the existing canonical redirect only for the Vynalth AI website.

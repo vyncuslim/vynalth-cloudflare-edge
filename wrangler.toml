@@ -1,7 +1,8 @@
 name = "vynalth-cloudflare-edge"
 main = "src/index.js"
 compatibility_date = "2026-09-19"
-workers_dev = true
+workers_dev = false
+preview_urls = false
 
 routes = [
   { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
@@ -20,11 +21,20 @@ routes = [
   { pattern = "*.vyncuslim.si/*", zone_name = "vyncuslim.si" }
 ]
 
-# The existing edge Worker owns HTTP routes. The policy Worker has no routes:
-# it is called privately, so the origin and security/tracing logic is preserved.
+[vars]
+SCHOOL_POLICY_ENABLED = "true"
+
 [[services]]
 binding = "SCHOOL_POLICY"
 service = "website-block-by-school-powiis"
 
 [observability]
 enabled = true
+
+# To enable the optional signed campus reporter, create a dedicated KV namespace
+# in Cloudflare, then bind it as SCHOOL_BEACON_KV in Wrangler or the dashboard.
+# Example only (DO NOT commit placeholder IDs as real):
+# [[kv_namespaces]]
+# binding = "SCHOOL_BEACON_KV"
+# id = "REPLACE_WITH_ACTUAL_32_CHAR_KV_NAMESPACE_ID"
+# Add the bearer/list and signing secrets via wrangler secret put or dashboard.
