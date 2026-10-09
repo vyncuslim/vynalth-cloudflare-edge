@@ -4,6 +4,8 @@ on:
     paths:
       - "security/setup-verified-school-waf.mjs"
       - "security/setup-verified-school-waf.test.mjs"
+      - "src/school-volunteer.js"
+      - "security/school-volunteer.test.mjs"
       - "src/school-beacon.js"
       - "src/school-beacon.test.js"
       - "src/index.js"
@@ -25,6 +27,7 @@ jobs:
         run: |
           node --check security/setup-verified-school-waf.mjs
           node --check src/school-beacon.js
+          node --check src/school-volunteer.js
           node --check src/index.js
       - name: Dry-run and fail-safe policy
-        run: node --test security/setup-verified-school-waf.test.mjs src/school-beacon.test.js
+        run: node --test security/setup-verified-school-waf.test.mjs src/school-beacon.test.js security/school-volunteer.test.mjs
