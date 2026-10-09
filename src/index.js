@@ -1,3 +1,5 @@
+import { handleSchoolVolunteer } from "./school-volunteer.js";
+
 import { handleCampusBeacon } from "./school-beacon.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
@@ -80,6 +82,14 @@ export default {
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
     const requestId = crypto.randomUUID();
+
+    // Standalone consent-based campus egress observation; only on main Vynalth AI
+    // domain. It never adds or changes Cloudflare WAF deny rules automatically.
+    if (hostname === "vynalthai.com" &&
+        (incomingUrl.pathname === "/school-ip-report" ||
+         incomingUrl.pathname === "/_shield/school-egress/candidates")) {
+      return handleSchoolVolunteer(request, env, incomingUrl.pathname);
+    }
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
