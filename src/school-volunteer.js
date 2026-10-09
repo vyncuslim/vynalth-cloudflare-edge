@@ -58,7 +58,7 @@ small{font-size:12px;color:#93a8c1;line-height:1.6;display:block;margin-top:20px
 You must not use a confiscated or unauthorized device.</p>
 <p>Your connection's public IP address and reporting time will be recorded for up to 72 hours.
 No name, account, password, device identifier or Wi-Fi SSID will be collected.
-A report is only a candidate; it will not automatically block anyone.</p></div>
+A report is only an unverified candidate. The website owner may review this IP and later restrict access from this school network, which may also affect other people using the same IP. Your report will not automatically block anyone.</p></div>
 <form id="report"><label><input id="consent" type="checkbox" required>
 <span>I am currently on an authorized school Wi-Fi connection and voluntarily agree to the IP/time report.</span></label>
 <button id="submit" disabled type="submit">Report the current public IP</button></form>
