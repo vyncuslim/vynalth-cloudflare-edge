@@ -49,7 +49,7 @@ function buildEdgeHeaders(existingHeaders, request, incomingUrl, requestId, root
   headers.set("x-vynalth-origin", detectOrigin(existingHeaders));
 
   if (cfRay) {
-    headers.set("x-vynalth-ray-id", cfRay.split("-")[0]);
+    headers.set("x-vynalth-ray-id", cfRay);
   }
 
   return headers;
@@ -152,7 +152,38 @@ export default {
       // Preserve the original hostname and Host header. Cloudflare DNS for the
       // matching zone decides the real origin, so every domain/subdomain can
       // keep its own backend while sharing one edge Worker.
-      originResponse = await fetch(request, {
+      // Vercel sees Cloudflare's egress IP as the TCP visitor. Carry the
+      // Cloudflare-observed visitor IP and Ray ID to the API for correlation.
+      // Remove browser-supplied versions first, so a request cannot impersonate
+      // another visitor by setting Vynalth-specific headers itself.
+      const originHeaders = new Headers(request.headers);
+      originHeaders.delete("x-vynalth-client-ip");
+      originHeaders.delete("x-vynalth-ray-id");
+      originHeaders.delete("x-vynalth-request-id");
+      const visitorIp = request.headers.get("CF-Connecting-IP");
+      const visitorRay = request.headers.get("CF-Ray");
+      if (visitorIp) originHeaders.set("x-vynalth-client-ip", visitorIp);
+      if (visitorRay) originHeaders.set("x-vynalth-ray-id", visitorRay);
+      originHeaders.set("x-vynalth-request-id", requestId);
+      originHeaders.delete("x-vynalth-edge-ts");
+      originHeaders.delete("x-vynalth-edge-signature");
+      // Optional authenticated edge identity for cases where the origin strips
+      // CF-Connecting-IP or substitutes the Ray ID on a Worker subrequest.
+      const identitySecret = env?.VYNALTH_EDGE_IDENTITY_SECRET;
+      if (visitorIp && typeof identitySecret === "string" && identitySecret.length >= 32) {
+        const epoch = String(Math.floor(Date.now() / 1000));
+        const payload = `${epoch}:${requestId}:${visitorIp}:${visitorRay || ""}`;
+        const key = await crypto.subtle.importKey(
+          "raw", new TextEncoder().encode(identitySecret),
+          { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+        );
+        const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+        const hex = Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, "0")).join("");
+        originHeaders.set("x-vynalth-edge-ts", epoch);
+        originHeaders.set("x-vynalth-edge-signature", hex);
+      }
+      const originRequest = new Request(request, { headers: originHeaders });
+      originResponse = await fetch(originRequest, {
         redirect: "manual",
       });
     } catch (error) {

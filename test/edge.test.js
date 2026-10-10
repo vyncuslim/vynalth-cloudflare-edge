@@ -121,3 +121,32 @@ test("ACME validation requests bypass policy to preserve certificates", async ()
     assert.equal(getCalls(), 1);
   });
 });
+
+test("origin receives Cloudflare visitor IP and full Ray ID, never user-forged values", async () => {
+  const prior = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async (originReq) => {
+    called = true;
+    assert.equal(originReq.headers.get("x-vynalth-client-ip"), "60.49.64.83");
+    assert.equal(originReq.headers.get("x-vynalth-ray-id"), "a4874d671bc7db73-SIN");
+    assert.notEqual(originReq.headers.get("x-vynalth-request-id"), "forged-request");
+    return new Response("ok", { status: 200 });
+  };
+  try {
+    const req = new Request("https://vynalthai.com/api/ai/chat", {
+      headers: {
+        "CF-Connecting-IP": "60.49.64.83",
+        "CF-Ray": "a4874d671bc7db73-SIN",
+        "x-vynalth-client-ip": "203.0.113.123",
+        "x-vynalth-ray-id": "forged-ray",
+        "x-vynalth-request-id": "forged-request",
+      },
+    });
+    const response = await edge.fetch(req, {}, {});
+    assert.equal(called, true);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-vynalth-ray-id"), "a4874d671bc7db73-SIN");
+  } finally {
+    globalThis.fetch = prior;
+  }
+});
