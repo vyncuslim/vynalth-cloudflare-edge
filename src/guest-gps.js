@@ -4,6 +4,7 @@ const DISCLAIMER_HTML="<!doctype html>\n<html lang=\"zh-CN\">\n<head><meta chars
 const SESSION_COOKIE="__Host-vynalth-geo";
 const STATUS_COOKIE="__Host-vynalth-status";
 const BLOCK_COOKIE="__Host-vynalth-geo-block";
+const HANDOFF_STATE_COOKIE="__Host-vynalth-geo-handoff";
 const GPS_BRIDGE_HUB="vynalthai.com";
 const GPS_BRIDGE_ROOTS=Object.freeze([
  "vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si",
@@ -89,27 +90,43 @@ function safeRelativePath(path){
    !path.startsWith("//")&&!path.includes("\\")&&!/[\r\n]/.test(path)&&
    !path.startsWith("/__shield/gps/");
 }
-async function handoffToken(cfg,target,path,verdict){
+function validState(v){return typeof v==="string"&&/^[A-Za-z0-9_-]{32}$/.test(v)}
+async function handoffToken(cfg,target,path,state,verdict){
  const expires=Math.floor(Date.now()/1000)+60;
- const random=new Uint8Array(16);crypto.getRandomValues(random);
- const nonce=b64(random);
- const sig=await sign(cfg.s,[expires,verdict,nonce,target,path].join("|"));
- return [expires,verdict,nonce,sig].join(".");
+ const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+ const nonce=b64(bytes);
+ const tag=await sign(cfg.s,[expires,verdict,nonce,target,path,state].join("|"));
+ return [expires,verdict,nonce,tag].join(".");
 }
-async function validateHandoff(cfg,target,path,ticket){
- if(typeof ticket!=="string"||ticket.length>260)return null;
+async function validateHandoff(cfg,target,path,state,ticket){
+ if(!validState(state)||typeof ticket!=="string"||ticket.length>260)return null;
  const parts=ticket.split(".");
  if(parts.length!==4)return null;
- const [expires,verdict,nonce,sig]=parts;
+ const [expires,verdict,nonce,tag]=parts;
  if(verdict!=="inside"&&verdict!=="outside")return null;
- if(!/^\d{10,12}$/.test(expires)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return null;
+ if(!/^\d{10,12}$/.test(expires)||!/^[A-Za-z0-9_-]{22}$/.test(nonce))return null;
  const expiry=Number(expires),now=Math.floor(Date.now()/1000);
  if(expiry<=now||expiry>now+60)return null;
- return await valid(cfg.s,[expires,verdict,nonce,target,path].join("|"),sig)?verdict:null;
+ return await valid(cfg.s,[expires,verdict,nonce,target,path,state].join("|"),tag)?verdict:null;
 }
+
 function redirect(to,headers={}){
  return new Response(null,{status:302,headers:{...head,Location:to,...headers}});
 }
+function beginHandoff(url,recheck=false){
+ if(!allowedTarget(url.hostname))return reply(400,{error:"INVALID_HANDOFF_TARGET"});
+ const bytes=new Uint8Array(24);crypto.getRandomValues(bytes);
+ const state=b64(bytes),path=safeRelativePath(url.pathname)?url.pathname:"/";
+ const dest=new URL("https://"+GPS_BRIDGE_HUB+"/__shield/gps/"+(recheck?"recheck":"bridge"));
+ dest.searchParams.set("host",url.hostname);
+ dest.searchParams.set("return",path);
+ dest.searchParams.set("state",state);
+ return redirect(dest.toString(),{
+  "Set-Cookie":policyCookie(HANDOFF_STATE_COOKIE,state,120),
+  "Referrer-Policy":"no-referrer"
+ });
+}
+
 // Browsers cannot read other registrable domain's cookies. Instead perform
 // an explicit top-level redirect through the first-party Vynalth AI hub,
 // transfer only a signed short-lived verdict, and set the target's own cookie.
@@ -117,25 +134,27 @@ async function bridge(request,url,cfg){
  if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
    return reply(404,{error:"NOT_FOUND"});
  const target=url.searchParams.get("host");
- const path=url.searchParams.get("return");
- if(!allowedTarget(target)||!safeRelativePath(path))
+ const path=url.searchParams.get("return"),state=url.searchParams.get("state");
+ if(!allowedTarget(target)||!safeRelativePath(path)||!validState(state))
    return reply(400,{error:"INVALID_BRIDGE_DESTINATION"});
  let verdict=null;
  if(await hasBlockVerdict(request,cfg,url.hostname))verdict="inside";
  else if(await permitted(request,cfg,url.hostname))verdict="outside";
  if(!verdict)return page(); // First-party hub asks for browser GPS; NO login needed.
- const ticket=await handoffToken(cfg,target,path,verdict);
+ const ticket=await handoffToken(cfg,target,path,state,verdict);
  const destination=new URL("https://"+target+"/__shield/gps/import");
  destination.searchParams.set("ticket",ticket);
  destination.searchParams.set("return",path);
+ destination.searchParams.set("state",state);
  return redirect(destination.toString(),{"Referrer-Policy":"no-referrer"});
 }
 async function importHandoff(request,url,cfg){
  if(request.method!=="GET"||!allowedTarget(url.hostname))
    return reply(404,{error:"NOT_FOUND"});
- const path=url.searchParams.get("return");
- if(!safeRelativePath(path))return reply(400,{error:"INVALID_RETURN_PATH"});
- const verdict=await validateHandoff(cfg,url.hostname,path,url.searchParams.get("ticket"));
+ const path=url.searchParams.get("return"),state=url.searchParams.get("state");
+ if(!safeRelativePath(path)||!validState(state))return reply(400,{error:"INVALID_RETURN_PATH"});
+ if(getCookie(request,HANDOFF_STATE_COOKIE)!==state)return reply(403,{error:"HANDOFF_STATE_MISMATCH"});
+ const verdict=await validateHandoff(cfg,url.hostname,path,state,url.searchParams.get("ticket"));
  if(!verdict)return reply(403,{error:"INVALID_OR_EXPIRED_HANDOFF"});
  const name=verdict==="inside"?BLOCK_COOKIE:SESSION_COOKIE;
  const old=verdict==="inside"?SESSION_COOKIE:BLOCK_COOKIE;
@@ -144,6 +163,7 @@ async function importHandoff(request,url,cfg){
  headers.set("Location",path);
  headers.append("Set-Cookie",policyCookie(name,value));
  headers.append("Set-Cookie",policyCookie(old,"",0));
+ headers.append("Set-Cookie",policyCookie(HANDOFF_STATE_COOKIE,"",0));
  return new Response(null,{status:302,headers});
 }
 
@@ -212,10 +232,17 @@ export async function guestGpsGate(request,env,url){
   if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
    return reply(404,{error:"NOT_FOUND"});
   const targetHost=url.searchParams.get("host");
-  const returnPath=url.searchParams.get("return");
-  if(!allowedTarget(targetHost)||!safeRelativePath(returnPath))
+  const returnPath=url.searchParams.get("return"),state=url.searchParams.get("state");
+  if(!allowedTarget(targetHost)||!safeRelativePath(returnPath)||!validState(state))
    return reply(400,{error:"INVALID_RECHECK_DESTINATION"});
   return page(); // Always offer a new explicit geolocation attempt.
+ }
+ if(url.pathname==="/__shield/gps/link"){
+  if(request.method!=="GET"||!allowedTarget(url.hostname))return reply(404,{error:"NOT_FOUND"});
+  const returnPath=url.searchParams.get("return");
+  if(!safeRelativePath(returnPath))return reply(400,{error:"INVALID_RETURN_PATH"});
+  const next=new URL(url.toString());next.pathname=returnPath;
+  return beginHandoff(next,url.searchParams.get("recheck")==="1");
  }
  if(url.pathname==="/__shield/gps/bridge")return bridge(request,url,cfg);
  if(url.pathname==="/__shield/gps/import")return importHandoff(request,url,cfg);
@@ -235,10 +262,7 @@ export async function guestGpsGate(request,env,url){
  // browser does not read vynalthai.com cookies from the target origin.
  // A missing hub verdict shows its normal GPS challenge or 403 denial.
  if(url.hostname!==GPS_BRIDGE_HUB&&allowedTarget(url.hostname)&&isBrowserDocument(request)){
-  const dest=new URL("https://"+GPS_BRIDGE_HUB+"/__shield/gps/bridge");
-  dest.searchParams.set("host",url.hostname);
-  dest.searchParams.set("return",safeRelativePath(url.pathname)?url.pathname:"/");
-  return redirect(dest.toString(),{"Referrer-Policy":"no-referrer"});
+  return beginHandoff(url);
  }
  const accept=request.headers.get("Accept")||"";
  if(request.method!=="GET"||(!accept.includes("text/html")&&accept.includes("application/json")))
