@@ -49,7 +49,7 @@ function buildEdgeHeaders(existingHeaders, request, incomingUrl, requestId, root
   headers.set("x-vynalth-origin", detectOrigin(existingHeaders));
 
   if (cfRay) {
-    headers.set("x-vynalth-ray-id", cfRay.split("-")[0]);
+    headers.set("x-vynalth-ray-id", cfRay);
   }
 
   return headers;
@@ -152,7 +152,21 @@ export default {
       // Preserve the original hostname and Host header. Cloudflare DNS for the
       // matching zone decides the real origin, so every domain/subdomain can
       // keep its own backend while sharing one edge Worker.
-      originResponse = await fetch(request, {
+      // Vercel sees Cloudflare's egress IP as the TCP visitor. Carry the
+      // Cloudflare-observed visitor IP and Ray ID to the API for correlation.
+      // Remove browser-supplied versions first, so a request cannot impersonate
+      // another visitor by setting Vynalth-specific headers itself.
+      const originHeaders = new Headers(request.headers);
+      originHeaders.delete("x-vynalth-client-ip");
+      originHeaders.delete("x-vynalth-ray-id");
+      originHeaders.delete("x-vynalth-request-id");
+      const visitorIp = request.headers.get("CF-Connecting-IP");
+      const visitorRay = request.headers.get("CF-Ray");
+      if (visitorIp) originHeaders.set("x-vynalth-client-ip", visitorIp);
+      if (visitorRay) originHeaders.set("x-vynalth-ray-id", visitorRay);
+      originHeaders.set("x-vynalth-request-id", requestId);
+      const originRequest = new Request(request, { headers: originHeaders });
+      originResponse = await fetch(originRequest, {
         redirect: "manual",
       });
     } catch (error) {
