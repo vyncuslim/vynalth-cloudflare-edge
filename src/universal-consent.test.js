@@ -233,3 +233,99 @@ test("consent page is navigable and contains all controls",async()=>{
  assert.equal(script.status,200);
  assert.match(await script.text(),/X-Vynalth-Consent-CSRF/);
 });
+
+
+async function linkFromPrimarySSO(e,target,role="status"){
+ // The target uses a first-party top-level navigation to vynalthai.com.
+ const started=await call(e,target,policy+"/link");
+ assert.equal(started.status,302);
+ const stateCookie=started.headers.get("Set-Cookie").split(";")[0];
+ assert.match(stateCookie,/__Secure-vynalth-consent-link=/);
+ const authorize=new URL(started.headers.get("Location"));
+ assert.equal(authorize.hostname,"vynalthai.com");
+ assert.equal(authorize.pathname,policy+"/authorize");
+ const hub=await call(e,"vynalthai.com",authorize.pathname+authorize.search,
+   "GET",undefined,issuer("vynalthai.com",role));
+ assert.equal(hub.status,302);
+ const callback=new URL(hub.headers.get("Location"));
+ assert.equal(callback.hostname,target);
+ assert.equal(callback.pathname,policy+"/callback");
+ const completed=await call(e,target,callback.pathname+callback.search,
+   "GET",undefined,stateCookie);
+ assert.equal(completed.status,302);
+ assert.equal(completed.headers.get("Location"),policy);
+ const firstPartyCookie=completed.headers.getSetCookie()
+   .find(x=>x.startsWith("__Secure-vynalth-sso=")).split(";")[0];
+ assert.ok(firstPartyCookie);
+ return {firstPartyCookie,started,hub,completed,callback,stateCookie};
+}
+
+test("vynalthai.com is canonical source for four root-domain linked SSO sessions",async()=>{
+ const e=env(),out={};
+ for(const root of CONSENT_DOMAINS.slice(1)){
+  const linked=await linkFromPrimarySSO(e,root,"contact");
+  assert.match(linked.completed.headers.getSetCookie().join("\n"),
+    new RegExp("Domain="+root.replaceAll(".","\\.")));
+  const result=await call(e,root,policy+"/session","GET",
+   undefined,linked.firstPartyCookie);
+  const session=await result.json();
+  assert.equal(session.authenticated,true,root);
+  assert.equal(session.status,"contact",root);
+  out[root]=linked.firstPartyCookie;
+ }
+ assert.equal(Object.keys(out).length,3);
+});
+
+test("link callback cannot consume arbitrary or already consumed KV tickets",async()=>{
+ const e=env(),target="vyncuslim.com";
+ const linked=await linkFromPrimarySSO(e,target);
+ const again=await call(e,target,linked.callback.pathname+linked.callback.search,
+  "GET",undefined,linked.stateCookie);
+ assert.equal(again.status,403);
+ assert.equal((await again.json()).error,"SSO_CODE_EXPIRED_OR_USED");
+ const tampered=await call(e,target,linked.callback.pathname+linked.callback.search,
+  "GET",undefined,"__Secure-vynalth-consent-link=forged");
+ assert.equal(tampered.status,403);
+});
+
+test("anonymous hub visitor is never silently linked to other registrable domains",async()=>{
+ const e=env();
+ const start=await call(e,"vyncuslim.si",policy+"/link");
+ const authUrl=new URL(start.headers.get("Location"));
+ const denied=await call(e,"vynalthai.com",authUrl.pathname+authUrl.search);
+ assert.equal(denied.status,401);
+ assert.equal([...e.CONSENT_KV.contents.keys()]
+   .filter(x=>x.includes("sso-link:")).length,0);
+});
+
+test("hubs reject destinations outside four-domain whitelist",async()=>{
+ const e=env();
+ for(const domain of ["attacker.invalid","powiismunc.com","vitamindai.online"]){
+  const r=await call(e,"vynalthai.com",policy+"/authorize?client="+
+    encodeURIComponent(domain)+"&state=forged","GET",undefined,
+    issuer("vynalthai.com"));
+  assert.equal(r.status,400);
+ }
+});
+
+test("real linked SSO sessions synchronize an explicitly shared preference via KV",async()=>{
+ const e=env();
+ const s=await begin(e,"vynalthai.com",issuer("vynalthai.com","trust"));
+ assert.equal((await update(e,"vynalthai.com",s,body(approved,true))).status,200);
+ for(const site of CONSENT_DOMAINS.slice(1)){
+  const linked=await linkFromPrimarySSO(e,site,"trust");
+  const preferences=await status(e,site,linked.firstPartyCookie);
+  assert.equal(preferences.choices.analytics,true,site);
+  assert.equal(preferences.sharedAcrossDomains,true,site);
+  assert.equal(preferences.authenticated,true,site);
+ }
+});
+
+test("a cross-domain SSO status assertion does not bypass unlinked domain or independent WAF",async()=>{
+ const e=env();
+ const linked=await linkFromPrimarySSO(e,"vyncuslim.com","status");
+ const request=new Request("https://vyncuslim.si/",{
+  headers:{Cookie:linked.firstPartyCookie}
+ });
+ assert.equal(await shieldAccountExempt(request,e,"vyncuslim.si"),false);
+});
