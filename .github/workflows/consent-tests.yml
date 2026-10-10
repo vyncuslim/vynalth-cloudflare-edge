@@ -8,6 +8,8 @@ on:
       - "src/universal-consent.js"
       - "src/guest-gps.js"
       - "src/guest-gps.test.js"
+      - "src/jingxin-media.js"
+      - "src/jingxin-media.test.js"
       - "test/edge.test.js"
       - "src/universal-consent.test.js"
       - "src/index.js"
@@ -34,6 +36,8 @@ jobs:
         run: |
           node --check src/guest-gps.js
           node --check src/guest-gps.test.js
+          node --check src/jingxin-media.js
+          node --check src/jingxin-media.test.js
           node --check src/universal-consent.js
           node --check src/universal-consent.test.js
           node --check src/index.js
