@@ -176,3 +176,65 @@ This Worker owns all **seven** configured zone Routes. It calls the separate `we
 6. Review Cloudflare deployment / GitHub Actions logs to confirm routes actually deployed. Updating a GitHub config does not alone prove the live Cloudflare routes changed.
 
 The service binding and routes are declared in `wrangler.toml`. Test before deployment with `npm test`.
+
+
+## Proposed Guest GPS Verification Gate (draft, OFF by default)
+
+This branch is an **opt-in rollout**, not a production change. It does not add real-time tracking, permanently disable accounts, or change existing school-IP `blocked:` records.
+
+### User experience
+
+- Non-exempt guest website requests receive a 403 HTML verification screen that explains GPS access and asks the visitor to press **Allow precise location / 允许位置并验证**.
+- A denied/unavailable/low-accuracy location shows a 403 *Access blocked* screen with a retry button. Browser/device location permission is **always under the visitor's control**.
+- Granting high-accuracy geolocation calls `/__shield/gps/verify` with lat/lon/accuracy **only for the request**. No persistent GPS coordinate record, Cookie value or third-party lookup is made.
+- When the reported location is clearly **outside** the configured campus circle, a per-host HMAC-signed HttpOnly Secure 15-minute Cookie allows navigating that site. One root domain's Cookie does not work on another.
+- When reported location is inside the circle, or its 95% accuracy range overlaps the boundary, access remains restricted. GPS can be spoofed or inaccurate; this is **not a proof of school membership** or a suitable sole basis for a permanent account ban.
+- An account with **server-authenticated `status=trust` or `status=contact`** is exempt **from the GPS gate**. No other statuses are exempt. The browser cannot self-declare this status in JavaScript, query params or unsigned Cookies.
+- Existing signed school IP Policy, Cloudflare WAF, and explicit host route rules remain independent. This GPS gate does not promise to exempt accounts from unrelated security blocks.
+
+### Campus reference (not a surveyed geofence boundary)
+
+Official school address:
+
+**POWIIS Balik Pulau, 1 Jalan Sungai Air Putih 6, Bandar Baru Air Putih, 11000 Balik Pulau, Penang, Malaysia.**
+
+An OpenStreetMap-based school feature located by Mapcarta has approximate reference coordinates **5.3677, 100.21995**. This represents an approximate campus location, **not a verified boundary**. Do **not** automatically substitute it for surveyed coordinates; confirm the campus footprint and radius on a map and obtain a supervised on-site accuracy test. The school has a separate Tanjung Bungah campus; do not treat that as the same geofence.
+
+### Mandatory production settings and integration
+
+In the `vynalth-cloudflare-edge` Cloudflare Worker, the `GPS_GATE_ENABLED` variable is `"false"` by default. Before enabling, set *all* of these, applying changes in the Worker production environment rather than only GitHub:
+
+- `GPS_GATE_SESSION_SECRET` — Cloudflare **Secret**, independent cryptographic string 32+ characters.
+- `GPS_ACCOUNT_STATUS_SECRET` — Cloudflare **Secret**, another independent cryptographic string 32+ characters. **Its signed status Cookie must be issued by the trusted Vynalth authentication backend after validating the account's actual status**.
+- `GPS_CAMPUS_LAT`, `GPS_CAMPUS_LON` — approved campus geofence **center**, numeric strings. The approximate Mapcarta reference above is only for assisted review, not an authoritative campus survey.
+- `GPS_CAMPUS_RADIUS_METERS` — campus-specific distance in meters, from 50 to 1000. Use mapped property boundaries or a more precise polygon when available.
+- `GPS_GATE_ENABLED` — only set to `"true"` **after** testing required browser flows, auth exemptions, WAF and DNS Edge routes, and explicit production authorization.
+
+Without valid configuration (including **both** secrets) the gate **fails open**, avoiding accidental lockout. The approval token signing secret and account-status signing secret must never be exposed in the frontend.
+
+#### Account backend contract (not wired to the existing Vynalth auth yet)
+
+The authentication backend (NOT a browser and NOT this public Worker) must issue an HTTPS first-party Cookie named `__Host-vynalth-status` **after server-side authentication and status lookup**. Valid token format:
+
+`<expUnixSeconds>.<status>.<nonceBase64url>.<signatureBase64url>`
+
+Sign UTF-8 bytes of `<expUnixSeconds>|<status>|<nonceBase64url>|<hostname>` using HMAC-SHA256 with `GPS_ACCOUNT_STATUS_SECRET`. Valid status is exactly `trust` or `contact`; all other account statuses are treated like guests by the GPS gate. Expiry maximum 60 minutes ahead. Set `Secure; HttpOnly; Path=/; SameSite=Lax`, omitting the Domain attribute. Account status changes must invalidate/expire the signed Cookie, otherwise the exemption lasts until expiry. This signed Cookie is a dedicated *location exemption* token, not a primary authentication token. An attacker cannot claim contact/trust by setting an arbitrary status Cookie.
+
+**Critical prerequisite:** Vynalth's live account system must mint and clear these tokens correctly across **each distinct root domain**. The current draft only verifies them; it does not know how to access the actual account database. Do not enable the gate until this integration works, otherwise real trust/contact users might be challenged.
+
+### Endpoints, no GPS storage
+
+- `/__shield/gps/client.js` — same-origin challenge JS.
+- `POST /__shield/gps/verify` — returns a 403 or a short-lived signed site Cookie after precision and distance checks. Request body is not logged.
+- `GET /__shield/gps/status` — status only; never returns coordinates.
+
+OAuth/auth endpoints, ACME validation and essential webhook callbacks are excluded so login and infrastructure can continue. Cloudflare route/DNS coverage still must be audited. Some subdomains may be application APIs or dashboards for which guest GPS prompts are not appropriate; verify before enabling globally.
+
+### Testing and safety
+
+```sh
+npm test
+node --check src/guest-gps.js
+```
+
+**No automatic production deployment or account blocking.** Review and test with real browsers on iOS, Android and desktop, ensure location permission denial shows the intended screen, test existing account `trust` and `contact`, and verify auth callback flows. Externally provided browser GPS positions are **self-reported and spoofable**; use signed account status and your separate server-side policy checks when strong protection is needed.
