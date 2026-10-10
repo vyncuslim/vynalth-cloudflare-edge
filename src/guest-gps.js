@@ -5,10 +5,23 @@ const SESSION_COOKIE="__Host-vynalth-geo";
 const STATUS_COOKIE="__Host-vynalth-status";
 const BLOCK_COOKIE="__Host-vynalth-geo-block";
 const GPS_BRIDGE_HUB="vynalthai.com";
-const GPS_BRIDGE_TARGETS=new Set([
- "vyncuslim.com","vynalthai.si","vyncuslim.si",
+const GPS_BRIDGE_ROOTS=Object.freeze([
+ "vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si",
  "vitamindai.online","sleepsomno.com","powiismunc.com"
 ]);
+function allowedTarget(host){
+ if(typeof host!=="string"||host.length>253||host===GPS_BRIDGE_HUB||
+    !/^[a-z0-9.-]+$/.test(host))return false;
+ return GPS_BRIDGE_ROOTS.some(root=>host===root||host.endsWith("."+root));
+}
+function isBrowserDocument(request){
+ // Only top-level HTML navigation may leave this site for a first-party
+ // consent flow; API/POST/assets remain protected without redirects.
+ const accept=request.headers.get("Accept")||"";
+ const dest=request.headers.get("Sec-Fetch-Dest");
+ return request.method==="GET" && accept.includes("text/html") &&
+    (!dest||dest==="document"||dest==="empty");
+}
 
 const SESSION_TTL=900;
 const enc=new TextEncoder();
@@ -105,12 +118,12 @@ async function bridge(request,url,cfg){
    return reply(404,{error:"NOT_FOUND"});
  const target=url.searchParams.get("host");
  const path=url.searchParams.get("return");
- if(!GPS_BRIDGE_TARGETS.has(target)||!safeRelativePath(path))
+ if(!allowedTarget(target)||!safeRelativePath(path))
    return reply(400,{error:"INVALID_BRIDGE_DESTINATION"});
  let verdict=null;
  if(await hasBlockVerdict(request,cfg,url.hostname))verdict="inside";
  else if(await permitted(request,cfg,url.hostname))verdict="outside";
- if(!verdict)return page();
+ if(!verdict)return page(); // First-party hub asks for browser GPS; NO login needed.
  const ticket=await handoffToken(cfg,target,path,verdict);
  const destination=new URL("https://"+target+"/__shield/gps/import");
  destination.searchParams.set("ticket",ticket);
@@ -118,7 +131,7 @@ async function bridge(request,url,cfg){
  return redirect(destination.toString(),{"Referrer-Policy":"no-referrer"});
 }
 async function importHandoff(request,url,cfg){
- if(request.method!=="GET"||!GPS_BRIDGE_TARGETS.has(url.hostname))
+ if(request.method!=="GET"||!allowedTarget(url.hostname))
    return reply(404,{error:"NOT_FOUND"});
  const path=url.searchParams.get("return");
  if(!safeRelativePath(path))return reply(400,{error:"INVALID_RETURN_PATH"});
@@ -189,7 +202,7 @@ export async function guestGpsGate(request,env,url){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
  if(url.pathname==="/__shield/gps/verify-info"&&request.method==="GET"){
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
-    exemptAccountStatuses:["trust","contact"],preciseCoordinatesStoredInCookie:false,
+    exemptAccountStatuses:["trust","contact","status"],preciseCoordinatesStoredInCookie:false,
     crossDomainCookieReading:false,defaultEnabled:false});
  }
 
@@ -203,9 +216,21 @@ export async function guestGpsGate(request,env,url){
   return reply(200,{enabled:true,verified:await permitted(request,cfg,url.hostname),
    exempt:await exempt(request,cfg,url.hostname)});
  if(skip(url.pathname))return null;
+ // Existing trusted server-verified account states bypass this GPS policy.
  if(await exempt(request,cfg,url.hostname))return null;
  if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
  if(await permitted(request,cfg,url.hostname))return null;
+
+ // Anonymous visitors also synchronize. Browser visits other registrable
+ // domains via a top-level redirect to the consented first-party hub. The
+ // browser does not read vynalthai.com cookies from the target origin.
+ // A missing hub verdict shows its normal GPS challenge or 403 denial.
+ if(url.hostname!==GPS_BRIDGE_HUB&&allowedTarget(url.hostname)&&isBrowserDocument(request)){
+  const dest=new URL("https://"+GPS_BRIDGE_HUB+"/__shield/gps/bridge");
+  dest.searchParams.set("host",url.hostname);
+  dest.searchParams.set("return",safeRelativePath(url.pathname)?url.pathname:"/");
+  return redirect(dest.toString(),{"Referrer-Policy":"no-referrer"});
+ }
  const accept=request.headers.get("Accept")||"";
  if(request.method!=="GET"||(!accept.includes("text/html")&&accept.includes("application/json")))
   return reply(403,{error:"PRECISE_GPS_REQUIRED",blocked:true});
