@@ -6,7 +6,7 @@ const SESSION_TTL=900;
 const enc=new TextEncoder();
 const head={"Cache-Control":"private, no-store, max-age=0","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","X-Robots-Tag":"noindex,nofollow","Vary":"Cookie","Permissions-Policy":"geolocation=(self)"};
 const reply=(status,data,extra={})=>new Response(JSON.stringify(data),{status,headers:{...head,"Content-Type":"application/json; charset=utf-8",...extra}});
-function b64(bytes){let s="";for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");}
+function b64(bytes){let s="";for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replaceAll("+","-").replaceAll("/","_").replace(/=+$/g,"");}
 function ub64(s){if(!/^[a-zA-Z0-9_-]{40,90}$/.test(s||""))return null;try{let x=s.replace(/-/g,"+").replace(/_/g,"/");return Uint8Array.from(atob(x+"=".repeat((4-x.length%4)%4)),v=>v.charCodeAt(0));}catch{return null}}
 async function hkey(key){return crypto.subtle.importKey("raw",enc.encode(key),{name:"HMAC",hash:"SHA-256"},false,["sign","verify"])}
 async function sign(key,msg){return b64(new Uint8Array(await crypto.subtle.sign("HMAC",await hkey(key),enc.encode(msg))))}
@@ -26,7 +26,7 @@ async function exempt(req,cfg,host){
  const parts=value.split(".");if(parts.length!==4)return false;
  const [exp,status,nonce,tag]=parts;
  if(status!=="trust"&&status!=="contact")return false;
- if(!/^\\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return false;
+ if(!/^\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return false;
  const now=Math.floor(Date.now()/1000),ttl=Number(exp);
  if(ttl<=now||ttl>now+3600)return false;
  return valid(cfg.a,[exp,status,nonce,host].join("|"),tag);
@@ -35,7 +35,7 @@ async function permitted(req,cfg,host){
  const value=getCookie(req,SESSION_COOKIE);if(!value||value.length>320)return false;
  const parts=value.split(".");if(parts.length!==3)return false;
  const [exp,nonce,tag]=parts;
- if(!/^\\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return false;
+ if(!/^\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return false;
  const now=Math.floor(Date.now()/1000),time=Number(exp);
  if(time<=now||time>now+SESSION_TTL)return false;
  return valid(cfg.s,[exp,nonce,host,"outside"].join("|"),tag);
