@@ -67,7 +67,7 @@ export function consentRoot(host){
 function isSet(s,n){return typeof s==="string"&&s.length>=n;}
 function ready(env){
  return env?.CONSENT_CMP_ENABLED==="true"&&
- env?.CONSENT_KV&&["get","put","list"].every(m=>typeof env.CONSENT_KV[m]==="function")&&
+ env?.CONSENT_KV&&["get","put","list","delete"].every(m=>typeof env.CONSENT_KV[m]==="function")&&
  isSet(env.CONSENT_COOKIE_SECRET,32);
 }
 export async function signedSSO(request,env,root){
@@ -312,6 +312,17 @@ async function writeConsent(env,root,identity,anonId,input){
  const userKey=identity?await subjectKey(env,identity.sub):null;
  const prefix=keys(root,userKey,id);
  const existingShared=identity?await readKV(kv,prefKey(prefix,"shared",root)):null;
+ // Unchecking the four-domain sharing option is a withdrawal of the earlier
+ // shared grant, not just a new site-only preference. Revoke the shared head
+ // first, then save the user's desired local preference. KV propagation is
+ // eventually consistent; a partial failure must never silently re-grant.
+ if(identity&&input.action==="save"&&input.sharedScope===false&&
+    existingShared?.sharedScope===true&&!existingShared.withdrawnAt){
+   const revoked=await writeConsent(env,root,identity,anonId,{
+     action:"withdraw",sharedScope:false
+   });
+   if(revoked.error)return revoked;
+ }
  const scope=identity&&(input.sharedScope===true||
    (input.action==="withdraw"&&existingShared?.sharedScope===true))?"shared":"site";
  const key=prefKey(prefix,scope,root);
