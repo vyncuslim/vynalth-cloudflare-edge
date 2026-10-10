@@ -174,3 +174,66 @@ test("unified Worker GPS guest challenge and trusted SSO bypass follow independe
   assert.equal(normal.status,403);
  });
 });
+
+test("signed outside GPS does not bypass School IP Policy on private images",async()=>{
+ await withOrigin(async originCalls=>{
+  const gpsSecret="test-outside-gps-signing-secret-0123456789";
+  const exp=Math.floor(Date.now()/1000)+600;
+  const nonce=Buffer.alloc(16,7).toString("base64url");
+  const sig=createHmac("sha256",gpsSecret)
+    .update([exp,nonce,"vyncuslim.com","outside"].join("|")).digest("base64url");
+  let photoReads=0,policyCalls=0;
+  const env={
+   JINGXIN_PRIVATE_MEDIA_ENABLED:"true",
+   JINGXIN_PRIVATE_MEDIA_R2:{async get(){photoReads++;return {body:new Response("private").body}}},
+   GPS_GATE_ENABLED:"true",GPS_GATE_SESSION_SECRET:gpsSecret,
+   GPS_ACCOUNT_STATUS_SECRET:"test-separate-gps-role-signing-secret-012345",
+   GPS_CAMPUS_LAT:"5.36770",GPS_CAMPUS_LON:"100.21995",
+   GPS_CAMPUS_RADIUS_METERS:"180",
+   SCHOOL_POLICY:{async fetch(){policyCalls++;return new Response("blocked",{
+    status:403,headers:{"X-School-Policy":"blocked"}
+   });}}
+  };
+  const response=await edge.fetch(new Request(
+   "https://vyncuslim.com/media/jingxin/shared-memory.jpg",{
+    headers:{"CF-Connecting-IP":"60.49.64.83",
+     Cookie:"__Host-vynalth-geo="+exp+"."+nonce+"."+sig}
+   }),env,{});
+  assert.equal(response.status,403);
+  assert.equal(response.headers.get("X-School-Policy"),"blocked");
+  assert.equal(photoReads,0);
+  assert.equal(policyCalls,1);
+  assert.equal(originCalls(),0);
+ });
+});
+
+test("server-signed trusted account bypasses only School IP photo feature",async()=>{
+ await withOrigin(async originCalls=>{
+  const key="test-canonical-sso-signing-secret-987654321012";
+  const exp=Math.floor(Date.now()/1000)+600;
+  const payload=Buffer.from(JSON.stringify({
+   sub:"person_12345678",sid:"session_12345678",status:"contact",
+   host:"vyncuslim.com",exp
+  })).toString("base64url");
+  const tag=createHmac("sha256",key).update(payload).digest("base64url");
+  let policyCalls=0,photoReads=0;
+  const env={
+   CONSENT_SSO_SIGNING_SECRET:key,
+   JINGXIN_PRIVATE_MEDIA_ENABLED:"true",
+   JINGXIN_PRIVATE_MEDIA_R2:{async get(){photoReads++;return {body:new Response("private").body}}},
+   SCHOOL_POLICY:{async fetch(){policyCalls++;return new Response("blocked",{
+    status:403,headers:{"X-School-Policy":"blocked"}
+   });}}
+  };
+  const response=await edge.fetch(new Request(
+   "https://vyncuslim.com/media/jingxin/shared-memory.jpg",{
+    headers:{"CF-Connecting-IP":"60.49.64.83",
+     Cookie:"__Secure-vynalth-sso="+payload+"."+tag}
+   }),env,{});
+  assert.equal(response.status,200);
+  assert.equal(await response.text(),"private");
+  assert.equal(photoReads,1);
+  assert.equal(policyCalls,0);
+  assert.equal(originCalls(),0);
+ });
+});
