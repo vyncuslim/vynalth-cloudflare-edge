@@ -200,3 +200,115 @@ test("privacy declaration and privacy policy can be read even if location gate i
  assert.equal(await invoke(req("/en/legal/privacy")),null);
  assert.equal(await invoke(req("/legal/privacy")),null);
 });
+
+
+
+test("anonymous HTML visitor is redirected to first-party vynalthai.com GPS authority without login",async()=>{
+ const all=["vyncuslim.com","vynalthai.si","vyncuslim.si",
+   "vitamindai.online","sleepsomno.com","powiismunc.com",
+   "app.vyncuslim.com","dashboard.vynalthai.si"];
+ for(const host of all){
+  const response=await invoke(new Request("https://"+host+"/my-page?private=123",{
+    headers:{Accept:"text/html,application/xhtml+xml","Sec-Fetch-Dest":"document",
+     "Sec-Fetch-Mode":"navigate"}
+  }));
+  assert.equal(response.status,302,host);
+  const target=new URL(response.headers.get("Location"));
+  assert.equal(target.hostname,"vynalthai.com",host);
+  assert.equal(target.pathname,"/__shield/gps/bridge",host);
+  assert.equal(target.searchParams.get("host"),host,host);
+  assert.equal(target.searchParams.get("return"),"/my-page",host);
+  assert.equal(target.searchParams.has("private"),false,host);
+ }
+});
+
+test("guest can accept once on primary site and synchronize across all domains using first-party redirects",async()=>{
+ const primary=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
+  method:"POST",
+  headers:{"Origin":"https://vynalthai.com","Content-Type":"application/json",
+    "Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:15})
+ }));
+ assert.equal(primary.status,200);
+ const primaryCookie=primary.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ for(const domain of ["vyncuslim.com","vynalthai.si","vyncuslim.si",
+  "vitamindai.online","sleepsomno.com","powiismunc.com"]){
+  const start=await invoke(new Request("https://"+domain+"/about",{
+   headers:{"Accept":"text/html","Sec-Fetch-Dest":"document"}
+  }));
+  assert.equal(start.status,302,domain);
+  const hub=await invoke(new Request(start.headers.get("Location"),{
+    headers:{Cookie:primaryCookie}
+  }));
+  assert.equal(hub.status,302,domain);
+  const imported=await invoke(new Request(hub.headers.get("Location")));
+  assert.equal(imported.status,302,domain);
+  assert.equal(imported.headers.get("Location"),"/about");
+  const siteCookie=imported.headers.getSetCookie()
+    .find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+  assert.equal(await invoke(new Request("https://"+domain+"/about",{
+    headers:{Cookie:siteCookie,Accept:"text/html","Sec-Fetch-Dest":"document"}
+  })),null,domain);
+ }
+});
+
+test("campus-inside guest block also synchronizes to other sites without user login",async()=>{
+ const primary=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
+  method:"POST",headers:{"Origin":"https://vynalthai.com",
+   "Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.3677,lon:100.21995,accuracy:10})
+ }));
+ assert.equal(primary.status,403);
+ const hubCookie=primary.headers.getSetCookie()
+   .find(x=>x.startsWith("__Host-vynalth-geo-block=")).split(";")[0];
+ const initial=await invoke(new Request("https://vyncuslim.si/",{
+  headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}
+ }));
+ assert.equal(initial.status,302);
+ const bridge=await invoke(new Request(initial.headers.get("Location"),{
+  headers:{Cookie:hubCookie}
+ }));
+ assert.equal(bridge.status,302);
+ const imported=await invoke(new Request(bridge.headers.get("Location")));
+ assert.equal(imported.status,302);
+ const siteCookie=imported.headers.getSetCookie()
+   .find(x=>x.startsWith("__Host-vynalth-geo-block=")).split(";")[0];
+ const siteBlocked=await invoke(new Request("https://vyncuslim.si/",{
+  headers:{Cookie:siteCookie,Accept:"text/html","Sec-Fetch-Dest":"document"}
+ }));
+ assert.equal(siteBlocked.status,403);
+ assert.match(await siteBlocked.text(),/id="blocked"/);
+});
+
+test("declined GPS and inaccurate GPS cannot obtain a cookie or handoff",async()=>{
+ const noGPS=await invoke(new Request("https://vynalthai.com/__shield/gps/bridge?host=vyncuslim.com&return=%2F"));
+ assert.equal(noGPS.status,403);
+ assert.match(await noGPS.text(),/getCurrentPosition|Location required/);
+ assert.equal(noGPS.headers.get("Set-Cookie"),null);
+ const poor=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
+  method:"POST",headers:{"Origin":"https://vynalthai.com",
+   "Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:400})
+ }));
+ assert.equal(poor.status,422);
+ assert.equal(poor.headers.get("Set-Cookie"),null);
+});
+
+test("JSON APIs never trigger cross-domain navigation and deny with 403",async()=>{
+ const r=await invoke(new Request("https://api.vyncuslim.com/v1/profile",{
+  headers:{Accept:"application/json","Sec-Fetch-Dest":"empty"}
+ }));
+ assert.equal(r.status,403);
+ assert.equal(r.headers.get("Location"),null);
+ assert.equal((await r.json()).error,"PRECISE_GPS_REQUIRED");
+});
+
+test("forged trusted roles are never an anonymous GPS bypass",async()=>{
+ for(const name of ["trust","contact","status"]){
+  const spoofed=await invoke(new Request("https://vyncuslim.com/",{
+   headers:{Cookie:"__Host-vynalth-status="+name,
+    Accept:"application/json"}
+  }));
+  assert.equal(spoofed.status,403);
+ }
+});
