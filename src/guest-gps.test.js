@@ -117,6 +117,33 @@ test("boundary uncertainty and insufficient precision are rejected",async()=>{
  const poor=await verifyCoords(5.3677,100.21995,600);
  assert.equal(poor.status,422);
 });
+test("both POWIIS campuses are separate provisional GPS test circles",async()=>{
+ const twoCampuses={...cfg,GPS_CAMPUS_GEOFENCES_JSON:JSON.stringify([
+  {id:"tanjung-bungah",lat:5.46113,lon:100.28420,radius:180},
+  {id:"balik-pulau",lat:5.36770,lon:100.21995,radius:180}
+ ])};
+ for(const [lat,lon] of [[5.46113,100.28420],[5.36770,100.21995]]){
+  const r=await verifyCoords(lat,lon,10,twoCampuses);
+  assert.equal(r.status,403);
+  assert.equal((await r.json()).error,"CAMPUS_RESTRICTED");
+  assert.equal(r.headers.getSetCookie().some(v=>v.includes(String(lat))||v.includes(String(lon))),false);
+ }
+ const exterior=await verifyCoords(5.42,100.25,10,twoCampuses);
+ assert.equal(exterior.status,200);
+ const overlap=await verifyCoords(5.46275,100.28420,25,twoCampuses);
+ assert.equal(overlap.status,403);
+ assert.equal((await overlap.json()).error,"LOCATION_UNCERTAIN");
+});
+
+test("invalid or incomplete provisional geofences cannot activate a block",async()=>{
+ for(const value of ["{oops", "[]",JSON.stringify([{id:"tanjung-bungah",lat:5.46113,lon:100.28420,radius:180},
+ {id:"balik-pulau",lat:5.36770,lon:100.21995}]),
+ JSON.stringify([{id:"tanjung-bungah",lat:5.46113,lon:100.28420,radius:180},
+ {id:"tanjung-bungah",lat:5.36770,lon:100.21995,radius:180}])]){
+  assert.equal(await invoke(req("/"),{...cfg,GPS_CAMPUS_GEOFENCES_JSON:value}),null);
+ }
+});
+
 test("cross-origin attempts and unsupported body content are rejected",async()=>{
  const wrong=await invoke(req("/__shield/gps/verify","POST",{
    "Content-Type":"application/json","Origin":"https://attacker.example"
