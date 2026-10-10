@@ -176,3 +176,59 @@ This Worker owns all **seven** configured zone Routes. It calls the separate `we
 6. Review Cloudflare deployment / GitHub Actions logs to confirm routes actually deployed. Updating a GitHub config does not alone prove the live Cloudflare routes changed.
 
 The service binding and routes are declared in `wrangler.toml`. Test before deployment with `npm test`.
+
+
+## Universal Cookie Consent — Cloudflare Workers KV only (draft)
+
+**No Supabase integration.** One existing vynalth-cloudflare-edge Worker serves these four registrable domains and all their subdomains: vynalthai.com, vyncuslim.com, vynalthai.si, vyncuslim.si.
+
+Each root domain receives an independent first-party __Secure-vynalth-consent Cookie, scoped using Domain=<root>, Secure, HttpOnly, SameSite=Lax, Path=/. Cookies are stored by the browser, **not literally in KV**. Workers KV stores the related consent preferences, version, timestamp, withdraw timestamp, site/share scope, and append-only history events.
+
+Anonymous guests use random per-domain identifiers, issued only after they save a preference; no device fingerprinting, third-party cookies or cross-domain anonymous linking. Optional purposes (analytics, personalization, marketing) default to OFF. Essential cookies remain ON.
+
+**Authenticated cross-domain consent** uses the existing SSO backend, not an unrelated database. A user signed into the same verified account on each of the four root domains obtains a fresh, first-party, HMAC-signed SSO assertion for that root domain. The Worker verifies identity, reads the common pseudonymous account preference in KV, and sets that site's own first-party Cookie. The browser never reads a different domain's Cookies. Existing SSO backend issuance is a REQUIRED integration step, not yet implemented or verified in this repository.
+
+Affirmative choices are written to shared scope only if the user is authenticated and explicitly ticks a notice mentioning ALL FOUR domains and purposes, with notice version vynalth-four-domains-v1. Without this, consent is local to the site. A subsequent withdrawal of a shared grant writes a new shared-revocation event; after new authenticated state sync, all four domains receive revoked choices. Local denials may override earlier affirmative shared choices.
+
+### API paths
+
+- GET /__vynalth/consent — multilingual manage/update/revoke page
+- GET /__vynalth/consent/client.js — first-party consent UI script
+- GET /__vynalth/consent/session — generate site-specific CSRF cookie and token
+- GET /__vynalth/consent/state — return effective consent; refresh first-party Cookie
+- POST /__vynalth/consent/preferences — save or withdraw; requires matching Origin, same-site fetch checks, and X-Vynalth-Consent-CSRF
+- GET /__vynalth/consent/history?scope=site or scope=shared — read own consent history
+
+Consent records live in dedicated CONSENT_KV Workers KV binding. Materials to configure IN THE EXISTING Cloudflare Edge Worker:
+
+1. Create a consent-only KV namespace; bind it as CONSENT_KV. Namespace ID is account-specific and has not been invented. For reproducible wrangler deploys, commit the real KV binding ID only after provisioning and review.
+2. Cloudflare Secret CONSENT_COOKIE_SECRET — unique, random, 32+ characters.
+3. Cloudflare Secret CONSENT_SSO_SIGNING_SECRET — separate, unique, 32+ characters, shared with trusted SSO backend issuer only; never frontend.
+4. CONSENT_CMP_ENABLED — defaults to false; change to true ONLY AFTER integration and tests.
+5. SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED — separate, defaults to false. After true and valid SSO assertions, trust, contact, status accounts are exempt from SCHOOL IP WORKER only. They are NOT exempt from unrelated Cloudflare WAF, abuse detection or application authorization.
+
+### Signed first-party SSO assertion contract (not wired yet)
+
+Existing SSO backend, AFTER actually checking login and account status, issues a Cookie named __Secure-vynalth-sso with value:
+
+Base64url(JSON({sub, sid, status, host, exp})).Base64url(HMAC_SHA256(secret, payloadBase64url))
+
+Use the SSO signing secret only on trusted server infrastructure. The status and stable user ID must not be browser-supplied or taken from user-editable metadata. host must equal the root domain and exp must be a future UNIX timestamp no more than 15 minutes away. sub and sid must each be validated opaque IDs of 8–128 safe characters. Issue via HTTPS with Secure, HttpOnly, SameSite=Lax, Path=/, Domain=<root> and short lifetime.
+
+The same signed SSO assertion **cannot** be blindly replayed on another root domain: the legitimate SSO flow must establish a domain-specific first-party session on each site. If SSO is not linked, an otherwise logged-in browser must be treated as a guest for this module.
+
+### KV state and legal caveats
+
+KV snapshot keys use the prefix vynalth:consent:v1 with separate subject-pseudonym and anonymous site IDs. Event keys include timestamp and unique event ID; histories include consent version, categories, update and withdrawal times and scope. Audit events expire after 365 days by default; data deletion/retention policy requires review.
+
+KV is eventually consistent, not transactional. Concurrent updates can race, and permission withdrawal may take time to propagate. This does not provide a strictly atomic compliance audit or instant global revocation. For stronger guarantees use Cloudflare Durable Objects as a per-account coordinator, still without Supabase.
+
+Production acceptance is currently BLOCKED on provisioning CONSENT_KV, implementing and validating the actual SSO issuer, reviewing privacy/security policy, confirming four-zone routes, and passing unit/integration tests. Do not deploy or merge this draft until reviewed.
+
+### Tests
+
+npm test
+node --check src/universal-consent.js
+node --check src/index.js
+
+The tests cover all four registrable domains and subdomains, anonymous denial, consent saving, CSRF and origin rejection, SSO impersonation, explicit sharing, history/withdrawal and Safari/Firefox third-party-cookie isolation.
