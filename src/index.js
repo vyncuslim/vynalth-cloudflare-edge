@@ -1,3 +1,4 @@
+import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -72,7 +73,12 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
 
 // A Cloudflare Service Binding makes policy decisions without overwriting any
 // route, Host header, existing Shield rules, redirects or application handler.
-async function checkSchoolPolicy(request, env) {
+async function checkSchoolPolicy(request, env, rootDomain) {
+  // Authenticate SSO status on the server. These three statuses are
+  // exempt from this School IP policy only; Cloudflare WAF, abuse and
+  // mandatory security controls still apply independently.
+  if (env?.SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED === "true" &&
+      await shieldAccountExempt(request, env, rootDomain)) return null;
   if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
 
   // The upstream CF-Connecting-IP is authoritative for this edge request.
@@ -115,10 +121,17 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
+    // Dedicated consent endpoints are first-party and must work without GPS
+    // consent and without bypassing the existing host routing/security model.
+    const consentDecision = await handleUniversalConsent(request, env, incomingUrl, rootDomain);
+    if (consentDecision) {
+      return edgeResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
+    }
+
     // Preserve domain validation/ACME checks; apply the policy to all other
     // requests while leaving existing public site behavior untouched in observe.
     if (!isValidationPath(incomingUrl.pathname)) {
-      const denial = await checkSchoolPolicy(request, env);
+      const denial = await checkSchoolPolicy(request, env, rootDomain);
       if (denial) {
         return edgeResponse(denial, request, incomingUrl, requestId, rootDomain);
       }
