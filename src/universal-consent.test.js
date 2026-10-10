@@ -42,11 +42,12 @@ function issuer(host,status="normal",sub="user_12345678"){
 }
 function call(e,domain,path=policy+"/state",method="GET",body,cookies="",extra={}){
  const url=new URL("https://"+domain+path);
- const headers={Cookie:cookies,...extra};
+ const headers={Cookie:cookies};
  if(method!=="GET"){
   headers.Origin=url.origin;headers["Sec-Fetch-Site"]="same-origin";
   headers["Content-Type"]="application/json";
  }
+ Object.assign(headers,extra); // tests must be able to override the Origin to simulate attacks
  const req=new Request(url,{method,headers,
   body:body===undefined?undefined:JSON.stringify(body)});
  return handleUniversalConsent(req,e,url,consentRoot(url.hostname));
