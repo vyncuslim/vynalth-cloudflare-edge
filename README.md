@@ -238,3 +238,22 @@ node --check src/guest-gps.js
 ```
 
 **No automatic production deployment or account blocking.** Review and test with real browsers on iOS, Android and desktop, ensure location permission denial shows the intended screen, test existing account `trust` and `contact`, and verify auth callback flows. Externally provided browser GPS positions are **self-reported and spoofable**; use signed account status and your separate server-side policy checks when strong protection is needed.
+
+
+### Dedicated public GPS disclaimer link
+
+The location challenge **and** its Block screen show:
+
+**🔗 声明 / Penafian / Disclaimer → `/__shield/gps/disclaimer`**
+
+It is a standalone, accessible, no-GPS, no-login HTML page with Chinese, Bahasa Melayu and English explanations covering the location requirement, refusal, accuracy, independent/not-school-official status, transient signed cookies, `trust/contact` exemptions, children/minors, and how to seek human review. `/__shield/gps/verify-info` is a read-only configuration-description endpoint that does not reveal GPS coordinates or secrets. `/en/legal/privacy` and `/legal/privacy` remain publicly accessible.
+
+### Campus-restricted verdict Cookie and multi-site sharing (draft)
+
+Upon a browser-reported campus-inside coordinate that clearly falls within the operator-defined campus circle, the server returns HTTP 403 with a **signed, host-only `__Host-vynalth-geo-block` cookie** for 15 minutes. The next visit on the same host immediately displays the Block page. Verified outside-campus position yields a separate host-only `__Host-vynalth-geo` Cookie for 15 minutes; on an updated result, the opposite Cookie is cleared. The browser can clear these cookies and re-request geolocation. The status Cookie contains only verdict/expiry/nonce/signature, not GPS coordinates.
+
+Browsers **cannot directly read cookies set by separate root domains**, such as `vyncuslim.com`, `vyncuslim.si`, and `vitamindai.online`. To support an **explicit user-initiated check**, the location page on these sites includes a link to `https://vynalthai.com/__shield/gps/bridge`. The browser navigates to that hub in the **top-level window**; only if the hub has a currently valid signed first-party location verdict does it generate a **60-second signed, target-host-bound** handoff. The destination `/__shield/gps/import` route verifies that signature and issues **its own** first-party status cookie, then redirects back to a validated relative destination. This is NOT third-party Cookie access, does not transmit raw GPS coordinates, and never treats unsigned parameters as proof.
+
+The handoff is **short-lived but not single-use**: a captured token might be replayed during its 60-second lifetime. Prevent leaks by keeping `Referrer-Policy: no-referrer`, restricting the target host and path, not logging query strings, and considering server-side single-use storage if you need strong identity assurance. A location report itself can be spoofed; neither cookie is proof of school membership.
+
+**Release gates remain unchanged:** OFF by default, reviewed school perimeter and precise geographic coordinates required, tested authentication backend issuance of signed `trust/contact` status Cookies on every desired domain, route parity for all public sites, and explicit production rollout. This feature should not be activated for pupils or other minors before appropriate privacy and institutional review.
