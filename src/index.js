@@ -1,4 +1,5 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
+import { guestGpsGate } from "./guest-gps.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -128,8 +129,22 @@ export default {
       return edgeResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
     }
 
-    // Preserve domain validation/ACME checks; apply the policy to all other
-    // requests while leaving existing public site behavior untouched in observe.
+    // GPS and Cookie Consent are independent modules in ONE existing Worker.
+    // Signed canonical SSO trust/contact/status is exempt from this GPS
+    // challenge, but does not bypass unrelated WAF or mandatory auth.
+    // Public GPS documentation/endpoints remain available to every visitor.
+    const gpsEndpoint = incomingUrl.pathname.startsWith("/__shield/gps/");
+    const canonicallyExempt = env?.GPS_GATE_ENABLED === "true" &&
+      !gpsEndpoint && await shieldAccountExempt(request,env,rootDomain);
+    if (!canonicallyExempt) {
+      const gpsDecision = await guestGpsGate(request,env,incomingUrl);
+      if (gpsDecision) {
+        return edgeResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
+      }
+    }
+
+    // Preserve domain validation/ACME checks; apply the school IP policy to
+    // remaining requests without changing upstream Cloudflare WAF behavior.
     if (!isValidationPath(incomingUrl.pathname)) {
       const denial = await checkSchoolPolicy(request, env, rootDomain);
       if (denial) {
