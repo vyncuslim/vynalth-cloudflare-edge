@@ -37,9 +37,28 @@ function getCookie(req,name){const x=(req.headers.get("Cookie")||"").split(";").
 function config(env){
  if(env?.GPS_GATE_ENABLED!=="true")return null;
  const {GPS_GATE_SESSION_SECRET:s,GPS_ACCOUNT_STATUS_SECRET:a}=env||{};
- const lat=Number(env?.GPS_CAMPUS_LAT),lon=Number(env?.GPS_CAMPUS_LON),radius=Number(env?.GPS_CAMPUS_RADIUS_METERS);
- if(typeof s!=="string"||s.length<32||typeof a!=="string"||a.length<32||!Number.isFinite(lat)||!Number.isFinite(lon)||!Number.isFinite(radius)||Math.abs(lat)>90||Math.abs(lon)>180||radius<50||radius>1000)return null;
- return {s,a,lat,lon,radius}
+ // A list enables *draft testing* of both POWIIS campuses. The 180 m
+ // circles are engineering test approximations, NOT surveyed school borders.
+ // Invalid configuration deliberately disables the whole gate (fail open).
+ let campuses;
+ if(env?.GPS_CAMPUS_GEOFENCES_JSON!==undefined){
+  const raw=env.GPS_CAMPUS_GEOFENCES_JSON;
+  if(typeof raw!=="string"||raw.length>4096)return null;
+  try{campuses=JSON.parse(raw);}catch{return null;}
+ }else{
+  const numeric=v=>(typeof v==="string"&&v.trim()==="")?NaN:Number(v);
+  campuses=[{id:"legacy",lat:numeric(env?.GPS_CAMPUS_LAT),
+   lon:numeric(env?.GPS_CAMPUS_LON),radius:numeric(env?.GPS_CAMPUS_RADIUS_METERS)}];
+ }
+ if(typeof s!=="string"||s.length<32||typeof a!=="string"||a.length<32||
+    !Array.isArray(campuses)||campuses.length<1||campuses.length>8||
+    campuses.some(c=>!c||typeof c!=="object"||typeof c.id!=="string"||
+     !/^[a-z0-9-]{2,48}$/.test(c.id)||typeof c.lat!=="number"||
+     typeof c.lon!=="number"||typeof c.radius!=="number"||
+     !Number.isFinite(c.lat)||!Number.isFinite(c.lon)||!Number.isFinite(c.radius)||
+     Math.abs(c.lat)>90||Math.abs(c.lon)>180||c.radius<50||c.radius>1000)||
+    new Set(campuses.map(c=>c.id)).size!==campuses.length)return null;
+ return {s,a,campuses}
 }
 async function exempt(req,cfg,host){
  // Only the trusted application's server can mint a valid signed status cookie.
@@ -183,9 +202,14 @@ async function verify(req,url,cfg){
  let data;try{const raw=await req.text();if(raw.length>256)return reply(413,{error:"REQUEST_TOO_LARGE"});data=JSON.parse(raw)}catch{return reply(400,{error:"INVALID_JSON"})}
  const {lat,lon,accuracy}=data||{};
  if([lat,lon,accuracy].some(x=>typeof x!=="number"||!Number.isFinite(x))||Math.abs(lat)>90||Math.abs(lon)>180||accuracy<=0||accuracy>100)return reply(422,{error:"PRECISE_LOCATION_UNAVAILABLE"});
- const d=distance(lat,lon,cfg.lat,cfg.lon);
- if(Math.abs(d-cfg.radius)<=accuracy)return reply(403,{error:"LOCATION_UNCERTAIN"});
- if(d<=cfg.radius){
+ // A verified outside verdict requires being clear of *every* test circle.
+ // Uncertain overlaps never produce an allow cookie; campus-specific
+ // coordinates are not included in response bodies or cookies.
+ const circles=cfg.campuses.map(c=>({distance:distance(lat,lon,c.lat,c.lon),
+  radius:c.radius}));
+ if(circles.some(c=>Math.abs(c.distance-c.radius)<=accuracy))
+  return reply(403,{error:"LOCATION_UNCERTAIN"});
+ if(circles.some(c=>c.distance+accuracy<c.radius)){
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
   headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,await verdictToken(cfg,url.hostname,"inside")));
