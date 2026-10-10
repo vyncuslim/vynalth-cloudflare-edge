@@ -255,3 +255,81 @@ This same approved flow applies to all three non-hub roots and their subdomains:
 - First-party top-level navigations use `SameSite=Lax` and need no Safari/Firefox third-party cookie allowance. Cookie acceptance depends on the destination browser's first-party policy.
 - The 60-second ticket appears in a redirect URL; keep `Referrer-Policy: no-referrer`, do not record sensitive query strings in edge/app/observability logs, and consider short-lived code revocation and anti-replay protection.
 - This feature remains in a **DRAFT PR, OFF by default**, until the real existing Auth issuer is linked and acceptance tests pass.
+
+
+## October 11 — Integrated GPS + Cookie Consent Review (Draft, not live)
+
+This branch combines `review/universal-consent-kv-20261011` and
+`review/consent-gps-guest-gate-20261011` into **one** existing
+`vynalth-cloudflare-edge` Worker. The order is:
+
+1. Universal consent endpoints (`/__vynalth/consent/*`);
+2. GPS Guest Gate endpoints and optional campus gate (`/__shield/gps/*`);
+3. Existing POWIIS School IP Policy service binding;
+4. Original hostname routing and origin proxy.
+
+Upstream Cloudflare WAF and DDoS protections are separate and cannot be
+unconditionally bypassed by a downstream Worker. `trust`, `contact` and
+`status` are exempt from **both school-IP and GPS feature-specific blocking**
+when backed by a valid, server-issued, root-bound canonical SSO assertion.
+The GPS module also recognizes its independent legacy signed exemption
+Cookie. No untrusted client-provided role can activate an exemption.
+
+**All feature flags remain OFF by default** in `wrangler.toml`:
+`CONSENT_CMP_ENABLED=false`,
+`GPS_GATE_ENABLED=false`, and
+`SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED=false`.
+This branch is for code review and isolated tests only. Do not merge or
+deploy to production until the actual Auth issuer, KV resources, logging,
+legal/privacy impact assessment, supported DNS routes and browser flows
+are confirmed. It contains no officially validated school boundary.
+
+### Two POWIIS campuses: test-only geometry
+
+POWIIS **official contact page**:
+https://www.powiis.edu.my/contact-us/
+
+- Balik Pulau: 1 Jalan Sungai Air Putih 6, Bandar Baru Air Putih,
+  11000 Balik Pulau, Penang, Malaysia; **+604 868 9999**.
+- Tanjung Bungah: 88 Jalan Loh Poh Heng, 11200 Tanjung Bungah, Penang;
+  **+604 893 9999**.
+
+Operator-provided OSM references, **not school-certified perimeters**:
+- Tanjung Bungah: https://www.openstreetmap.org/way/790940312 ;
+  draft center `5.46113,100.28420`; farthest checked node about 111.76 m;
+  one vertex not yet checked.
+- Balik Pulau: https://www.openstreetmap.org/way/808258869 ;
+  draft center `5.36770,100.21995`; farthest checked node about 129.78 m.
+
+**111.76 m, 129.78 m and 180 m must not be used as certified production
+radii.** Neither school campus has a confirmed authoritative perimeter
+or radius in the available project evidence. A 180-m circle may include
+people outside campus and would be an unacceptable sole criterion for
+enforced blocking.
+
+Temporary test-only configuration, in an isolated non-production Worker:
+```env
+GPS_GATE_ENABLED=true
+GPS_CAMPUS_GEOFENCES_JSON=[{"id":"tanjung-bungah","lat":5.46113,"lon":100.28420,"radius":180},{"id":"balik-pulau","lat":5.36770,"lon":100.21995,"radius":180}]
+```
+
+Requires test-only `GPS_GATE_SESSION_SECRET` and
+`GPS_ACCOUNT_STATUS_SECRET` values, each 32+ characters and distinct.
+No GPS point is saved in a Cookie. The site issues signed short-lived
+per-host verdicts, not browser-shared cross-root cookies. The browser
+uses an explicit first-party redirect-based signed handoff.
+
+To check the single-Worker draft:
+```sh
+npm test
+node --check src/index.js
+node --check src/guest-gps.js
+node --check src/universal-consent.js
+```
+
+**Release blockers:** verified account-status issuer and lifecycle;
+production KV and cryptographic secrets; a replay-safe consent handoff;
+WAF and School IP Policy interaction; code review; privacy of minors;
+accurate school polygon vertices and onsite measurements; accessible
+GPS-denial alternatives; browsers and subdomains; functional photo access
+authorization. DO NOT turn on campus blocking while any remain open.
