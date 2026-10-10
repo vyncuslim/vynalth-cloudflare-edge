@@ -123,9 +123,21 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
+    // Keep School IP Policy enforcement for protected photo bytes. A guest's
+    // self-reported GPS verdict alone must never bypass independent School
+    // IP restrictions. Canonical server-signed trust/contact/status identities
+    // remain exempt from this feature-specific school blocking.
+    const photoResource = rootDomain === "vyncuslim.com" &&
+      incomingUrl.pathname.startsWith("/media/jingxin/");
+    if (photoResource && !(await shieldAccountExempt(request,env,rootDomain))) {
+      const schoolDenial = await checkSchoolPolicy(request,env,rootDomain);
+      if (schoolDenial) {
+        return edgeResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
+      }
+    }
     // Private Jingxin media is handled entirely at the edge before generic
-    // origin proxying and feature-specific gates. A denied/failed R2 request
-    // must never fall through to potentially public static photo assets.
+    // origin proxying. A denied/failed R2 request never falls through
+    // to potentially public static photo assets.
     const photoDecision = await handleJingxinMedia(request,env,incomingUrl,rootDomain);
     if (photoDecision) {
       return edgeResponse(photoDecision,request,incomingUrl,requestId,rootDomain);
