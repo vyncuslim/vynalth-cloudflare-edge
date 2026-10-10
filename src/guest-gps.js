@@ -32,7 +32,7 @@ function b64(bytes){let s="";for(const b of bytes)s+=String.fromCharCode(b);retu
 function ub64(s){if(!/^[a-zA-Z0-9_-]{40,90}$/.test(s||""))return null;try{let x=s.replace(/-/g,"+").replace(/_/g,"/");return Uint8Array.from(atob(x+"=".repeat((4-x.length%4)%4)),v=>v.charCodeAt(0));}catch{return null}}
 async function hkey(key){return crypto.subtle.importKey("raw",enc.encode(key),{name:"HMAC",hash:"SHA-256"},false,["sign","verify"])}
 async function sign(key,msg){return b64(new Uint8Array(await crypto.subtle.sign("HMAC",await hkey(key),enc.encode(msg))))}
-async function valid(key,msg,tag){const signature=ub64(tag);return !!signature&&signature.length===32&&await crypto.subtle.verify("HMAC",await hkey(key),signature,enc.encode(msg))}
+async function valid(key,msg,tag){const signature=ub64(tag);return !!signature&&signature.length===32&&b64(signature)===tag&&await crypto.subtle.verify("HMAC",await hkey(key),signature,enc.encode(msg))}
 function getCookie(req,name){const x=(req.headers.get("Cookie")||"").split(";").map(x=>x.trim()).find(x=>x.startsWith(name+"="));return x?x.slice(name.length+1):null}
 function config(env){
  if(env?.GPS_GATE_ENABLED!=="true")return null;
