@@ -116,13 +116,6 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
-    // Opt-in, default-OFF guest GPS policy with signed trust/contact exemption.
-    // This never mutates account status; denied consent displays a 403 challenge.
-    // Apply before origin requests, but after exact domain recognition.
-    const gpsDecision = await guestGpsGate(request, env, incomingUrl);
-    if (gpsDecision) {
-      return edgeResponse(gpsDecision, request, incomingUrl, requestId, rootDomain);
-    }
 
     // Preserve domain validation/ACME checks; apply the policy to all other
     // requests while leaving existing public site behavior untouched in observe.
@@ -153,6 +146,13 @@ export default {
         requestId,
         rootDomain,
       );
+    }
+
+    // Canonical www redirect and existing policy are evaluated before GPS.
+    // Prevent separate location prompts on www.vynalthai.com and vynalthai.com.
+    const gpsDecision = await guestGpsGate(request, env, incomingUrl);
+    if (gpsDecision) {
+      return edgeResponse(gpsDecision, request, incomingUrl, requestId, rootDomain);
     }
 
     let originResponse;
