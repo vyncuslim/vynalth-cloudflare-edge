@@ -176,3 +176,135 @@ This Worker owns all **seven** configured zone Routes. It calls the separate `we
 6. Review Cloudflare deployment / GitHub Actions logs to confirm routes actually deployed. Updating a GitHub config does not alone prove the live Cloudflare routes changed.
 
 The service binding and routes are declared in `wrangler.toml`. Test before deployment with `npm test`.
+
+
+## Proposed Guest GPS Verification Gate (draft, OFF by default)
+
+This branch is an **opt-in rollout**, not a production change. It does not add real-time tracking, permanently disable accounts, or change existing school-IP `blocked:` records.
+
+### User experience
+
+- Non-exempt guest website requests receive a 403 HTML verification screen that explains GPS access and asks the visitor to press **Allow precise location / 允许位置并验证**.
+- A denied/unavailable/low-accuracy location shows a 403 *Access blocked* screen with a retry button. Browser/device location permission is **always under the visitor's control**.
+- Granting high-accuracy geolocation calls `/__shield/gps/verify` with lat/lon/accuracy **only for the request**. No persistent GPS coordinate record, Cookie value or third-party lookup is made.
+- When the reported location is clearly **outside** the configured campus circle, a per-host HMAC-signed HttpOnly Secure 15-minute Cookie allows navigating that site. One root domain's Cookie does not work on another.
+- When reported location is inside the circle, or its 95% accuracy range overlaps the boundary, access remains restricted. GPS can be spoofed or inaccurate; this is **not a proof of school membership** or a suitable sole basis for a permanent account ban.
+- An account with **server-authenticated `status=trust` or `status=contact`** is exempt **from the GPS gate**. No other statuses are exempt. The browser cannot self-declare this status in JavaScript, query params or unsigned Cookies.
+- Existing signed school IP Policy, Cloudflare WAF, and explicit host route rules remain independent. This GPS gate does not promise to exempt accounts from unrelated security blocks.
+
+### Campus reference (not a surveyed geofence boundary)
+
+Official school address:
+
+**POWIIS Balik Pulau, 1 Jalan Sungai Air Putih 6, Bandar Baru Air Putih, 11000 Balik Pulau, Penang, Malaysia.**
+
+An OpenStreetMap-based school feature located by Mapcarta has approximate reference coordinates **5.3677, 100.21995**. This represents an approximate campus location, **not a verified boundary**. Do **not** automatically substitute it for surveyed coordinates; confirm the campus footprint and radius on a map and obtain a supervised on-site accuracy test. The school has a separate Tanjung Bungah campus; do not treat that as the same geofence.
+
+### Mandatory production settings and integration
+
+In the `vynalth-cloudflare-edge` Cloudflare Worker, the `GPS_GATE_ENABLED` variable is `"false"` by default. Before enabling, set *all* of these, applying changes in the Worker production environment rather than only GitHub:
+
+- `GPS_GATE_SESSION_SECRET` — Cloudflare **Secret**, independent cryptographic string 32+ characters.
+- `GPS_ACCOUNT_STATUS_SECRET` — Cloudflare **Secret**, another independent cryptographic string 32+ characters. **Its signed status Cookie must be issued by the trusted Vynalth authentication backend after validating the account's actual status**.
+- `GPS_CAMPUS_LAT`, `GPS_CAMPUS_LON` — approved campus geofence **center**, numeric strings. The approximate Mapcarta reference above is only for assisted review, not an authoritative campus survey.
+- `GPS_CAMPUS_RADIUS_METERS` — campus-specific distance in meters, from 50 to 1000. Use mapped property boundaries or a more precise polygon when available.
+- `GPS_GATE_ENABLED` — only set to `"true"` **after** testing required browser flows, auth exemptions, WAF and DNS Edge routes, and explicit production authorization.
+
+Without valid configuration (including **both** secrets) the gate **fails open**, avoiding accidental lockout. The approval token signing secret and account-status signing secret must never be exposed in the frontend.
+
+#### Account backend contract (not wired to the existing Vynalth auth yet)
+
+The authentication backend (NOT a browser and NOT this public Worker) must issue an HTTPS first-party Cookie named `__Host-vynalth-status` **after server-side authentication and status lookup**. Valid token format:
+
+`<expUnixSeconds>.<status>.<nonceBase64url>.<signatureBase64url>`
+
+Sign UTF-8 bytes of `<expUnixSeconds>|<status>|<nonceBase64url>|<hostname>` using HMAC-SHA256 with `GPS_ACCOUNT_STATUS_SECRET`. Valid status is exactly `trust` or `contact`; all other account statuses are treated like guests by the GPS gate. Expiry maximum 60 minutes ahead. Set `Secure; HttpOnly; Path=/; SameSite=Lax`, omitting the Domain attribute. Account status changes must invalidate/expire the signed Cookie, otherwise the exemption lasts until expiry. This signed Cookie is a dedicated *location exemption* token, not a primary authentication token. An attacker cannot claim contact/trust by setting an arbitrary status Cookie.
+
+**Critical prerequisite:** Vynalth's live account system must mint and clear these tokens correctly across **each distinct root domain**. The current draft only verifies them; it does not know how to access the actual account database. Do not enable the gate until this integration works, otherwise real trust/contact users might be challenged.
+
+### Endpoints, no GPS storage
+
+- `/__shield/gps/client.js` — same-origin challenge JS.
+- `POST /__shield/gps/verify` — returns a 403 or a short-lived signed site Cookie after precision and distance checks. Request body is not logged.
+- `GET /__shield/gps/status` — status only; never returns coordinates.
+
+OAuth/auth endpoints, ACME validation and essential webhook callbacks are excluded so login and infrastructure can continue. Cloudflare route/DNS coverage still must be audited. Some subdomains may be application APIs or dashboards for which guest GPS prompts are not appropriate; verify before enabling globally.
+
+### Testing and safety
+
+```sh
+npm test
+node --check src/guest-gps.js
+```
+
+**No automatic production deployment or account blocking.** Review and test with real browsers on iOS, Android and desktop, ensure location permission denial shows the intended screen, test existing account `trust` and `contact`, and verify auth callback flows. Externally provided browser GPS positions are **self-reported and spoofable**; use signed account status and your separate server-side policy checks when strong protection is needed.
+
+
+### Dedicated public GPS disclaimer link
+
+The location challenge **and** its Block screen show:
+
+**🔗 声明 / Penafian / Disclaimer → `/__shield/gps/disclaimer`**
+
+It is a standalone, accessible, no-GPS, no-login HTML page with Chinese, Bahasa Melayu and English explanations covering the location requirement, refusal, accuracy, independent/not-school-official status, transient signed cookies, `trust/contact` exemptions, children/minors, and how to seek human review. `/__shield/gps/verify-info` is a read-only configuration-description endpoint that does not reveal GPS coordinates or secrets. `/en/legal/privacy` and `/legal/privacy` remain publicly accessible.
+
+### Campus-restricted verdict Cookie and multi-site sharing (draft)
+
+**Guest contract:** GPS refusal → browser displays a 403 blocked panel; confirmed campus interior → HTTP 403 plus a 15-minute signed block Cookie; confirmed exterior → a signed 15-minute allow Cookie; inadequate or boundary-ambiguous precision → no allow, retry. No guest login is required. Primary first-party GPS verification hub: `vynalthai.com`. The draft covers all seven configured root zones and their recognized HTTP subdomains, although final production route coverage is not yet confirmed. Authenticated `trust`, `contact` or `status` account status must come from server-signed credentials and is exempt from GPS verification; WAF and unrelated security controls still apply.
+
+**Retry after an old block:** On any target's Block page, Retry navigates via its own `/__shield/gps/link?recheck=1` endpoint to establish a fresh CSRF-bound state, then top-level `vynalthai.com/__shield/gps/recheck` displays the consent and location challenge **even if a previous inside-campus Cookie still exists**. A new exterior verification overwrites the central inside Cookie and returns via `/__shield/gps/bridge` to the original page. No automatic covert re-geolocation is performed.
+
+
+Upon a browser-reported campus-inside coordinate that clearly falls within the operator-defined campus circle, the server returns HTTP 403 with a **signed, host-only `__Host-vynalth-geo-block` cookie** for 15 minutes. The next visit on the same host immediately displays the Block page. Verified outside-campus position yields a separate host-only `__Host-vynalth-geo` Cookie for 15 minutes; on an updated result, the opposite Cookie is cleared. The browser can clear these cookies and re-request geolocation. The status Cookie contains only verdict/expiry/nonce/signature, not GPS coordinates.
+
+Browsers **cannot directly read cookies set by separate root domains**, such as `vyncuslim.com`, `vyncuslim.si`, and `vitamindai.online`. To support **automatic, login-free guest verification**, when a guest navigates to HTML on another Vynalth domain, the target creates a random **120-second, first-party, HttpOnly `__Host-vynalth-geo-handoff` CSRF state Cookie** and performs a top-level 302 navigation to `https://vynalthai.com/__shield/gps/bridge` (with a non-sensitive validated return path). At the hub, the visitor either receives a new browser location prompt or has an existing signed 15-minute first-party GPS verdict. The hub sends back a **60-second HMAC-signed verdict ticket**, cryptographically bound to the target hostname, return path and the recipient's random CSRF state. `/__shield/gps/import` requires the matching recipient state Cookie before issuing its own host-specific GPS Cookie and deleting the one-time state Cookie. The browser **never reads cross-domain Cookies directly**. This flow does not transmit precise GPS coordinates between sites and does not require login. Browser restrictions on third-party cookies do not prevent top-level first-party navigations. On API requests, no cross-domain redirect occurs; a guest without a local valid result receives a JSON 403.
+
+The handoff is **60 seconds** and bound to the **target host, validated return path and target-generated 120-second first-party state cookie**. It is still not a globally atomic single-use token: a token captured with its matching state could be replayed before expiration. Keep `Referrer-Policy: no-referrer`, do not log sensitive query strings, and use a Cloudflare Durable Object for truly atomic redemption if later required. GPS browser coordinates may be spoofed or inaccurate; this is not conclusive proof of anyone's school membership.
+
+**Release gates remain unchanged:** OFF by default, reviewed school perimeter and precise geographic coordinates required, tested authentication backend issuance of signed `trust/contact/status` status Cookies on every desired domain, route parity for all public sites, and explicit production rollout. This feature should not be activated for pupils or other minors before appropriate privacy and institutional review.
+
+
+## October 11, 2026 — provisional dual-campus GPS test fixtures (NOT surveyed)
+
+The school address and OSM *feature center* for each campus can be checked
+against the public school contact page and OSM feature pages. These are not
+school-certified perimeter coordinates. Operator-supplied draft values:
+
+| Campus | OSM way | Center WGS84 lat/lon | Farthest *checked* vertex | Temporary test radius |
+| --- | --- | --- | --- | --- |
+| Tanjung Bungah | 790940312 | 5.46113, 100.28420 | 111.76 m (one polygon node still unchecked) | 180 m |
+| Balik Pulau | 808258869 | 5.36770, 100.21995 | 129.78 m (all reported polygon nodes checked) | 180 m |
+
+**A circle with an 180 m radius can include nearby public roads, homes and
+people who are not on school property.** The values are for isolated unit /
+staging tests, not production user blocking. Do not infer school attendance
+or identity from geolocation. GPS reports are spoofable.
+
+Two-campus staging test configuration, set only in a non-production test
+environment with separate test-only secrets:
+
+```env
+GPS_GATE_ENABLED=true
+GPS_CAMPUS_GEOFENCES_JSON=[{"id":"tanjung-bungah","lat":5.46113,"lon":100.28420,"radius":180},{"id":"balik-pulau","lat":5.36770,"lon":100.21995,"radius":180}]
+```
+
+The existing `GPS_GATE_SESSION_SECRET` and `GPS_ACCOUNT_STATUS_SECRET`
+are also mandatory, separate, and must not be reused from production.
+`GPS_CAMPUS_GEOFENCES_JSON` supersedes the legacy
+`GPS_CAMPUS_LAT/LON/RADIUS_METERS` fields when set; malformed JSON and
+invalid/incomplete features disable GPS gating (fail open).
+
+When testing both circles, a guest is classified as inside only if their
+reported accuracy disc is fully inside either circle; if their accuracy disc
+intersects either perimeter, the result is uncertain and no allow cookie is
+issued. A guest can receive a 15-minute signed outside verdict only after
+being clearly outside *both* test circles. No raw coordinates are retained in
+the verdict cookies.
+
+**Do not enable GPS on production:** a Tanjung Bungah polygon vertex is
+unverified, none of the perimeters has official approval, live SSO
+trust/contact/status exemption is not wired, and HTTPS/browser accessibility,
+WAF, API/OAuth, student/minor privacy and manual review flows are still
+production blockers. A proper audited, point-in-polygon boundary with a
+defined GPS uncertainty margin is required before any school-restricted
+production decision. Leave production `GPS_GATE_ENABLED=false`.

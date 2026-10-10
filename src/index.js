@@ -1,3 +1,4 @@
+import { guestGpsGate } from "./guest-gps.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -115,6 +116,7 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
+
     // Preserve domain validation/ACME checks; apply the policy to all other
     // requests while leaving existing public site behavior untouched in observe.
     if (!isValidationPath(incomingUrl.pathname)) {
@@ -144,6 +146,13 @@ export default {
         requestId,
         rootDomain,
       );
+    }
+
+    // Canonical www redirect and existing policy are evaluated before GPS.
+    // Prevent separate location prompts on www.vynalthai.com and vynalthai.com.
+    const gpsDecision = await guestGpsGate(request, env, incomingUrl);
+    if (gpsDecision) {
+      return edgeResponse(gpsDecision, request, incomingUrl, requestId, rootDomain);
     }
 
     let originResponse;

@@ -3,6 +3,12 @@ main = "src/index.js"
 compatibility_date = "2026-09-19"
 workers_dev = true
 
+# GPS guest gate is OFF until identity-status bypass and all app routes have
+# been verified. Never switch this on merely because code was merged.
+[vars]
+GPS_GATE_ENABLED = "false"
+
+
 routes = [
   { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
   { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" },
