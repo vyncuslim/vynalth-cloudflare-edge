@@ -63,7 +63,7 @@ test("forged status cannot bypass, valid signed trust and contact can",async()=>
   Cookie:"__Host-vynalth-status="+Math.floor(Date.now()/1000+600)+".trust.fake.untrusted"
  }));
  assert.equal(fake.status,403);
- for(const state of ["trust","contact"]){
+ for(const state of ["trust","contact","status"]){
   const valid=await invoke(req("/","GET",{Cookie:await statusCookie(state)}));
   assert.equal(valid,null,state);
  }
@@ -89,11 +89,12 @@ test("proven guest outside campus gets short-lived signed Cookie",async()=>{
    Cookie:session.replace(/.$/,"x")
  })).status),403);
 });
-test("verified campus coordinates return 403 and do not emit signed cookie",async()=>{
+test("verified campus coordinates return 403 and emit only a short-lived restriction cookie",async()=>{
  const response=await verifyCoords(5.3677,100.21995,10);
  assert.equal(response.status,403);
  assert.equal((await response.json()).error,"CAMPUS_RESTRICTED");
- assert.equal(response.headers.get("Set-Cookie"),null);
+ assert.ok(response.headers.getSetCookie().some(v=>v.startsWith("__Host-vynalth-geo-block=")));
+ assert.equal(response.headers.getSetCookie().some(v=>v.includes("lat=")||v.includes("lon=")),false);
 });
 test("boundary uncertainty and insufficient precision are rejected",async()=>{
  const ambiguous=await verifyCoords(5.3688,100.21995,100);
