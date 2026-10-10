@@ -99,9 +99,9 @@ test("proven guest outside campus gets short-lived signed Cookie",async()=>{
  assert.match(header,/Max-Age=900/);
  const session=header.split(";")[0];
  assert.equal(await invoke(req("/","GET",{Cookie:session})),null);
- assert.equal((await invoke(req("/","GET",{
-   Cookie:session.replace(/.$/,"x")
- })).status),403);
+ const forged=session.replace(/\.([A-Za-z0-9_-])/,(_,c)=>"."+ (c==="A"?"B":"A"));
+ const rejected=await invoke(req("/","GET",{Cookie:forged}));
+ assert.equal(rejected.status,403);
 });
 test("verified campus coordinates return 403 and emit only a short-lived restriction cookie",async()=>{
  const response=await verifyCoords(5.3677,100.21995,10);
@@ -222,9 +222,10 @@ test("signed anonymous hub transfer is bound to recipient first-party state Cook
  const siteCookie=imported.headers.getSetCookie()
    .find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
  assert.equal(await invoke(req("/hello","GET",{Cookie:siteCookie})),null);
- assert.equal((await invoke(new Request("https://vyncuslim.si/hello",{
-   headers:{Cookie:siteCookie}
- })).status),403);
+ const wrongDomain=await invoke(new Request("https://vyncuslim.si/hello",{
+  headers:{Cookie:siteCookie}
+ }));
+ assert.equal(wrongDomain.status,403);
 });
 
 
@@ -237,7 +238,9 @@ test("handoff is not an open redirect or a browser-provided authorization",async
   const r=await invoke(new Request("https://vynalthai.com"+invalid));
   assert.equal(r.status,400);
  }
- const fake=await invoke(req("/__shield/gps/import?ticket=not-signed&return=%2Fhello"));
+ const missingState=await invoke(req("/__shield/gps/import?ticket=not-signed&return=%2Fhello"));
+ assert.equal(missingState.status,400);
+ const fake=await invoke(req("/__shield/gps/import?ticket=not-signed&return=%2Fhello&state="+ "a".repeat(32)));
  assert.equal(fake.status,403);
 });
 
