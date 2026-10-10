@@ -124,3 +124,74 @@ test("geolocation gate has no KV, analytics or account status writes",async()=>{
  const text=await (await invoke(req("/"))).text();
  assert.doesNotMatch(text,/blocked:|school-ip-kv|localStorage/i);
 });
+
+
+test("GPS declaration is readable without location consent and contains three languages",async()=>{
+ const response=await invoke(req("/__shield/gps/disclaimer"));
+ assert.equal(response.status,200);
+ assert.match(response.headers.get("Content-Type"),/text\/html/);
+ const html=await response.text();
+ assert.match(html,/声明/);
+ assert.match(html,/Penafian/);
+ assert.match(html,/Disclaimer/);
+ assert.match(html,/trust/);
+ assert.match(html,/contact/);
+ assert.doesNotMatch(html,/getCurrentPosition/);
+ const original=await (await invoke(req("/"))).text();
+ assert.match(original,/href="\/__shield\/gps\/disclaimer"/);
+});
+
+test("a confirmed campus coordinate creates a short-lived block Cookie and shows blocked page",async()=>{
+ const denied=await verifyCoords(5.3677,100.21995,15);
+ assert.equal(denied.status,403);
+ assert.equal((await denied.json()).error,"CAMPUS_RESTRICTED");
+ const cookies=denied.headers.getSetCookie();
+ assert.ok(cookies.some(v=>v.includes("__Host-vynalth-geo-block=")));
+ assert.ok(cookies.some(v=>v.includes("Max-Age=900")));
+ const first=cookies.find(v=>v.startsWith("__Host-vynalth-geo-block=")).split(";")[0];
+ const page=await invoke(req("/","GET",{Cookie:first}));
+ assert.equal(page.status,403);
+ assert.match(await page.text(),/id="blocked"/);
+});
+
+test("signed hub-to-target handoff sets each host's own Cookie but no GPS coordinates",async()=>{
+ const origin=await verifyCoords(5.4,100.25,15);
+ assert.equal(origin.status,200);
+ const sourceCookie=origin.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const hubRequest=new Request("https://vynalthai.com/__shield/gps/bridge?host=vyncuslim.com&return=%2Fhello",{
+   headers:{Cookie:sourceCookie}
+ });
+ const hubResponse=await invoke(hubRequest);
+ assert.equal(hubResponse.status,302);
+ const dest=hubResponse.headers.get("Location");
+ assert.match(dest,/https:\/\/vyncuslim\.com\/__shield\/gps\/import/);
+ assert.doesNotMatch(dest,/5\.4|100\.25/);
+ const destReply=await invoke(new Request(dest));
+ assert.equal(destReply.status,302);
+ assert.equal(destReply.headers.get("Location"),"/hello");
+ const targetCookie=destReply.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const allowed=await invoke(req("/hello","GET",{Cookie:targetCookie}));
+ assert.equal(allowed,null);
+ // A cookie signed for one root domain never authorizes another root domain.
+ const other=await invoke(new Request("https://vyncuslim.si/hello",{headers:{Cookie:targetCookie}}));
+ assert.equal(other.status,403);
+});
+
+test("handoff is not an open redirect or a browser-provided authorization",async()=>{
+ for(const invalid of [
+  "/__shield/gps/bridge?host=attacker.example&return=%2F",
+  "/__shield/gps/bridge?host=vyncuslim.com&return=https%3A%2F%2Fevil.example",
+  "/__shield/gps/bridge?host=vyncuslim.com&return=%2F%2Fevil.example"
+ ]){
+  const r=await invoke(new Request("https://vynalthai.com"+invalid));
+  assert.equal(r.status,400);
+ }
+ const fake=await invoke(req("/__shield/gps/import?ticket=not-signed&return=%2Fhello"));
+ assert.equal(fake.status,403);
+});
+
+test("privacy declaration and privacy policy can be read even if location gate is enabled",async()=>{
+ assert.equal((await invoke(req("/__shield/gps/disclaimer"))).status,200);
+ assert.equal(await invoke(req("/en/legal/privacy")),null);
+ assert.equal(await invoke(req("/legal/privacy")),null);
+});
