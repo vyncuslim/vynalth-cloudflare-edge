@@ -10,6 +10,8 @@ workers_dev = true
 [vars]
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
+# Keep BOTH GPS and Cookie Consent disabled in production until integration review.
+GPS_GATE_ENABLED = "false"
 
 
 routes = [
