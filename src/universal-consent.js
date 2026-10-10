@@ -178,11 +178,11 @@ function documentPage(root){
   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"}
  });
 }
-const CLIENT=String.raw\`"use strict";let token="";const el=id=>document.getElementById(id);function msg(x){el("status").textContent=x}
+const CLIENT=String.raw`"use strict";let token="";const el=id=>document.getElementById(id);function msg(x){el("status").textContent=x}
 async function get(path){const r=await fetch("/__vynalth/consent/"+path,{credentials:"same-origin",cache:"no-store"});if(!r.ok)throw Error("HTTP "+r.status);return r.json()}
 async function load(){try{const s=await get("session");token=s.csrf;const x=await get("state");["analytics","personalization","marketing"].forEach(k=>el(k).checked=!!x.choices[k]);el("share").checked=!!x.sharedAcrossDomains;if(!x.authenticated)el("share").disabled=true;msg(x.authenticated?"SSO linked. You can manage consent.":"Guest: consent applies only to this site. SSO link requires your existing login integration.")}catch(e){msg("Consent service unavailable: "+e.message)}}
 async function save(withdraw=false,deny=false){try{const choices={analytics:!deny&&el("analytics").checked,personalization:!deny&&el("personalization").checked,marketing:!deny&&el("marketing").checked};const sharedScope=!deny&&!withdraw&&el("share").checked;const r=await fetch("/__vynalth/consent/preferences",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json","X-Vynalth-Consent-CSRF":token},body:JSON.stringify({action:withdraw?"withdraw":"save",choices,sharedScope,sharedScopeAcknowledged:sharedScope,noticeVersion:"vynalth-four-domains-v1"})});const x=await r.json();if(!r.ok)throw Error(x.error||"Update failed");msg(withdraw?"Consent withdrawn.":deny?"Optional cookies declined.":"Preferences saved.");await load()}catch(e){msg(e.message)}}
-el("save").onclick=()=>save();el("deny").onclick=()=>save(false,true);el("withdraw").onclick=()=>save(true);load();\`;
+el("save").onclick=()=>save();el("deny").onclick=()=>save(false,true);el("withdraw").onclick=()=>save(true);load();`;
 function clientPage(){
  return new Response(CLIENT,{headers:{...RESP,"Content-Type":"application/javascript; charset=utf-8"}});
 }
@@ -210,7 +210,9 @@ async function writeConsent(env,root,identity,anonId,input){
  if(!identity&&!id){id=rnd(24);generated=true;}
  const userKey=identity?await subjectKey(env,identity.sub):null;
  const prefix=keys(root,userKey,id);
- const scope=identity&&input.sharedScope===true?"shared":"site";
+ const existingShared=identity?await readKV(kv,prefKey(prefix,"shared",root)):null;
+ const scope=identity&&(input.sharedScope===true||
+   (input.action==="withdraw"&&existingShared?.sharedScope===true))?"shared":"site";
  const key=prefKey(prefix,scope,root);
  const before=await readKV(kv,key);
  const now=new Date().toISOString();
@@ -219,7 +221,7 @@ async function writeConsent(env,root,identity,anonId,input){
  const record={
   consentVersion:CONSENT_VERSION,
   noticeVersion:scope==="shared"?SHARED_NOTICE_VERSION:null,
-  sharedScope:scope==="shared"&&!withdraw,
+  sharedScope:scope==="shared",
   choices:currentChoices,
   revision:(before?.revision||0)+1,
   updatedAt:now,
