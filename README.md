@@ -262,3 +262,49 @@ Browsers **cannot directly read cookies set by separate root domains**, such as 
 The handoff is **60 seconds** and bound to the **target host, validated return path and target-generated 120-second first-party state cookie**. It is still not a globally atomic single-use token: a token captured with its matching state could be replayed before expiration. Keep `Referrer-Policy: no-referrer`, do not log sensitive query strings, and use a Cloudflare Durable Object for truly atomic redemption if later required. GPS browser coordinates may be spoofed or inaccurate; this is not conclusive proof of anyone's school membership.
 
 **Release gates remain unchanged:** OFF by default, reviewed school perimeter and precise geographic coordinates required, tested authentication backend issuance of signed `trust/contact/status` status Cookies on every desired domain, route parity for all public sites, and explicit production rollout. This feature should not be activated for pupils or other minors before appropriate privacy and institutional review.
+
+
+## October 11, 2026 — provisional dual-campus GPS test fixtures (NOT surveyed)
+
+The school address and OSM *feature center* for each campus can be checked
+against the public school contact page and OSM feature pages. These are not
+school-certified perimeter coordinates. Operator-supplied draft values:
+
+| Campus | OSM way | Center WGS84 lat/lon | Farthest *checked* vertex | Temporary test radius |
+| --- | --- | --- | --- | --- |
+| Tanjung Bungah | 790940312 | 5.46113, 100.28420 | 111.76 m (one polygon node still unchecked) | 180 m |
+| Balik Pulau | 808258869 | 5.36770, 100.21995 | 129.78 m (all reported polygon nodes checked) | 180 m |
+
+**A circle with an 180 m radius can include nearby public roads, homes and
+people who are not on school property.** The values are for isolated unit /
+staging tests, not production user blocking. Do not infer school attendance
+or identity from geolocation. GPS reports are spoofable.
+
+Two-campus staging test configuration, set only in a non-production test
+environment with separate test-only secrets:
+
+```env
+GPS_GATE_ENABLED=true
+GPS_CAMPUS_GEOFENCES_JSON=[{"id":"tanjung-bungah","lat":5.46113,"lon":100.28420,"radius":180},{"id":"balik-pulau","lat":5.36770,"lon":100.21995,"radius":180}]
+```
+
+The existing `GPS_GATE_SESSION_SECRET` and `GPS_ACCOUNT_STATUS_SECRET`
+are also mandatory, separate, and must not be reused from production.
+`GPS_CAMPUS_GEOFENCES_JSON` supersedes the legacy
+`GPS_CAMPUS_LAT/LON/RADIUS_METERS` fields when set; malformed JSON and
+invalid/incomplete features disable GPS gating (fail open).
+
+When testing both circles, a guest is classified as inside only if their
+reported accuracy disc is fully inside either circle; if their accuracy disc
+intersects either perimeter, the result is uncertain and no allow cookie is
+issued. A guest can receive a 15-minute signed outside verdict only after
+being clearly outside *both* test circles. No raw coordinates are retained in
+the verdict cookies.
+
+**Do not enable GPS on production:** a Tanjung Bungah polygon vertex is
+unverified, none of the perimeters has official approval, live SSO
+trust/contact/status exemption is not wired, and HTTPS/browser accessibility,
+WAF, API/OAuth, student/minor privacy and manual review flows are still
+production blockers. A proper audited, point-in-polygon boundary with a
+defined GPS uncertainty margin is required before any school-restricted
+production decision. Leave production `GPS_GATE_ENABLED=false`.
