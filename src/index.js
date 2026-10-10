@@ -165,6 +165,23 @@ export default {
       if (visitorIp) originHeaders.set("x-vynalth-client-ip", visitorIp);
       if (visitorRay) originHeaders.set("x-vynalth-ray-id", visitorRay);
       originHeaders.set("x-vynalth-request-id", requestId);
+      originHeaders.delete("x-vynalth-edge-ts");
+      originHeaders.delete("x-vynalth-edge-signature");
+      // Optional authenticated edge identity for cases where the origin strips
+      // CF-Connecting-IP or substitutes the Ray ID on a Worker subrequest.
+      const identitySecret = env?.VYNALTH_EDGE_IDENTITY_SECRET;
+      if (visitorIp && typeof identitySecret === "string" && identitySecret.length >= 32) {
+        const epoch = String(Math.floor(Date.now() / 1000));
+        const payload = `${epoch}:${requestId}:${visitorIp}:${visitorRay || ""}`;
+        const key = await crypto.subtle.importKey(
+          "raw", new TextEncoder().encode(identitySecret),
+          { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+        );
+        const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+        const hex = Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, "0")).join("");
+        originHeaders.set("x-vynalth-edge-ts", epoch);
+        originHeaders.set("x-vynalth-edge-signature", hex);
+      }
       const originRequest = new Request(request, { headers: originHeaders });
       originResponse = await fetch(originRequest, {
         redirect: "manual",
