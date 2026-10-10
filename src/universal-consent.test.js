@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, randomBytes, webcrypto } from "node:crypto";
+import { Script } from "node:vm";
 import {
   handleUniversalConsent, consentRoot, signedSSO, shieldAccountExempt,
   CONSENT_DOMAINS, SHARED_NOTICE_VERSION
@@ -18,6 +19,7 @@ function fakeKV(){
   contents,
   async get(key){return contents.get(key)??null;},
   async put(key,data){contents.set(key,data);},
+  async delete(key){contents.delete(key);},
   async list({prefix,limit=50,cursor}){
    const all=[...contents.keys()].filter(x=>x.startsWith(prefix)).sort();
    const offset=cursor?Number(cursor):0;
@@ -196,6 +198,28 @@ test("cross-domain withdrawal overrides previous shared grant and creates separa
  assert.ok(events.some(x=>x.action==="save"));
 });
 
+test("turning off prior shared consent revokes other domains but preserves site-only choices",async()=>{
+ const e=env(),root="vynalthai.com",s=await begin(e,root,issuer(root));
+ assert.equal((await update(e,root,s,body(approved,true))).status,200);
+ const localOnly={analytics:true,personalization:false,marketing:false};
+ const result=await update(e,root,s,body(localOnly,false));
+ assert.equal(result.status,200);
+ const home=await status(e,root,issuer(root));
+ assert.equal(home.choices.analytics,true);
+ assert.equal(home.sharedAcrossDomains,false);
+ for(const domain of CONSENT_DOMAINS.filter(x=>x!==root)){
+  const x=await status(e,domain,issuer(domain));
+  assert.equal(x.choices.analytics,false,domain);
+  assert.ok(x.withdrawnAt,domain);
+ }
+ const history=await call(e,root,policy+"/history?scope=shared","GET",undefined,issuer(root));
+ assert.equal((await history.json()).events.filter(x=>x.action==="withdraw").length,1);
+ const localChange=await update(e,root,s,body(localOnly,false));
+ assert.equal(localChange.status,200);
+ const historyAgain=await call(e,root,policy+"/history?scope=shared","GET",undefined,issuer(root));
+ assert.equal((await historyAgain.json()).events.filter(x=>x.action==="withdraw").length,1);
+});
+
 test("guest withdrawal is confined to same domain and kept in KV history",async()=>{
  const e=env(),root="vyncuslim.si",s=await begin(e,root);
  const initial=await update(e,root,s,body());
@@ -231,7 +255,9 @@ test("consent page is navigable and contains all controls",async()=>{
  assert.match(html,/Cross-site sharing is optional/);
  const script=await call(e,"vynalthai.com",policy+"/client.js");
  assert.equal(script.status,200);
- assert.match(await script.text(),/X-Vynalth-Consent-CSRF/);
+ const javascript=await script.text();
+ assert.match(javascript,/X-Vynalth-Consent-CSRF/);
+ assert.doesNotThrow(()=>new Script(javascript), "served client must parse as valid JavaScript");
 });
 
 
