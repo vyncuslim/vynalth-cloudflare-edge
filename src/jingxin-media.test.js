@@ -70,11 +70,11 @@ test("signed trusted status unlocks only recognized first-party private R2 paths
  }
  assert.deepEqual(env.JINGXIN_PRIVATE_MEDIA_R2.calls,
   Array(3).fill("jingxin/shared-memory.jpg"));
- assert.equal((await invoke(photo("/media/jingxin/../../etc/passwd",signedUser()),env))?.status,null);
+ assert.equal(await invoke(photo("/media/jingxin/../../etc/passwd",signedUser()),env),null);
 });
 test("forged, ordinary and wrong-host SSO cannot read photos",async()=>{
  const env=makeEnv();
- for(const cookie of ["",signedUser("normal"),signedUser("trust","vynalthai.com"),signedUser().replace(/.$/,"x")]){
+ for(const cookie of ["",signedUser("normal"),signedUser("trust","vynalthai.com"),signedUser().replace(/.$/,x=>x==="A"?"B":"A")]){
   const res=await invoke(photo(undefined,cookie),env);
   assert.equal(res.status,403);
  }
