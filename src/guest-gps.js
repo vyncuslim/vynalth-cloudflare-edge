@@ -104,6 +104,15 @@ async function hasBlockVerdict(request,cfg,host){
  if(end<=now||end>now+SESSION_TTL)return false;
  return valid(cfg.s,[expiry,nonce,host,"inside"].join("|"),sig);
 }
+// Private media may use the same existing *signed* first-party GPS verdict.
+// No browser-supplied status/coordinates are trusted as authorization here.
+export async function gpsOutsideOrLegacyExempt(request,env,host){
+ const cfg=config(env);
+ if(!cfg)return false;
+ if(await exempt(request,cfg,host))return true;
+ if(await hasBlockVerdict(request,cfg,host))return false;
+ return permitted(request,cfg,host);
+}
 function safeRelativePath(path){
  return typeof path==="string"&&path.length<=300&&path.startsWith("/")&&
    !path.startsWith("//")&&!path.includes("\\")&&!/[\r\n]/.test(path)&&
