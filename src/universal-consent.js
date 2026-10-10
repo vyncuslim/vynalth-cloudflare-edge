@@ -12,6 +12,11 @@ const API="/__vynalth/consent";
 const SID_COOKIE="__Secure-vynalth-consent";
 const CSRF_COOKIE="__Secure-vynalth-consent-csrf";
 const SSO_COOKIE="__Secure-vynalth-sso";
+const HUB_ROOT="vynalthai.com";
+const LINK_COOKIE="__Secure-vynalth-consent-link";
+const LINK_SECONDS=300;
+const CODE_SECONDS=60;
+const BOUND_SSO_SECONDS=600;
 const COOKIE_SECONDS=60*60*24*90;
 const AUDIT_SECONDS=60*60*24*365;
 const te=new TextEncoder();
@@ -108,6 +113,102 @@ async function anonIdentity(request,env,root){
  if(!data)return null;
  return await verify(env.CONSENT_COOKIE_SECRET,"anon|"+root+"|"+data.id,data.signature)?data.id:null;
 }
+
+// Cross-domain SSO: vynalthai.com is the *only* authority that can originate
+// linked identities. The target never reads that domain's cookies directly.
+// The existing vynalthai.com login backend must issue the canonical signed
+// host-bound SSO Cookie after validating the real logged-in user.
+function errorPage(status,title,message){
+ const safe=String(message).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+ return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>'+title+'</title><body style="font:16px system-ui;background:#070b16;color:#eef3fb;max-width:650px;margin:6vh auto;padding:24px"><h1>'+title+'</h1><p>'+safe+'</p><p><a href="https://vynalthai.com" style="color:#a4ceff">在 Vynalth AI 主站登录 / Sign in at vynalthai.com</a></p></body></html>',{
+  status,headers:{...RESP,"Content-Type":"text/html; charset=utf-8",
+   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
+   "Referrer-Policy":"no-referrer"}
+ });
+}
+function safeRedirect(url){
+ return new Response(null,{status:302,headers:{...RESP,"Location":url,
+  "Referrer-Policy":"no-referrer"}});
+}
+function linkCodeKey(code){return "vynalth:consent:v1:sso-link:"+code;}
+function parseLinkState(state,root){
+ if(typeof state!=="string"||state.length>200)return null;
+ const arr=state.split(".");
+ if(arr.length!==3)return null;
+ const [expiry,nonce,mac]=arr;
+ if(!/^\d{10,12}$/.test(expiry)||!/^[A-Za-z0-9_-]{32}$/.test(nonce))return null;
+ const now=Math.floor(Date.now()/1000),end=Number(expiry);
+ return end>now&&end<=now+LINK_SECONDS?{expiry,nonce,mac}:null;
+}
+async function beginLinkResponse(request,env,url,root){
+ const exp=Math.floor(Date.now()/1000)+LINK_SECONDS,nonce=rnd(24);
+ const state=[exp,nonce,await sig(env.CONSENT_COOKIE_SECRET,["sso-link",root,exp,nonce].join("|"))].join(".");
+ const dest="https://"+HUB_ROOT+API+"/authorize?client="+encodeURIComponent(root)+"&state="+encodeURIComponent(state);
+ const headers=new Headers(RESP);
+ headers.set("Location",dest);
+ headers.set("Referrer-Policy","no-referrer");
+ headers.append("Set-Cookie",cookie(LINK_COOKIE,state,root,LINK_SECONDS));
+ return new Response(null,{status:302,headers});
+}
+async function authorizeAtHub(request,env,url,root){
+ if(request.method!=="GET"||root!==HUB_ROOT)return output(404,{error:"NOT_FOUND"});
+ const target=url.searchParams.get("client");
+ const state=url.searchParams.get("state");
+ if(!CONSENT_DOMAINS.includes(target)||target===HUB_ROOT||!parseLinkState(state,target))
+  return output(400,{error:"INVALID_SSO_TARGET_OR_STATE"});
+ const identity=await signedSSO(request,env,HUB_ROOT);
+ if(!identity)return errorPage(401,"Vynalth AI SSO","请先在 vynalthai.com 登录，然后从需要同步的网站重新点击连接。账号资料仅以主站服务端验证结果为准。");
+ const code=rnd(32),now=Math.floor(Date.now()/1000);
+ try{
+  // Ephemeral KV ticket. KV deletion is not atomic: do not claim strict
+  // one-time redemption under concurrent replay or POP propagation.
+  await env.CONSENT_KV.put(linkCodeKey(code),JSON.stringify({
+   sub:identity.sub,status:identity.status,sid:identity.sid,
+   target,state,exp:now+CODE_SECONDS,issuer:HUB_ROOT
+  }),{expirationTtl:CODE_SECONDS});
+ }catch{return output(503,{error:"SSO_TICKET_STORAGE_UNAVAILABLE"});}
+ const redirect=new URL("https://"+target+API+"/callback");
+ redirect.searchParams.set("code",code);
+ redirect.searchParams.set("state",state);
+ return safeRedirect(redirect.toString());
+}
+async function completeLink(request,env,url,root){
+ if(request.method!=="GET"||root===HUB_ROOT)return output(404,{error:"NOT_FOUND"});
+ if(!isSet(env.CONSENT_SSO_SIGNING_SECRET,32))return output(503,{error:"SSO_SIGNING_NOT_CONFIGURED"});
+ const state=url.searchParams.get("state");
+ const saved=cookieValue(request,LINK_COOKIE);
+ const parsed=parseLinkState(state,root);
+ if(!parsed||!saved||saved!==state||
+    !await verify(env.CONSENT_COOKIE_SECRET,["sso-link",root,parsed.expiry,parsed.nonce].join("|"),parsed.mac))
+   return output(403,{error:"SSO_STATE_INVALID_OR_MISSING"});
+ const code=url.searchParams.get("code");
+ if(!/^[A-Za-z0-9_-]{43}$/.test(code||""))return output(403,{error:"SSO_CODE_INVALID"});
+ let ticket;
+ try{
+  const raw=await env.CONSENT_KV.get(linkCodeKey(code));
+  if(!raw)return output(403,{error:"SSO_CODE_EXPIRED_OR_USED"});
+  ticket=JSON.parse(raw);
+  if(!ticket||ticket.target!==root||ticket.issuer!==HUB_ROOT||ticket.state!==state||
+     !Number.isInteger(ticket.exp)||ticket.exp<=Math.floor(Date.now()/1000)||
+     !/^[A-Za-z0-9:_-]{8,128}$/.test(ticket.sub||"")||
+     !/^[A-Za-z0-9:_-]{8,128}$/.test(ticket.sid||"")||
+     typeof ticket.status!=="string"||ticket.status.length>32)
+   return output(403,{error:"SSO_TICKET_INVALID"});
+  await env.CONSENT_KV.delete(linkCodeKey(code));
+ }catch{return output(503,{error:"SSO_TICKET_UNAVAILABLE"});}
+ const exp=Math.floor(Date.now()/1000)+BOUND_SSO_SECONDS;
+ const payload=base64(te.encode(JSON.stringify({
+  sub:ticket.sub,status:ticket.status,sid:ticket.sid,host:root,exp
+ })));
+ const signature=await sig(env.CONSENT_SSO_SIGNING_SECRET,payload);
+ const headers=new Headers(RESP);
+ headers.set("Location",API);
+ headers.set("Referrer-Policy","no-referrer");
+ headers.append("Set-Cookie",cookie(SSO_COOKIE,payload+"."+signature,root,BOUND_SSO_SECONDS));
+ headers.append("Set-Cookie",cookie(LINK_COOKIE,"",root,0));
+ return new Response(null,{status:302,headers});
+}
+
 async function newAnonCookie(env,root,id){
  return cookie(SID_COOKIE,"a."+id+"."+(await sig(env.CONSENT_COOKIE_SECRET,"anon|"+root+"|"+id)),root,COOKIE_SECONDS);
 }
@@ -173,7 +274,7 @@ async function jsonBody(request){
  }catch{return null;}
 }
 function documentPage(root){
- return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Vynalth Consent</title><style>body{font-family:system-ui;background:#080b12;color:#e8f1ff;max-width:650px;margin:5vh auto;padding:30px;line-height:1.7}fieldset{border:1px solid #526075;padding:20px}button{padding:12px;margin:8px 8px 8px 0;border-radius:8px;cursor:pointer}p{color:#b4c5db}a{color:#accfff}</style><h1>Vynalth Universal Cookie Consent</h1><p>中文：必要 Cookie 始终启用。分析、个性化及营销均可单独选择，拒绝或撤回不会阻止基本使用。</p><p lang="ms">Kuki penting sentiasa aktif. Analitik, pemperibadian dan pemasaran adalah pilihan.</p><p lang="en">Essential cookies are required; analytics, personalization and marketing are optional.</p><p>跨站范围：vynalthai.com、vyncuslim.com、vynalthai.si、vyncuslim.si。仅在你明确允许跨站共享且已登录同一 Vynalth SSO 时，同步肯定同意。</p><p>Cross-site sharing is optional. No fingerprinting or third-party cookies are used.</p><fieldset><legend>Consent choices</legend><label><input type="checkbox" checked disabled> Essential / 必要</label><div><label><input id="analytics" type="checkbox"> Analytics / 分析</label></div><div><label><input id="personalization" type="checkbox"> Personalization / 个性化</label></div><div><label><input id="marketing" type="checkbox"> Marketing / 营销</label></div><hr><label><input id="share" type="checkbox"> I explicitly agree to apply these choices across all 4 Vynalth domains (logged-in SSO only).</label></fieldset><button id="save">Save preferences</button><button id="deny">Reject optional</button><button id="withdraw">Withdraw consent</button><p id="status" role="status" aria-live="polite"></p><p><a href="https://vynalthai.com/en/legal/privacy">Privacy policy</a></p><script src="/__vynalth/consent/client.js" defer></script></html>',{
+ return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Vynalth Consent</title><style>body{font-family:system-ui;background:#080b12;color:#e8f1ff;max-width:650px;margin:5vh auto;padding:30px;line-height:1.7}fieldset{border:1px solid #526075;padding:20px}button{padding:12px;margin:8px 8px 8px 0;border-radius:8px;cursor:pointer}p{color:#b4c5db}a{color:#accfff}</style><h1>Vynalth Universal Cookie Consent</h1><p>中文：必要 Cookie 始终启用。分析、个性化及营销均可单独选择，拒绝或撤回不会阻止基本使用。</p><p lang="ms">Kuki penting sentiasa aktif. Analitik, pemperibadian dan pemasaran adalah pilihan.</p><p lang="en">Essential cookies are required; analytics, personalization and marketing are optional.</p><p>跨站范围：vynalthai.com、vyncuslim.com、vynalthai.si、vyncuslim.si。仅在你明确允许跨站共享且已登录同一 Vynalth SSO 时，同步肯定同意。</p><p>Cross-site sharing is optional. No fingerprinting or third-party cookies are used.</p><p>统一登录来源为 <strong>vynalthai.com</strong>。其他网站通过主站验证和短期授权码建立各自的第一方会话。</p><p><a href="/__vynalth/consent/link">🔗 连接 vynalthai.com 账号 / Link Vynalth AI SSO</a></p><fieldset><legend>Consent choices</legend><label><input type="checkbox" checked disabled> Essential / 必要</label><div><label><input id="analytics" type="checkbox"> Analytics / 分析</label></div><div><label><input id="personalization" type="checkbox"> Personalization / 个性化</label></div><div><label><input id="marketing" type="checkbox"> Marketing / 营销</label></div><hr><label><input id="share" type="checkbox"> I explicitly agree to apply these choices across all 4 Vynalth domains (logged-in SSO only).</label></fieldset><button id="save">Save preferences</button><button id="deny">Reject optional</button><button id="withdraw">Withdraw consent</button><p id="status" role="status" aria-live="polite"></p><p><a href="https://vynalthai.com/en/legal/privacy">Privacy policy</a></p><script src="/__vynalth/consent/client.js" defer></script></html>',{
   headers:{...RESP,"Content-Type":"text/html; charset=utf-8",
   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"}
  });
@@ -248,6 +349,9 @@ export async function handleUniversalConsent(request,env,url,root){
  if(url.pathname===API+"/client.js")return clientPage();
  if(!ready(env))return output(503,{error:"CONSENT_SERVICE_NOT_CONFIGURED"});
  const endpoint=url.pathname.slice(API.length+1);
+ if(endpoint==="link")return beginLinkResponse(request,env,url,root);
+ if(endpoint==="authorize")return authorizeAtHub(request,env,url,root);
+ if(endpoint==="callback")return completeLink(request,env,url,root);
  const identity=await signedSSO(request,env,root);
  const anon=identity?null:await anonIdentity(request,env,root);
  if(endpoint==="session"&&request.method==="GET"){
