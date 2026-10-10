@@ -3,6 +3,13 @@ const GEO_CLIENT="\"use strict\";const $=id=>document.getElementById(id);functio
 const DISCLAIMER_HTML="<!doctype html>\n<html lang=\"zh-CN\">\n<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\"><meta name=\"referrer\" content=\"no-referrer\">\n<title>GPS Verification Disclaimer · Vynalth Shield</title>\n<style>\n:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#eaf1fc;background:#05070e}\nbody{padding:28px 17px;margin:0;background:radial-gradient(circle at 20% 0,#172840,transparent 60%),#05070e}\nmain{margin:auto;max-width:780px;background:#101827;border:1px solid #364563;border-radius:21px;padding:clamp(24px,4vw,42px)}\nheader{color:#98c8ff;font-size:12px;font-weight:800;letter-spacing:.1em}\nh1{font-size:clamp(30px,5vw,42px);margin:16px 0}\nh2{font-size:18px;color:#d6e7ff;margin:26px 0 10px}\np,li{color:#bbcbdf;line-height:1.8;font-size:14px}\na{color:#9cceff}aside{padding:14px;border:1px solid #465b81;border-radius:12px;background:#192b44}\n</style></head>\n<body><main><header>✦ VYNALTH SHIELD · LOCATION POLICY</header>\n<h1>声明 · Penafian · Disclaimer</h1>\n<aside>\n<strong>独立网站政策 / Dasar laman bebas / Independent website policy</strong>\n<p>此功能由 Vynalth AI 网站运营者提供，不属于 POWIIS 校方官方定位或访问系统。</p>\n<p>Fungsi ini bukan perkhidmatan rasmi POWIIS.</p>\n<p>This location requirement is not operated or endorsed by POWIIS.</p>\n</aside>\n<h2>1. 为什么请求位置 / Tujuan / Purpose</h2>\n<p>网页仅在访客点击授权按钮、并同意浏览器的位置权限后才请求地理位置，用于判断设备报告的位置是否位于网站运营者设置的校园地理围栏之内。精确位置并不能可靠证明某人的学校身份、账号身份或当前网络。</p>\n<p>Lokasi hanya diminta selepas persetujuan melalui pelayar, bagi semakan kawasan geografi. Lokasi bukan bukti identiti.</p>\n<p>After browser permission, the reported position is checked against an operator-defined campus area. Browser location can be inaccurate or spoofed.</p>\n<h2>2. 不提供位置 / Jika menolak / If you decline</h2>\n<p>访客可以拒绝授权，但启用此功能的网站可能因此不允许继续访问并展示访问限制页面。拒绝授权本身不会导致永久账号封锁。你可以修改浏览器权限后重新尝试。</p>\n<p>Anda boleh menolak; akses tetamu mungkin dihadkan, tetapi akaun tidak diharamkan secara kekal hanya kerana penolakan.</p>\n<p>You may refuse location access. When the gate is enabled, guest access may be restricted, but refusing does not permanently ban your account.</p>\n<h2>3. Cookie 与数据 / Kuki dan data / Cookies and data</h2>\n<p>验证时通过 HTTPS 将报告的经纬度及精度传送至本站 Worker，本功能不主动将精确 GPS 坐标写入 Cookie 或 KV。成功通过验证或处于限制区域时，本站可设置最长约 15 分钟、仅对本站有效的签名状态 Cookie。浏览器可在设置中删除 Cookie；各独立根域名无法直接读取其他域的 Cookie。</p>\n<p>Koordinat digunakan untuk keputusan permintaan sahaja dan tidak disimpan dalam kuki. Kuki status sementara terikat pada domain sendiri.</p>\n<p>Precise coordinates are used for the current verification and are not intentionally stored in persistent application data by this feature. Short-lived signed status cookies do not contain GPS coordinates. Standard server/network logs and browser behavior are governed by their own policies.</p>\n<h2>4. 豁免和错误 / Pengecualian dan ralat / Exemptions and mistakes</h2>\n<p>由服务器身份验证并确认状态为 <strong>trust</strong> 或 <strong>contact</strong> 的账号可豁免此项 GPS 检查。浏览器自身声明并不构成有效凭证。如判断有误、设备无法定位、位于边界或需要访问帮助，请联系网站管理员；可要求人工复核与删除相关记录。</p>\n<p>Status akaun trust/contact mesti disahkan oleh pelayan. Untuk semakan atau pemadaman, hubungi pentadbir laman.</p>\n<p>Authenticated trust/contact accounts are exempt once the website validates their status server-side. Contact the website operator to dispute a decision or request applicable data deletion.</p>\n<h2>5. 儿童及未成年人 / Pengguna bawah umur / Minors</h2>\n<p>学校访客可能包括未成年人。请勿在未经适当授权的情况下提交他人位置，亦不要通过其他设备代替他人授权。网站不会因为一次位置报告而永久封锁账号。</p>\n<p>Jangan kongsi lokasi orang lain tanpa persetujuan yang sewajarnya.</p>\n<p>Do not submit someone else's location without appropriate permission. This feature must be reviewed for applicable privacy requirements before production activation.</p>\n<p><a href=\"https://vynalthai.com/en/legal/privacy\" rel=\"noopener noreferrer\" referrerpolicy=\"no-referrer\">Vynalth AI Privacy Policy</a></p>\n<p><a href=\"/__shield/gps/verify-info\">查看位置验证信息 / View verification information</a></p>\n</main></body></html>";
 const SESSION_COOKIE="__Host-vynalth-geo";
 const STATUS_COOKIE="__Host-vynalth-status";
+const BLOCK_COOKIE="__Host-vynalth-geo-block";
+const GPS_BRIDGE_HUB="vynalthai.com";
+const GPS_BRIDGE_TARGETS=new Set([
+ "vyncuslim.com","vynalthai.si","vyncuslim.si",
+ "vitamindai.online","sleepsomno.com","powiismunc.com"
+]);
+
 const SESSION_TTL=900;
 const enc=new TextEncoder();
 const head={"Cache-Control":"private, no-store, max-age=0","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","X-Robots-Tag":"noindex,nofollow","Vary":"Cookie","Permissions-Policy":"geolocation=(self)"};
@@ -41,6 +48,92 @@ async function permitted(req,cfg,host){
  if(time<=now||time>now+SESSION_TTL)return false;
  return valid(cfg.s,[exp,nonce,host,"outside"].join("|"),tag);
 }
+
+function policyCookie(name,value,age=SESSION_TTL){
+ return name+"="+value+"; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age="+age;
+}
+async function verdictToken(cfg,host,verdict){
+ if(verdict!=="inside"&&verdict!=="outside")throw Error("Invalid verdict");
+ const expiry=Math.floor(Date.now()/1000)+SESSION_TTL;
+ const nonceBytes=new Uint8Array(16);crypto.getRandomValues(nonceBytes);
+ const nonce=b64(nonceBytes);
+ const sig=await sign(cfg.s,[expiry,nonce,host,verdict].join("|"));
+ return expiry+"."+nonce+"."+sig;
+}
+async function hasBlockVerdict(request,cfg,host){
+ const value=getCookie(request,BLOCK_COOKIE);
+ if(!value||value.length>320)return false;
+ const chunks=value.split(".");
+ if(chunks.length!==3)return false;
+ const [expiry,nonce,sig]=chunks;
+ if(!/^\d{10,12}$/.test(expiry)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return false;
+ const now=Math.floor(Date.now()/1000),end=Number(expiry);
+ if(end<=now||end>now+SESSION_TTL)return false;
+ return valid(cfg.s,[expiry,nonce,host,"inside"].join("|"),sig);
+}
+function safeRelativePath(path){
+ return typeof path==="string"&&path.length<=300&&path.startsWith("/")&&
+   !path.startsWith("//")&&!path.includes("\\")&&!/[\r\n]/.test(path)&&
+   !path.startsWith("/__shield/gps/");
+}
+async function handoffToken(cfg,target,path,verdict){
+ const expires=Math.floor(Date.now()/1000)+60;
+ const random=new Uint8Array(16);crypto.getRandomValues(random);
+ const nonce=b64(random);
+ const sig=await sign(cfg.s,[expires,verdict,nonce,target,path].join("|"));
+ return [expires,verdict,nonce,sig].join(".");
+}
+async function validateHandoff(cfg,target,path,ticket){
+ if(typeof ticket!=="string"||ticket.length>260)return null;
+ const parts=ticket.split(".");
+ if(parts.length!==4)return null;
+ const [expires,verdict,nonce,sig]=parts;
+ if(verdict!=="inside"&&verdict!=="outside")return null;
+ if(!/^\d{10,12}$/.test(expires)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return null;
+ const expiry=Number(expires),now=Math.floor(Date.now()/1000);
+ if(expiry<=now||expiry>now+60)return null;
+ return await valid(cfg.s,[expires,verdict,nonce,target,path].join("|"),sig)?verdict:null;
+}
+function redirect(to,headers={}){
+ return new Response(null,{status:302,headers:{...head,Location:to,...headers}});
+}
+// Browsers cannot read other registrable domain's cookies. Instead perform
+// an explicit top-level redirect through the first-party Vynalth AI hub,
+// transfer only a signed short-lived verdict, and set the target's own cookie.
+async function bridge(request,url,cfg){
+ if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
+   return reply(404,{error:"NOT_FOUND"});
+ const target=url.searchParams.get("host");
+ const path=url.searchParams.get("return");
+ if(!GPS_BRIDGE_TARGETS.has(target)||!safeRelativePath(path))
+   return reply(400,{error:"INVALID_BRIDGE_DESTINATION"});
+ let verdict=null;
+ if(await hasBlockVerdict(request,cfg,url.hostname))verdict="inside";
+ else if(await permitted(request,cfg,url.hostname))verdict="outside";
+ if(!verdict)return page();
+ const ticket=await handoffToken(cfg,target,path,verdict);
+ const destination=new URL("https://"+target+"/__shield/gps/import");
+ destination.searchParams.set("ticket",ticket);
+ destination.searchParams.set("return",path);
+ return redirect(destination.toString(),{"Referrer-Policy":"no-referrer"});
+}
+async function importHandoff(request,url,cfg){
+ if(request.method!=="GET"||!GPS_BRIDGE_TARGETS.has(url.hostname))
+   return reply(404,{error:"NOT_FOUND"});
+ const path=url.searchParams.get("return");
+ if(!safeRelativePath(path))return reply(400,{error:"INVALID_RETURN_PATH"});
+ const verdict=await validateHandoff(cfg,url.hostname,path,url.searchParams.get("ticket"));
+ if(!verdict)return reply(403,{error:"INVALID_OR_EXPIRED_HANDOFF"});
+ const name=verdict==="inside"?BLOCK_COOKIE:SESSION_COOKIE;
+ const old=verdict==="inside"?SESSION_COOKIE:BLOCK_COOKIE;
+ const value=await verdictToken(cfg,url.hostname,verdict);
+ const headers=new Headers(head);
+ headers.set("Location",path);
+ headers.append("Set-Cookie",policyCookie(name,value));
+ headers.append("Set-Cookie",policyCookie(old,"",0));
+ return new Response(null,{status:302,headers});
+}
+
 async function createSession(cfg,host){
  const exp=Math.floor(Date.now()/1000)+SESSION_TTL;
  const n=new Uint8Array(16);crypto.getRandomValues(n);const nonce=b64(n);
@@ -59,9 +152,11 @@ async function verify(req,url,cfg){
  if([lat,lon,accuracy].some(x=>typeof x!=="number"||!Number.isFinite(x))||Math.abs(lat)>90||Math.abs(lon)>180||accuracy<=0||accuracy>100)return reply(422,{error:"PRECISE_LOCATION_UNAVAILABLE"});
  const d=distance(lat,lon,cfg.lat,cfg.lon);
  if(Math.abs(d-cfg.radius)<=accuracy)return reply(403,{error:"LOCATION_UNCERTAIN"});
- if(d<=cfg.radius)return reply(403,{error:"CAMPUS_RESTRICTED"});
+ if(d<=cfg.radius)return reply(403,{error:"CAMPUS_RESTRICTED"},{
+  "Set-Cookie":policyCookie(BLOCK_COOKIE,await verdictToken(cfg,url.hostname,"inside"))
+ });
  return reply(200,{verified:true,expiresInSeconds:SESSION_TTL},{
-  "Set-Cookie":SESSION_COOKIE+"="+await createSession(cfg,url.hostname)+"; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age="+SESSION_TTL
+  "Set-Cookie":policyCookie(SESSION_COOKIE,await verdictToken(cfg,url.hostname,"outside"))
  })
 }
 function page(){return new Response(GEO_HTML,{status:403,headers:{...head,"Content-Type":"text/html; charset=utf-8","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}})}
@@ -69,6 +164,15 @@ function disclaimerPage(){
  return new Response(DISCLAIMER_HTML,{status:200,headers:{...head,"Content-Type":"text/html; charset=utf-8",
   "X-Frame-Options":"DENY",
   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"}});
+}
+function blockedPage(){
+ const visible=GEO_HTML.replace('<section id="prompt">','<section id="prompt" hidden>')
+  .replace('<section id="blocked" hidden>','<section id="blocked">')
+  .replace('<p class="warning error" id="reason">Location permission unavailable</p>',
+    '<p class="warning error" id="reason">此连接最近报告的位置在校园限制区域内。访问暂时受限制。你可以重试定位。</p>');
+ return new Response(visible,{status:403,headers:{...head,"Content-Type":"text/html; charset=utf-8",
+   "X-Frame-Options":"DENY",
+   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}});
 }
 function script(){return new Response(GEO_CLIENT,{status:200,headers:{...head,"Content-Type":"application/javascript; charset=utf-8"}})}
 function skip(path){return path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||path==="/__shield/campus-beacon"}
@@ -82,6 +186,8 @@ export async function guestGpsGate(request,env,url){
 
  const cfg=config(env);
  if(!cfg)return null; // disabled or misconfigured -> site works normally
+ if(url.pathname==="/__shield/gps/bridge")return bridge(request,url,cfg);
+ if(url.pathname==="/__shield/gps/import")return importHandoff(request,url,cfg);
  if(url.pathname==="/__shield/gps/client.js"&&request.method==="GET")return script();
  if(url.pathname==="/__shield/gps/verify")return verify(request,url,cfg);
  if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
@@ -89,6 +195,7 @@ export async function guestGpsGate(request,env,url){
    exempt:await exempt(request,cfg,url.hostname)});
  if(skip(url.pathname))return null;
  if(await exempt(request,cfg,url.hostname))return null;
+ if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
  if(await permitted(request,cfg,url.hostname))return null;
  const accept=request.headers.get("Accept")||"";
  if(request.method!=="GET"||(!accept.includes("text/html")&&accept.includes("application/json")))
