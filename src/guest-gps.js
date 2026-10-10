@@ -240,7 +240,12 @@ function blockedPage(){
    "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}});
 }
 function script(){return new Response(GEO_CLIENT,{status:200,headers:{...head,"Content-Type":"application/javascript; charset=utf-8"}})}
-function skip(path){return path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
+// The personal /jingxin story is public. GPS gating applies to protected
+// photo resources, never the HTML story itself or its public text.
+function jingxinPublicPage(path){
+ return path==="/jingxin"||path==="/jingxin/"||path==="/jingxin.html";
+}
+function skip(path){return jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
 export async function guestGpsGate(request,env,url){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
