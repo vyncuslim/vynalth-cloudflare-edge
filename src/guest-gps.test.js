@@ -155,7 +155,12 @@ test("a confirmed campus coordinate creates a short-lived block Cookie and shows
 });
 
 test("signed hub-to-target handoff sets each host's own Cookie but no GPS coordinates",async()=>{
- const origin=await verifyCoords(5.4,100.25,15);
+ const origin=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
+   method:"POST",
+   headers:{"Origin":"https://vynalthai.com","Sec-Fetch-Site":"same-origin",
+    "Content-Type":"application/json"},
+   body:JSON.stringify({lat:5.4,lon:100.25,accuracy:15})
+ }));
  assert.equal(origin.status,200);
  const sourceCookie=origin.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
  const hubRequest=new Request("https://vynalthai.com/__shield/gps/bridge?host=vyncuslim.com&return=%2Fhello",{
