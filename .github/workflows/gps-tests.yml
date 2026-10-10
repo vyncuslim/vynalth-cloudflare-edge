@@ -1,0 +1,27 @@
+name: GPS Guest Gate Unit Tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/guest-gps.js"
+      - "src/guest-gps.test.js"
+      - "src/index.js"
+      - ".github/workflows/gps-tests.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gps-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check syntax
+        run: |
+          node --check src/guest-gps.js
+          node --check src/guest-gps.test.js
+          node --check src/index.js
+      - name: Run GPS guest verification regression tests
+        run: node --test src/guest-gps.test.js
