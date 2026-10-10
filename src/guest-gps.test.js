@@ -156,6 +156,17 @@ test("cross-origin attempts and unsupported body content are rejected",async()=>
  },"test"));
  assert.equal(text.status,415);
 });
+test("Jingxin story text stays public while its protected photos require verification",async()=>{
+ for(const path of ["/jingxin","/jingxin/","/jingxin.html"]){
+  assert.equal(await invoke(req(path)),null,path);
+ }
+ for(const photoPath of ["/media/jingxin/shared-memory.jpg","/media/jingxin/mce-kuala-lumpur-real.webp"]){
+  const response=await invoke(req(photoPath,"GET",{Accept:"image/avif,image/webp,image/*,*/*"}));
+  assert.equal(response.status,403,photoPath);
+  assert.equal(response.headers.get("Cache-Control").includes("no-store"),true);
+ }
+});
+
 test("JSON APIs receive JSON 403; exempt auth routes remain accessible",async()=>{
  const api=await invoke(req("/api/v1/items","GET",{Accept:"application/json"}));
  assert.equal(api.status,403);
