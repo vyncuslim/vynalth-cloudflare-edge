@@ -1,5 +1,6 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
+import { handleJingxinMedia } from "./jingxin-media.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -120,6 +121,14 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Private Jingxin media is handled entirely at the edge before generic
+    // origin proxying and feature-specific gates. A denied/failed R2 request
+    // must never fall through to potentially public static photo assets.
+    const photoDecision = await handleJingxinMedia(request,env,incomingUrl,rootDomain);
+    if (photoDecision) {
+      return edgeResponse(photoDecision,request,incomingUrl,requestId,rootDomain);
     }
 
     // Dedicated consent endpoints are first-party and must work without GPS
