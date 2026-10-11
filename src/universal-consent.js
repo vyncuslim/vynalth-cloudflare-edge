@@ -57,7 +57,10 @@ async function sig(secret,text){
 }
 async function verify(secret,value,signature){
  const bytes=decode(signature);
- if(!bytes||bytes.length!==32)return false;
+ // Reject alternative Base64url spellings with non-zero unused pad bits.
+ // They may decode to the same HMAC bytes but should not be accepted as
+ // equivalent signed Cookies / SSO link-state signatures.
+ if(!bytes||bytes.length!==32||base64(bytes)!==signature)return false;
  return crypto.subtle.verify("HMAC",await hkey(secret),bytes,te.encode(value));
 }
 export function consentRoot(host){
