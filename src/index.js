@@ -129,7 +129,8 @@ export default {
     // remain exempt from this feature-specific school blocking.
     const photoResource = rootDomain === "vyncuslim.com" &&
       incomingUrl.pathname.startsWith("/media/jingxin/");
-    if (photoResource && !(await shieldAccountExempt(request,env,rootDomain))) {
+    if (photoResource && env?.JINGXIN_PRIVATE_MEDIA_ENABLED === "true" &&
+        !(await shieldAccountExempt(request,env,rootDomain))) {
       const schoolDenial = await checkSchoolPolicy(request,env,rootDomain);
       if (schoolDenial) {
         return edgeResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
