@@ -116,7 +116,7 @@ test("confirmed campus returns 403 and only expires stale credentials",async()=>
  assert.equal(result.status,403);
  assert.equal((await result.json()).error,"CAMPUS_RESTRICTED");
  const cookies=result.headers.getSetCookie();
- assert.ok(cookies.length>=1);
+ assert.equal(cookies.length,0,"New INSIDE denials send no Set-Cookie");
  assert.ok(cookies.every(v=>v.includes("Max-Age=0")));
  assert.equal(cookies.some(v=>v.includes("Max-Age=900")||v.includes("Max-Age=300")),false);
  assert.equal(cookies.some(v=>v.includes("lat=")||v.includes("lon=")),false);
