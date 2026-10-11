@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { Script } from "node:vm";
+import { readFileSync } from "node:fs";
 import { guestGpsGate } from "./guest-gps.js";
 
 const cryptoApi=globalThis.crypto || webcrypto;
@@ -408,4 +409,58 @@ test("CSRF-linked handoff cannot be injected into a different visitor session",a
  }));
  assert.equal(injected.status,403);
  assert.equal((await injected.json()).error,"HANDOFF_STATE_MISMATCH");
+});
+
+const researchOSM=readFileSync(new URL("../test/fixtures/powiis-osm-candidates.RESEARCH_ONLY.geojson",import.meta.url),"utf8");
+test("GPS polygon shadow mode never changes legacy circle outcomes or publishes shadow results",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"shadow",GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ for(const [lat,lon,acc] of [[5.3677,100.21995,5],[5.4,100.25,5],
+  [5.3687259,100.2204351,1]]){
+  const original=await verifyCoords(lat,lon,acc,cfg);
+  const shadow=await verifyCoords(lat,lon,acc,env);
+  assert.equal(shadow.status,original.status);
+  const originalBody=await original.json(),shadowBody=await shadow.json();
+  assert.equal(shadowBody.error,originalBody.error);
+  assert.equal(shadowBody.verified,originalBody.verified);
+  assert.ok(!("shadowDecision" in shadowBody));
+  assert.ok(!("lat" in shadowBody)&&!("lon" in shadowBody));
+ }
+});
+test("GPS research OSM polygons cannot be promoted to hard enforcement",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+  GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ const response=await verifyCoords(5.367711,100.219932,5,env);
+ assert.equal(response.status,503);
+ assert.equal((await response.json()).error,"GPS_GATE_CONFIGURATION_UNAVAILABLE");
+ const absentApproval=await invoke(req("/"),{...env,GPS_POLYGON_ENFORCEMENT_APPROVED:"false"});
+ assert.equal(absentApproval.status,503);
+ assert.equal(await invoke(req("/"),{...env,GPS_GATE_ENABLED:"false"}),null);
+});
+test("GPS polygon shadow requires valid GeoJSON and HMAC secret when gate enabled",async()=>{
+ for(const value of ["{broken","[]",undefined]){
+  const r=await invoke(req("/"),{...cfg,GPS_POLYGON_MODE:"shadow",
+   GPS_CAMPUS_POLYGONS_JSON:value});
+  assert.equal(r.status,503);
+ }
+ const noSecret=await invoke(req("/"),{...cfg,GPS_POLYGON_MODE:"shadow",
+  GPS_CAMPUS_POLYGONS_JSON:researchOSM,GPS_GATE_SESSION_SECRET:undefined});
+ assert.equal(noSecret.status,503);
+});
+test("approved synthetic polygon mode has INSIDE/OUTSIDE/UNCERTAIN outcomes without exposing position",async()=>{
+ // Synthetic approval is used only to exercise the code path; no production
+ // authoritative survey is asserted by these test-only feature attributes.
+ const data=JSON.parse(researchOSM);
+ data.features.forEach(f=>{f.properties.official_boundary_verified=true;});
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+  GPS_CAMPUS_POLYGONS_JSON:JSON.stringify(data)};
+ const inside=await verifyCoords(5.367711,100.219932,3,env);
+ assert.equal(inside.status,403);
+ assert.equal((await inside.json()).error,"CAMPUS_RESTRICTED");
+ const outside=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(outside.status,200);
+ assert.equal((await outside.json()).verified,true);
+ const edge=await verifyCoords(5.3687259,100.2204351,3,env);
+ assert.equal(edge.status,403);
+ assert.equal((await edge.json()).error,"LOCATION_UNCERTAIN");
+ assert.equal(edge.headers.get("Set-Cookie"),null);
 });
