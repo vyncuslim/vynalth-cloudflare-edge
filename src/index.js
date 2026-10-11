@@ -1,6 +1,6 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
-import { handleEgressIpCheck } from "./egress-ip-check.js";
+import { handleEgressIpCheck,checkSchoolEgressRestriction } from "./egress-ip-check.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
@@ -127,9 +127,16 @@ export default {
     // Dedicated, read-only, same-origin network observer for an opted-in
     // administrator's mobile browser. Never creates an IP block or whitelist.
     // Existing Cloudflare WAF runs before this Worker as usual.
-    const networkObservation = handleEgressIpCheck(request,incomingUrl);
+    const networkObservation = await handleEgressIpCheck(request,env,incomingUrl);
     if(networkObservation){
       return edgeResponse(networkObservation,request,incomingUrl,requestId,rootDomain);
+    }
+
+    // Time-limited founder-approved network restrictions. The browser cannot
+    // choose a third-party IP: only CF-Connecting-IP is considered.
+    const schoolEgressDenial=await checkSchoolEgressRestriction(request,env,incomingUrl);
+    if(schoolEgressDenial){
+      return edgeResponse(schoolEgressDenial,request,incomingUrl,requestId,rootDomain);
     }
 
     // Keep School IP Policy enforcement for protected photo bytes. A guest's
