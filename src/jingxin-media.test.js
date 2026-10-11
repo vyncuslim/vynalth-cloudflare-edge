@@ -47,17 +47,22 @@ test("story and unrelated assets are untouched by private media handler",async()
  assert.equal(await invoke(photo("/jingxin"),{}),null);
  assert.equal(await invoke(photo("/assets/logo.svg"),{}),null);
 });
-test("missing R2 binding or off flag denies private photo without origin fallback",async()=>{
+test("disabled private-media rollout leaves existing public photos and status routes untouched",async()=>{
  for(const env of [{}, {...makeEnv(),JINGXIN_PRIVATE_MEDIA_ENABLED:"false"}]){
-  const res=await invoke(photo(),env);
-  assert.equal(res.status,503);
-  assert.match(res.headers.get("Cache-Control"),/no-store/);
-  const status=await invoke(photo("/jingxin/access-status"),env);
-  assert.equal(status.status,200);
-  const detail=await status.json();
-  assert.equal(detail.blocked,true);
-  assert.equal(detail.reason,"unavailable");
+  assert.equal(await invoke(photo(),env),null);
+  assert.equal(await invoke(photo("/jingxin/access-status"),env),null);
  }
+});
+test("enabled private-media rollout without R2 binding fails closed, never reaches public origin",async()=>{
+ const env={...base};
+ const res=await invoke(photo(),env);
+ assert.equal(res.status,503);
+ assert.match(res.headers.get("Cache-Control"),/no-store/);
+ const status=await invoke(photo("/jingxin/access-status"),env);
+ assert.equal(status.status,200);
+ const detail=await status.json();
+ assert.equal(detail.blocked,true);
+ assert.equal(detail.reason,"unavailable");
 });
 test("signed trusted status unlocks only recognized first-party private R2 paths",async()=>{
  const env=makeEnv();
