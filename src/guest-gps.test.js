@@ -77,7 +77,9 @@ test("client script serves before GPS grant and includes denial state",async()=>
  assert.match(script,/autoRequest\(\)/);
  assert.match(script,/navigator\.permissions\.query/);
  assert.match(script,/授权被拒绝/);
- assert.match(script,/location\.reload/);
+ assert.match(script,/navigationTicket/);
+ assert.match(script,/location\.replace/);
+ assert.doesNotMatch(script,/location\.reload/);
  assert.doesNotThrow(()=>new Script(script),"GPS browser challenge client must parse as valid JavaScript");
 });
 test("forged status cannot bypass, valid signed trust and contact can",async()=>{
