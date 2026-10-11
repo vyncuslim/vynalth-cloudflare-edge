@@ -4,6 +4,7 @@ on:
     branches:
       - review/universal-consent-kv-20261011
       - review/integrate-consent-gps-20261011
+      - fix/wrangler-14-domain-routes-20261011
     paths:
       - "src/universal-consent.js"
       - "src/guest-gps.js"
@@ -17,6 +18,10 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "wrangler.toml"
+      - ".github/scripts/verify-routes.py"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/consent-tests.yml"
       - "src/universal-consent.js"
       - "src/universal-consent.test.js"
       - "src/index.js"
@@ -41,5 +46,14 @@ jobs:
           node --check src/universal-consent.js
           node --check src/universal-consent.test.js
           node --check src/index.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify seven-zone routes parse at TOML root
+        run: python3 .github/scripts/verify-routes.py
+      - name: Install Wrangler for offline configuration check
+        run: npm install --no-audit --no-fund
+      - name: Wrangler dry-run (never deploys)
+        run: npx wrangler deploy --dry-run --outdir .wrangler-route-test
       - name: Run all Worker regression tests
         run: npm test
