@@ -29,6 +29,10 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
 GPS_GATE_ENABLED = "true"
+# Server-side Telegram notification for GPS 403, separate from visitor access.
+# Requires Telegram Bot and Chat ID configured as Worker secrets.
+# Reuses existing TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID if bound.
+GPS_TELEGRAM_ALERTS_ENABLED = "true"
 # Re-evaluate GPS on each protected HTML document reload/navigation. Previous
 # 15-minute cookies can serve assets/APIs but cannot bypass document checks.
 GPS_RECHECK_EVERY_DOCUMENT = "true"
