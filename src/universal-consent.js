@@ -90,7 +90,19 @@ export async function signedSSO(request,env,root){
     claim.host!==root||!Number.isInteger(claim.exp)||
     claim.exp<=now||claim.exp>now+900||
     typeof claim.status!=="string"||claim.status.length>32)return null;
- return {sub:claim.sub,status:claim.status,sid:claim.sid,exp:claim.exp};
+ // Optional email claims are signed by the REAL canonical Auth backend,
+ // never taken from a login form or browser-editable user_metadata. Existing
+ // sessions without these fields remain compatible but cannot grant an
+ // affirmative verified-email assertion to school access policy.
+ const hasEmailFields=Object.hasOwn(claim,"email")||
+   Object.hasOwn(claim,"email_verified");
+ if(hasEmailFields&&(
+    typeof claim.email!=="string"||claim.email.length>254||
+    !/^[^\\s@]{1,64}@[A-Za-z0-9.-]{1,190}$/.test(claim.email)||
+    typeof claim.email_verified!=="boolean"))return null;
+ return {sub:claim.sub,status:claim.status,sid:claim.sid,exp:claim.exp,
+  ...(hasEmailFields?{email:claim.email.toLowerCase(),
+   email_verified:claim.email_verified}:{})};
 }
 export async function shieldAccountExempt(request,env,root){
  const identity=await signedSSO(request,env,root);
