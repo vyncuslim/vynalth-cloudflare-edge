@@ -28,6 +28,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify domain routes and disabled safety flags
+        run: python3 .github/scripts/verify-routes.py
+      - name: Dry-run Worker configuration
+        run: npx wrangler deploy --dry-run --outdir .wrangler-route-test
+
       - name: Deploy Worker
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
         uses: cloudflare/wrangler-action@v3
