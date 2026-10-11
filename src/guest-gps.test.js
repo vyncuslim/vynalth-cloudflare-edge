@@ -596,11 +596,20 @@ test("sibling domain completes fresh cross-domain GPS recheck with exactly one t
   body:JSON.stringify({lat:5.4,lon:100.25,accuracy:8,returnPath:"/"})
  }),env);
  assert.equal(fresh.status,200);
- const hubCookie=fresh.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const hubCookies=fresh.headers.getSetCookie();
+ const hubCookie=hubCookies.filter(x=>x.startsWith("__Host-vynalth-geo=")||
+   x.startsWith("__Host-vynalth-gps-fresh=")).map(x=>x.split(";")[0]).join("; ");
+ assert.match(hubCookie,/__Host-vynalth-gps-fresh=/);
  const bridge=new URL(challengeUrl);
  bridge.pathname="/__shield/gps/bridge";
+ const oldOnly=hubCookie.split("; ").find(x=>x.startsWith("__Host-vynalth-geo="));
+ const staleBridge=await invoke(new Request(bridge.toString(),{headers:{Cookie:oldOnly}}),env);
+ assert.equal(staleBridge.status,403,"Old location cookie cannot bypass new GPS check");
+ assert.equal((await staleBridge.json()).error,"FRESH_GPS_REQUIRED");
  const bridgeResponse=await invoke(new Request(bridge.toString(),{headers:{Cookie:hubCookie}}),env);
  assert.equal(bridgeResponse.status,302);
+ assert.equal((await invoke(new Request(bridge.toString(),{headers:{Cookie:hubCookie}}),env)).status,403,
+   "Fresh bridge grant can only be used once");
  const targetState=first.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo-handoff=")).split(";")[0];
  const imported=await invoke(new Request(bridgeResponse.headers.get("Location"),{headers:{Cookie:targetState}}),env);
  assert.equal(imported.status,302);
