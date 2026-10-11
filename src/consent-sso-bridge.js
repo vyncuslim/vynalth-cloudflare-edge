@@ -22,6 +22,13 @@ export async function handleConsentSsoBridge(request,env,url){
  if(url.hostname!==HOST||!url.pathname.startsWith(PATH))return null;
  if(url.pathname!==PATH&&url.pathname!==PATH+"/clear"&&
     url.pathname!==PATH+"/status")return null;
+ // Revocation/cleanup must remain available during emergency rollback,
+ // even when all issuance and session inspection is disabled.
+ if(url.pathname===PATH+"/clear"){
+  if(request.method!=="POST")return output(405,{error:"METHOD_NOT_ALLOWED"});
+  if(!okayOrigin(request))return output(403,{error:"ORIGIN_NOT_ALLOWED"});
+  return output(200,{cleared:true},{"Set-Cookie":cookie("",0)});
+ }
  if(env?.CONSENT_SSO_BRIDGE_ENABLED!=="true")return output(503,{error:"SSO_BRIDGE_DISABLED"});
  if(url.pathname===PATH+"/status"){
   if(request.method!=="GET")return output(405,{error:"METHOD_NOT_ALLOWED"});
@@ -30,9 +37,6 @@ export async function handleConsentSsoBridge(request,env,url){
  }
  if(request.method!=="POST")return output(405,{error:"METHOD_NOT_ALLOWED"});
  if(!okayOrigin(request))return output(403,{error:"ORIGIN_NOT_ALLOWED"});
- if(url.pathname===PATH+"/clear"){
-  return output(200,{cleared:true},{"Set-Cookie":cookie("",0)});
- }
  if(request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase()!=="application/json")
   return output(415,{error:"JSON_REQUIRED"});
  const length=Number(request.headers.get("Content-Length")||0);
