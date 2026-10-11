@@ -295,6 +295,9 @@ async function verify(req,url,cfg,env){
  let data;try{const raw=await req.text();if(raw.length>1024)return reply(413,{error:"REQUEST_TOO_LARGE"});data=JSON.parse(raw)}catch{return reply(400,{error:"INVALID_JSON"})}
  const {lat,lon,accuracy}=data||{};
  const recheckDocument=env?.GPS_RECHECK_EVERY_DOCUMENT==="true";
+ if(recheckDocument&&(typeof env?.CONSENT_KV?.get!=="function"||
+    typeof env?.CONSENT_KV?.put!=="function"))
+  return reply(503,{error:"GPS_NAVIGATION_STATE_UNAVAILABLE"});
  // This is the destination of the original document, NOT an arbitrary URL.
  const requestedPath=typeof data?.returnPath==="string"?
     data.returnPath:"/";
