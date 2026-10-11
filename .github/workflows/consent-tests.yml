@@ -9,6 +9,7 @@ on:
       - "src/universal-consent.js"
       - "src/guest-gps.js"
       - "src/gps-regional-trigger.js"
+      - "src/gps-regional-trigger.test.js"
       - "src/guest-gps.test.js"
       - "src/gps-telegram-alert.js"
       - "src/gps-telegram-alert.test.js"
@@ -30,6 +31,7 @@ on:
       - "src/universal-consent.test.js"
       - "src/guest-gps.js"
       - "src/gps-regional-trigger.js"
+      - "src/gps-regional-trigger.test.js"
       - "src/guest-gps.test.js"
       - "src/gps-telegram-alert.js"
       - "src/gps-telegram-alert.test.js"
@@ -53,6 +55,7 @@ jobs:
           node --check src/gps-verification-ui.js
           node --check src/guest-gps.js
           node --check src/gps-regional-trigger.js
+          node --check src/gps-regional-trigger.test.js
           node --check src/guest-gps.test.js
           node --check src/gps-telegram-alert.js
           node --check src/gps-telegram-alert.test.js
