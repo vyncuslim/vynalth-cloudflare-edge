@@ -123,11 +123,10 @@ export default {
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
     }
-    // Identity restrictions take precedence over trust/contact/status, GPS,
-    // consent linking and private media. Never infer login email from user
-    // inputs; only a valid signed SSO assertion from canonical Auth is used.
-    const schoolEmailDenial=await schoolEmailGate(
-      request,env,incomingUrl,rootDomain);
+
+    // Account restrictions must run before role/GPS/consent/photo exemptions.
+    // Only a signed, verified canonical login assertion can identify school email.
+    const schoolEmailDenial=await schoolEmailGate(request,env,incomingUrl,rootDomain);
     if(schoolEmailDenial){
       return edgeResponse(schoolEmailDenial,request,incomingUrl,requestId,rootDomain);
     }
@@ -136,14 +135,8 @@ export default {
     // self-reported GPS verdict alone must never bypass independent School
     // IP restrictions. Canonical server-signed trust/contact/status identities
     // remain exempt from this feature-specific school blocking.
-    const photoPath=incomingUrl.pathname;
-    const photoResource = rootDomain === "vyncuslim.com" && (
-      photoPath.startsWith("/media/jingxin/")||
-      photoPath==="/assets/jingxin-memory.jpg"||
-      photoPath==="/assets/jingxin-memory-hq.avif"||
-      photoPath==="/assets/mce-kuala-lumpur-real.webp"||
-      photoPath.startsWith("/assets/.jingxin-hq/")
-    ||photoPath.startsWith("/assets/.jingxin-hq2/"));
+    const photoResource = rootDomain === "vyncuslim.com" &&
+      incomingUrl.pathname.startsWith("/media/jingxin/");
     if (photoResource && env?.JINGXIN_PRIVATE_MEDIA_ENABLED === "true" &&
         !(await shieldAccountExempt(request,env,rootDomain))) {
       const schoolDenial = await checkSchoolPolicy(request,env,rootDomain);
