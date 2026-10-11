@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import edge from "../src/index.js";
+import { temporaryIpBlockResponse,TEMPORARY_IP_BLOCK } from "../src/temporary-ip-block.js";
 
 // Existing edge behavior is tested with a stub origin and stub Service Binding.
 function request(hostname = "vyncuslim.com", path = "/") {
@@ -235,5 +236,79 @@ test("server-signed trusted account bypasses only School IP photo feature",async
   assert.equal(photoReads,1);
   assert.equal(policyCalls,0);
   assert.equal(originCalls(),0);
+ });
+});
+
+test("time-limited owner IP restriction returns 403 without a cookie",async()=>{
+ const req=new Request("https://vynalthai.com/",{
+  headers:{"CF-Connecting-IP":"60.51.219.195"}
+ });
+ const checkedAt=(TEMPORARY_IP_BLOCK.expiresAtUnix-3600)*1000;
+ const r=temporaryIpBlockResponse(req,new URL(req.url),checkedAt);
+ assert.equal(r.status,403);
+ assert.equal(r.headers.get("X-Vynalth-Temporary-IP-Block"),"12h");
+ assert.equal(Number(r.headers.get("Retry-After")),3600);
+ assert.equal(r.headers.get("Set-Cookie"),null);
+ assert.equal(r.headers.get("Cache-Control"),"no-store");
+ assert.equal(temporaryIpBlockResponse(req,new URL(req.url),
+  TEMPORARY_IP_BLOCK.expiresAtUnix*1000),null,"Automatic expiry must work without redeploy");
+ assert.equal(temporaryIpBlockResponse(req,new URL(req.url),
+  (TEMPORARY_IP_BLOCK.expiresAtUnix+100)*1000),null);
+});
+test("temporary rule matches only Cloudflare's authoritative client IP",()=>{
+ const url=new URL("https://vynalthai.com/c");
+ const at=(TEMPORARY_IP_BLOCK.expiresAtUnix-60)*1000;
+ const spoofed=new Request(url,{headers:{
+  "CF-Connecting-IP":"203.0.113.25","X-Forwarded-For":"60.51.219.195"}});
+ assert.equal(temporaryIpBlockResponse(spoofed,url,at),null);
+ assert.equal(temporaryIpBlockResponse(new Request(url),url,at),null);
+});
+test("temporary rule preserves trust/contact/status, legal and login recovery paths",()=>{
+ const at=(TEMPORARY_IP_BLOCK.expiresAtUnix-60)*1000;
+ for(const addr of [
+  "https://trust.vynalthai.com/",
+  "https://status.vynalthai.com/",
+  "https://contact.vynalthai.com/",
+  "https://vynalthai.com/auth/login",
+  "https://vynalthai.com/en/legal/privacy",
+  "https://vynalthai.com/__shield/gps/status",
+  "https://vynalthai.com/__shield/gps/disclaimer",
+  "https://vynalthai.com/.well-known/acme-challenge/demo",
+  "https://vynalthai.com/api/auth/session",
+ ]){
+  const req=new Request(addr,{headers:{"CF-Connecting-IP":"60.51.219.195"}});
+  assert.equal(temporaryIpBlockResponse(req,new URL(req.url),at),null,addr);
+ }
+});
+test("blocked public IPv4 stops origin fetch for main site and covered subdomains",async()=>{
+ await withOrigin(async count=>{
+  for(const hostname of ["vynalthai.com","search.vynalthai.com","vynova.vynalthai.com"]){
+   const req=new Request("https://"+hostname+"/",{
+    headers:{"CF-Connecting-IP":"60.51.219.195"}});
+   const res=await edge.fetch(req,{},null);
+   // This test is run before the block's configured real-world expiry.
+   if(Date.now()<TEMPORARY_IP_BLOCK.expiresAtUnix*1000){
+    assert.equal(res.status,403,hostname);
+    assert.equal(res.headers.get("x-vynalth-edge"),"cloudflare-worker");
+    assert.equal(res.headers.get("x-vynalth-temporary-ip-block"),"12h");
+   }
+  }
+  if(Date.now()<TEMPORARY_IP_BLOCK.expiresAtUnix*1000)assert.equal(count(),0);
+ });
+});
+test("server-signed trusted identity remains exempt from temporary network deny",async()=>{
+ await withOrigin(async count=>{
+  const key="temporary-ip-exemption-signing-key-1234567890";
+  const payload=Buffer.from(JSON.stringify({
+   sub:"person_12345678",sid:"session_12345678",status:"trust",
+   host:"vynalthai.com",exp:Math.floor(Date.now()/1000)+600
+  })).toString("base64url");
+  const mac=createHmac("sha256",key).update(payload).digest("base64url");
+  const r=await edge.fetch(new Request("https://vynalthai.com/c",{
+   headers:{"CF-Connecting-IP":"60.51.219.195",
+    Cookie:"__Secure-vynalth-sso="+payload+"."+mac}
+  }),{CONSENT_SSO_SIGNING_SECRET:key},{});
+  assert.equal(r.status,200);
+  assert.equal(count(),1);
  });
 });
