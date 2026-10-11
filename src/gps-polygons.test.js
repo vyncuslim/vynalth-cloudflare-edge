@@ -75,3 +75,12 @@ test("ring crossing, overlapping holes, nested multipolygon and wrong identifier
   shape([outer],"Polygon","BAD ID")
  ])assert.equal(parseCampusPolygons(sample(bad)),null);
 });
+
+
+test("30m edge buffer covers location accuracy without rejecting clearly outside users",()=>{
+ assert.equal(decideCampusPolygons(parsed,5.367711,100.219932,5,30),"INSIDE");
+ const vertex=raw.features[0].geometry.coordinates[0][0];
+ assert.equal(decideCampusPolygons(parsed,vertex[1],vertex[0],5,30),"UNCERTAIN");
+ assert.equal(decideCampusPolygons(parsed,5.4,100.25,5,30),"OUTSIDE");
+ assert.equal(decideCampusPolygons(parsed,5.4,100.25,5,101),"INVALID");
+});
