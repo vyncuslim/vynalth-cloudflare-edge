@@ -50,7 +50,7 @@ const isPolicyException=path=>path===PATH||path===PATH+"/block"||path===PATH+"/c
  path==="/api/admin/school-egress/authorize"||path==="/api/admin/school-egress/revoke"||
  path==="/en/legal/privacy"||path==="/robots.txt"||
  path==="/network-egress"||
- /^\\/(?:en|cn|ms)\\/(?:network-egress|auth)(?:\\/|$)/.test(path);
+ ["en","cn","ms"].some(lang=>[ "network-egress","auth" ].some(name=>path==="/"+lang+"/"+name||path.startsWith("/"+lang+"/"+name+"/")));
 
 export async function checkSchoolEgressRestriction(request,env,url){
  if(env?.SCHOOL_EGRESS_BLOCK_ENABLED!=="true"||isPolicyException(url.pathname))return null;
