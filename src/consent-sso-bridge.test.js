@@ -66,7 +66,7 @@ test("explicit same-origin logout clears the first-party cookie",async()=>{
 
 test("SSO status probe verifies HttpOnly cookie without enabling Consent or leaking PII",async()=>{
  const validToken=token();
- const req=new Request(URL_BASE+"/status",{method:"GET",headers:{
+ const req=new Request(SSO_URL+"/status",{method:"GET",headers:{
   Cookie:"__Secure-vynalth-sso="+validToken
  }});
  const active=await run(req,{...env,CONSENT_CMP_ENABLED:"false"});
@@ -75,15 +75,15 @@ test("SSO status probe verifies HttpOnly cookie without enabling Consent or leak
  assert.equal(active.headers.get("Cache-Control"),"private, no-store");
  assert.equal(active.headers.get("Vary"),"Cookie");
  assert.equal(active.headers.get("Set-Cookie"),null);
- const anonymous=await run(new Request(URL_BASE+"/status"),env);
+ const anonymous=await run(new Request(SSO_URL+"/status"),env);
  assert.equal(anonymous.status,200);
  assert.deepEqual(await anonymous.json(),{authenticated:false});
- const expired=await run(new Request(URL_BASE+"/status",{
+ const expired=await run(new Request(SSO_URL+"/status",{
   headers:{Cookie:"__Secure-vynalth-sso="+token("user",-1)}
  }));
  assert.deepEqual(await expired.json(),{authenticated:false});
- const invalidMethod=await run(new Request(URL_BASE+"/status",{method:"POST"}));
+ const invalidMethod=await run(new Request(SSO_URL+"/status",{method:"POST"}));
  assert.equal(invalidMethod.status,405);
- const disabled=await run(new Request(URL_BASE+"/status"),{...env,CONSENT_SSO_BRIDGE_ENABLED:"false"});
+ const disabled=await run(new Request(SSO_URL+"/status"),{...env,CONSENT_SSO_BRIDGE_ENABLED:"false"});
  assert.equal(disabled.status,503);
 });
