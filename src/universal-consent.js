@@ -98,7 +98,7 @@ export async function signedSSO(request,env,root){
    Object.hasOwn(claim,"email_verified");
  if(hasEmailFields&&(
     typeof claim.email!=="string"||claim.email.length>254||
-    !/^[^\\s@]{1,64}@[A-Za-z0-9.-]{1,190}$/.test(claim.email)||
+    !/^[^\s@]{1,64}@[A-Za-z0-9.-]{1,190}$/.test(claim.email)||
     typeof claim.email_verified!=="boolean"))return null;
  return {sub:claim.sub,status:claim.status,sid:claim.sid,exp:claim.exp,
   ...(hasEmailFields?{email:claim.email.toLowerCase(),
@@ -211,7 +211,7 @@ async function completeLink(request,env,url,root){
      typeof ticket.status!=="string"||ticket.status.length>32||
      (Object.hasOwn(ticket,"email")&&(
        typeof ticket.email!=="string"||ticket.email.length>254||
-       !/^[^\\s@]{1,64}@[A-Za-z0-9.-]{1,190}$/.test(ticket.email)||
+       !/^[^\s@]{1,64}@[A-Za-z0-9.-]{1,190}$/.test(ticket.email)||
        typeof ticket.email_verified!=="boolean")))
    return output(403,{error:"SSO_TICKET_INVALID"});
   await env.CONSENT_KV.delete(linkCodeKey(code));
