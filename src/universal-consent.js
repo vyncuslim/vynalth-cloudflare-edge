@@ -19,6 +19,16 @@ const CODE_SECONDS=60;
 const BOUND_SSO_SECONDS=600;
 const COOKIE_SECONDS=60*60*24*90;
 const AUDIT_SECONDS=60*60*24*365;
+const GUEST_SYNC_TTL=180;
+const GUEST_SYNC_HOSTS=Object.freeze(CONSENT_DOMAINS.filter(root=>root!==HUB_ROOT)
+ .map(root=>"consent."+root));
+const GUEST_SYNC_PREFIX="vynalth:consent:v1:guest-transfer:";
+function guestSyncUrl(index,code){
+ const host=GUEST_SYNC_HOSTS[index];
+ return "https://"+host+API+"/guest-sync/step?ticket="+
+  encodeURIComponent(code)+"&step="+index;
+}
+
 const te=new TextEncoder();
 const RESP={
  "Cache-Control":"private, no-store, max-age=0",
@@ -233,6 +243,75 @@ async function completeLink(request,env,url,root){
  return new Response(null,{status:302,headers});
 }
 
+// A single user-initiated first-party redirect chain transfers an anonymous
+// preference SNAPSHOT to all six other roots without SSO, third-party cookies,
+// shared persistent identifiers or browser fingerprinting. Revoke/changes need
+// another explicit sync; do not claim silent, instantaneous global revocation.
+async function beginGuestSync(request,env,url,root){
+ if(request.method!=="POST"||root!==HUB_ROOT||url.hostname!==HUB_ROOT)
+  return output(404,{error:"NOT_FOUND"});
+ if(!csrfOkay(request,root,url))return output(403,{error:"CSRF_OR_ORIGIN_REJECTED"});
+ const input=await jsonBody(request);
+ if(!input||input.explicit!==true||input.noticeVersion!==SHARED_NOTICE_VERSION)
+  return output(400,{error:"SEVEN_DOMAIN_GUEST_SYNC_NEEDS_EXPLICIT_ACKNOWLEDGMENT"});
+ // Do not promote a guest's mutable account metadata into an authenticated
+ // linked session. Existing real SSO accounts use their own SSO sync.
+ if(await signedSSO(request,env,root))
+  return output(409,{error:"SIGNED_IN_USE_ACCOUNT_SYNC"});
+ const anon=await anonIdentity(request,env,root);
+ if(!anon)return output(409,{error:"SAVE_LOCAL_CONSENT_FIRST"});
+ const snapshot=await current(env,root,null,anon);
+ if(!snapshot.value)return output(409,{error:"SAVE_LOCAL_CONSENT_FIRST"});
+ const action=snapshot.value.withdrawnAt?"withdraw":"save";
+ const choices=snapshot.choices;
+ if(!purposes({analytics:choices.analytics,personalization:choices.personalization,
+              marketing:choices.marketing}))
+  return output(503,{error:"INVALID_STORED_CONSENT"});
+ const ticket=rnd(32),now=Math.floor(Date.now()/1000);
+ try{
+  await env.CONSENT_KV.put(GUEST_SYNC_PREFIX+ticket,JSON.stringify({
+   action,choices,exp:now+GUEST_SYNC_TTL,noticeVersion:SHARED_NOTICE_VERSION
+  }),{expirationTtl:GUEST_SYNC_TTL});
+ }catch{return output(503,{error:"GUEST_SYNC_UNAVAILABLE"});}
+ return output(200,{next:guestSyncUrl(0,ticket),expiresInSeconds:GUEST_SYNC_TTL,
+  domains:CONSENT_DOMAINS,automatic:false});
+}
+async function applyGuestSync(request,env,url,root){
+ if(request.method!=="GET")return output(405,{error:"METHOD_NOT_ALLOWED"});
+ const rawStep=url.searchParams.get("step");
+ const step=/^[0-5]$/.test(rawStep||"")?Number(rawStep):-1;
+ const code=url.searchParams.get("ticket");
+ if(step<0||!GUEST_SYNC_HOSTS[step]||url.hostname!==GUEST_SYNC_HOSTS[step]||
+    root!==CONSENT_DOMAINS.find(d=>url.hostname==="consent."+d)||
+    !/^[A-Za-z0-9_-]{43}$/.test(code||""))
+  return output(403,{error:"GUEST_SYNC_TARGET_REJECTED"});
+ let snapshot;
+ try{
+  const raw=await env.CONSENT_KV.get(GUEST_SYNC_PREFIX+code);
+  if(!raw)return output(410,{error:"GUEST_SYNC_EXPIRED"});
+  snapshot=JSON.parse(raw);
+ }catch{return output(503,{error:"GUEST_SYNC_UNAVAILABLE"});}
+ if(!snapshot||snapshot.noticeVersion!==SHARED_NOTICE_VERSION||
+   snapshot.exp<=Math.floor(Date.now()/1000)||
+   !["save","withdraw"].includes(snapshot.action)||
+   !snapshot.choices||!purposes({
+    analytics:snapshot.choices.analytics,personalization:snapshot.choices.personalization,
+    marketing:snapshot.choices.marketing
+   }))return output(403,{error:"INVALID_GUEST_SYNC_TICKET"});
+ const applied=await writeConsent(env,root,null,null,{
+  action:snapshot.action,choices:snapshot.choices,sharedScope:false
+ });
+ if(applied.error)return output(503,{error:applied.error});
+ const last=step===GUEST_SYNC_HOSTS.length-1;
+ const location=last?"https://"+HUB_ROOT+API+"?guest-sync=complete":
+  guestSyncUrl(step+1,code);
+ const headers=new Headers(RESP);
+ headers.set("Location",location);
+ headers.set("Referrer-Policy","no-referrer");
+ headers.append("Set-Cookie",applied.header);
+ return new Response(null,{status:303,headers});
+}
+
 async function newAnonCookie(env,root,id){
  return cookie(SID_COOKIE,"a."+id+"."+(await sig(env.CONSENT_COOKIE_SECRET,"anon|"+root+"|"+id)),root,COOKIE_SECONDS);
 }
@@ -298,7 +377,7 @@ async function jsonBody(request){
  }catch{return null;}
 }
 function documentPage(root){
- return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Vynalth Consent</title><style>body{font-family:system-ui;background:#080b12;color:#e8f1ff;max-width:650px;margin:5vh auto;padding:30px;line-height:1.7}fieldset{border:1px solid #526075;padding:20px}button{padding:12px;margin:8px 8px 8px 0;border-radius:8px;cursor:pointer}p{color:#b4c5db}a{color:#accfff}</style><h1>Vynalth Universal Cookie Consent</h1><p>中文：必要 Cookie 始终启用。分析、个性化及营销均可单独选择，拒绝或撤回不会阻止基本使用。</p><p lang="ms">Kuki penting sentiasa aktif. Analitik, pemperibadian dan pemasaran adalah pilihan.</p><p lang="en">Essential cookies are required; analytics, personalization and marketing are optional.</p><p>跨站范围：vynalthai.com、vyncuslim.com、vynalthai.si、vyncuslim.si、sleepsomno.com、powiismunc.com、vitamindai.online，以及各站子域名。访客可分别选择和拒绝，无需登录。跨域保存到已登录账号是额外可选功能，只有明确勾选共享并经验证后才同步。</p><p>Cross-site sharing is optional. No fingerprinting or third-party cookies are used. Guest preferences remain first-party per domain unless explicitly linked.</p><p>统一登录来源为 <strong>vynalthai.com</strong>。其他网站通过主站验证和短期授权码建立各自的第一方会话。</p><p><a href="/__vynalth/consent/link">🔗 连接 vynalthai.com 账号 / Link Vynalth AI SSO</a></p><fieldset><legend>Consent choices</legend><label><input type="checkbox" checked disabled> Essential / 必要</label><div><label><input id="analytics" type="checkbox"> Analytics / 分析</label></div><div><label><input id="personalization" type="checkbox"> Personalization / 个性化</label></div><div><label><input id="marketing" type="checkbox"> Marketing / 营销</label></div><hr><label><input id="share" type="checkbox"> I explicitly agree to share these choices across all 7 Vynalth domains when signed in (SSO optional; local choices do not require login).</label></fieldset><button id="save">Save preferences</button><button id="deny">Reject optional</button><button id="withdraw">Withdraw consent</button><p id="status" role="status" aria-live="polite"></p><p><a href="https://vynalthai.com/en/legal/privacy">Privacy policy</a></p><script src="/__vynalth/consent/client.js" defer></script></html>',{
+ return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Vynalth Consent</title><style>body{font-family:system-ui;background:#080b12;color:#e8f1ff;max-width:650px;margin:5vh auto;padding:30px;line-height:1.7}fieldset{border:1px solid #526075;padding:20px}button{padding:12px;margin:8px 8px 8px 0;border-radius:8px;cursor:pointer}p{color:#b4c5db}a{color:#accfff}</style><h1>Vynalth Universal Cookie Consent</h1><p>中文：必要 Cookie 始终启用。分析、个性化及营销均可单独选择，拒绝或撤回不会阻止基本使用。</p><p lang="ms">Kuki penting sentiasa aktif. Analitik, pemperibadian dan pemasaran adalah pilihan.</p><p lang="en">Essential cookies are required; analytics, personalization and marketing are optional.</p><p>跨站范围：vynalthai.com、vyncuslim.com、vynalthai.si、vyncuslim.si、sleepsomno.com、powiismunc.com、vitamindai.online，以及各站子域名。访客可分别选择和拒绝，无需登录。跨域保存到已登录账号是额外可选功能，只有明确勾选共享并经验证后才同步。</p><p>Cross-site sharing is optional. No fingerprinting or third-party cookies are used. Guest preferences remain first-party per domain. From the main site, you can explicitly copy your saved guest choices to all seven domains using first-party redirects. Later changes or withdrawals require another sync. Never automatic or silent.</p><p>统一登录来源为 <strong>vynalthai.com</strong>。其他网站通过主站验证和短期授权码建立各自的第一方会话。</p><p><a href="/__vynalth/consent/link">🔗 连接 vynalthai.com 账号 / Link Vynalth AI SSO</a></p><fieldset><legend>Consent choices</legend><label><input type="checkbox" checked disabled> Essential / 必要</label><div><label><input id="analytics" type="checkbox"> Analytics / 分析</label></div><div><label><input id="personalization" type="checkbox"> Personalization / 个性化</label></div><div><label><input id="marketing" type="checkbox"> Marketing / 营销</label></div><hr><label><input id="share" type="checkbox"> I explicitly agree to share these choices across all 7 Vynalth domains when signed in (SSO optional; local choices do not require login).</label></fieldset><button id="save">Save preferences</button><button id="deny">Reject optional</button><button id="withdraw">Withdraw consent</button><button id="guest-sync" hidden>Sync saved guest choices across all 7 sites (no login, explicit redirects)</button><p id="status" role="status" aria-live="polite"></p><p><a href="https://vynalthai.com/en/legal/privacy">Privacy policy</a></p><script src="/__vynalth/consent/client.js" defer></script></html>',{
   headers:{...RESP,"Content-Type":"text/html; charset=utf-8",
   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"}
  });
@@ -306,7 +385,21 @@ function documentPage(root){
 const CLIENT=String.raw`"use strict";let token="";const el=id=>document.getElementById(id);function msg(x){el("status").textContent=x}
 async function get(path){const r=await fetch("/__vynalth/consent/"+path,{credentials:"same-origin",cache:"no-store"});if(!r.ok)throw Error("HTTP "+r.status);return r.json()}
 async function load(){try{const s=await get("session");token=s.csrf;const x=await get("state");["analytics","personalization","marketing"].forEach(k=>el(k).checked=!!x.choices[k]);el("share").checked=!!x.sharedAcrossDomains;if(!x.authenticated)el("share").disabled=true;msg(x.authenticated?"SSO linked. You can manage consent.":"Guest: consent applies only to this site. SSO link requires your existing login integration.")}catch(e){msg("Consent service unavailable: "+e.message)}}
-async function save(withdraw=false,deny=false){try{const choices={analytics:!deny&&el("analytics").checked,personalization:!deny&&el("personalization").checked,marketing:!deny&&el("marketing").checked};const sharedScope=!deny&&!withdraw&&el("share").checked;const r=await fetch("/__vynalth/consent/preferences",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json","X-Vynalth-Consent-CSRF":token},body:JSON.stringify({action:withdraw?"withdraw":"save",choices,sharedScope,sharedScopeAcknowledged:sharedScope,noticeVersion:"vynalth-four-domains-v1"})});const x=await r.json();if(!r.ok)throw Error(x.error||"Update failed");msg(withdraw?"Consent withdrawn.":deny?"Optional cookies declined.":"Preferences saved.");await load()}catch(e){msg(e.message)}}
+async function save(withdraw=false,deny=false){try{const choices={analytics:!deny&&el("analytics").checked,personalization:!deny&&el("personalization").checked,marketing:!deny&&el("marketing").checked};const sharedScope=!deny&&!withdraw&&el("share").checked;const r=await fetch("/__vynalth/consent/preferences",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json","X-Vynalth-Consent-CSRF":token},body:JSON.stringify({action:withdraw?"withdraw":"save",choices,sharedScope,sharedScopeAcknowledged:sharedScope,noticeVersion:"vynalth-seven-domains-v1"})});const x=await r.json();if(!r.ok)throw Error(x.error||"Update failed");msg(withdraw?"Consent withdrawn.":deny?"Optional cookies declined.":"Preferences saved.");await load()}catch(e){msg(e.message)}}
+async function guestSync(){try{
+ if(!token)throw Error("Save local consent and reload the page first.");
+ const r=await fetch("/__vynalth/consent/guest-sync/start",{
+  method:"POST",credentials:"same-origin",cache:"no-store",
+  headers:{"Content-Type":"application/json","X-Vynalth-Consent-CSRF":token},
+  body:JSON.stringify({explicit:true,noticeVersion:"vynalth-seven-domains-v1"})
+ });
+ const x=await r.json();
+ if(!r.ok)throw Error(x.error||"Guest sync unavailable");
+ msg("Redirecting through six first-party consent hosts...");
+ window.location.assign(x.next);
+ }catch(e){msg(e.message)}}
+if(location.hostname==="vynalthai.com"){el("guest-sync").hidden=false;
+ el("guest-sync").onclick=guestSync}
 el("save").onclick=()=>save();el("deny").onclick=()=>save(false,true);el("withdraw").onclick=()=>save(true);load();`;
 function clientPage(){
  return new Response(CLIENT,{headers:{...RESP,"Content-Type":"application/javascript; charset=utf-8"}});
@@ -387,6 +480,8 @@ export async function handleUniversalConsent(request,env,url,root){
  if(endpoint==="link")return beginLinkResponse(request,env,url,root);
  if(endpoint==="authorize")return authorizeAtHub(request,env,url,root);
  if(endpoint==="callback")return completeLink(request,env,url,root);
+ if(endpoint==="guest-sync/start")return beginGuestSync(request,env,url,root);
+ if(endpoint==="guest-sync/step")return applyGuestSync(request,env,url,root);
  const identity=await signedSSO(request,env,root);
  const anon=identity?null:await anonIdentity(request,env,root);
  if(endpoint==="session"&&request.method==="GET"){
