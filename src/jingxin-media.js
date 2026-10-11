@@ -8,6 +8,22 @@ import { gpsOutsideOrLegacyExempt } from "./guest-gps.js";
 
 const PHOTO_HOST="vyncuslim.com";
 const MEDIA_PREFIX="/media/jingxin/";
+// Old static file paths must not become an unauthenticated origin bypass
+// after private R2 cutover. Public Vercel previews/caches still need
+// independent cleanup: this Worker does not govern unproxied origins.
+const LEGACY_KEYS=Object.freeze({
+ "/assets/jingxin-memory.jpg":"shared-memory.jpg",
+ "/assets/mce-kuala-lumpur-real.webp":"mce-kuala-lumpur-real.webp"
+});
+const SENSITIVE_LEGACY=Object.freeze([
+ "/assets/jingxin-memory-hq.avif",
+ "/assets/.jingxin-hq/",
+ "/assets/.jingxin-hq2/"
+]);
+function legacyProtected(path){
+ return Object.hasOwn(LEGACY_KEYS,path)||
+  SENSITIVE_LEGACY.some(p=>path===p||path.startsWith(p));
+}
 const PHOTO_KEYS=Object.freeze({
  "shared-memory.jpg":{key:"jingxin/shared-memory.jpg",type:"image/jpeg"},
  "mce-kuala-lumpur-real.webp":{key:"jingxin/mce-kuala-lumpur-real.webp",type:"image/webp"}
@@ -34,8 +50,9 @@ async function photoAuthorized(request,env,root,hostname){
 }
 export async function handleJingxinMedia(request,env,url,root){
  const isPhoto=url.pathname.startsWith(MEDIA_PREFIX);
+ const isLegacy=legacyProtected(url.pathname);
  const isStatus=url.pathname==="/jingxin/access-status";
- if(!isPhoto&&!isStatus)return null;
+ if(!isPhoto&&!isLegacy&&!isStatus)return null;
  // Staged rollout: merging the Worker must NOT intercept existing public
  // image routes while private storage migration is incomplete.
  // Once explicitly enabled, missing R2 config fails CLOSED.
@@ -57,7 +74,12 @@ export async function handleJingxinMedia(request,env,url,root){
    source:"vynalth-edge-private-media"};
   return response(200,state);
  }
- const name=url.pathname.slice(MEDIA_PREFIX.length);
+ // HQ chunk/text and AVIF variants are not exposed until independently
+ // backed up in private storage. Alias known JPEG/WebP originals to R2.
+ if(isLegacy&&!Object.hasOwn(LEGACY_KEYS,url.pathname))
+  return response(404,{error:"PHOTO_NOT_FOUND"});
+ const name=isLegacy?LEGACY_KEYS[url.pathname]:
+  url.pathname.slice(MEDIA_PREFIX.length);
  if(!Object.hasOwn(PHOTO_KEYS,name))
   return response(404,{error:"PHOTO_NOT_FOUND"});
  if(!configured)return response(503,{error:"PRIVATE_MEDIA_NOT_CONFIGURED"});
