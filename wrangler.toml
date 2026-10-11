@@ -47,6 +47,13 @@ JINGXIN_PRIVATE_MEDIA_ENABLED = "false"
 
 
 
+# Existing Cloudflare namespace previously validated in GPS/CMP review branches.
+# This stores ONLY random one-use GPS navigation/freshness markers.
+# No coordinates or account secrets are stored in this KV namespace.
+[[kv_namespaces]]
+binding = "CONSENT_KV"
+id = "f687e465ac0441d7a6ca18aaa9ed91f8"
+
 # The existing edge Worker owns HTTP routes. The policy Worker has no routes:
 # it is called privately, so the origin and security/tracing logic is preserved.
 [[services]]
