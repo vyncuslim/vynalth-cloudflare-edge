@@ -455,7 +455,7 @@ test("approved synthetic polygon mode has INSIDE/OUTSIDE/UNCERTAIN outcomes with
  const outside=await verifyCoords(5.4,100.25,5,env);
  assert.equal(outside.status,200);
  assert.equal((await outside.json()).verified,true);
- const edge=await verifyCoords(5.3687259,100.2204351,3,env);
+ const edge=await verifyCoords(5.36875,100.22045,3,env);
  assert.equal(edge.status,200);
  const near=await edge.json();
  assert.equal(near.nearBoundary,true);
@@ -475,7 +475,7 @@ test("operator-approved uncertified OSM polygons use temporary near-border permi
  assert.equal((await inside.json()).error,"CAMPUS_RESTRICTED");
  const outside=await verifyCoords(5.4,100.25,5,env);
  assert.equal(outside.status,200);
- const near=await verifyCoords(5.3687259,100.2204351,5,env);
+ const near=await verifyCoords(5.36875,100.22045,5,env);
  assert.equal(near.status,200);
  assert.equal((await near.json()).nearBoundary,true);
  // No location consent means no signed status, hence HTML and APIs are denied.
@@ -487,6 +487,31 @@ test("operator-approved uncertified OSM polygons use temporary near-border permi
  const noConsentPage=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}),env);
  assert.equal(noConsentPage.status,403);
  assert.match(await noConsentPage.text(),/Request location again|Allow location/);
+});
+
+test("inside point within 30m buffer is retryable 403, no permit Cookie issued",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+  GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED:"true",GPS_BOUNDARY_BUFFER_METERS:"30",
+  GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ const nearInside=await verifyCoords(5.36870,100.220435,5,env);
+ assert.equal(nearInside.status,403);
+ const result=await nearInside.json();
+ assert.equal(result.error,"CAMPUS_BOUNDARY_UNCERTAIN");
+ assert.equal(result.retryable,true);
+ assert.equal(result.blocked,true);
+ assert.equal(nearInside.headers.getSetCookie().length,0,"No Cookie may be granted");
+ const nearOutside=await verifyCoords(5.36875,100.22045,5,env);
+ assert.equal(nearOutside.status,200);
+ assert.equal((await nearOutside.json()).classification,"near_outside");
+ const outside=await verifyCoords(5.40,100.25,5,env);
+ assert.equal((await outside.json()).classification,"outside");
+ const signed=outside.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const revoked=await invoke(req("/__shield/gps/verify","POST",{
+   Origin:HOST,"Content-Type":"application/json","Sec-Fetch-Site":"same-origin",Cookie:signed
+ },JSON.stringify({lat:5.36870,lon:100.220435,accuracy:5})),env);
+ assert.equal(revoked.status,403);
+ assert.ok(revoked.headers.getSetCookie().some(x=>x.includes("Max-Age=0")));
+ assert.equal(revoked.headers.getSetCookie().some(x=>x.includes("Max-Age=900")),false);
 });
 
 test("invalid config never grants protected access, including legacy bypass setting",async()=>{
@@ -512,7 +537,7 @@ test("proximity cookie cannot unlock private photo data",async()=>{
  const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
    GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED:"true",GPS_BOUNDARY_BUFFER_METERS:"30",
    GPS_CAMPUS_POLYGONS_JSON:researchOSM};
- const near=await verifyCoords(5.3687259,100.2204351,5,env);
+ const near=await verifyCoords(5.36875,100.22045,5,env);
  assert.equal(near.status,200);
  const nearCookie=near.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
  const rq=req("/private/picture.webp","GET",{Cookie:nearCookie});

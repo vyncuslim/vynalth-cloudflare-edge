@@ -352,8 +352,23 @@ async function verify(req,url,cfg,env){
   verdict=circles.some(c=>Math.abs(c.distance-c.radius)<=accuracy)?"UNCERTAIN":
    circles.some(c=>c.distance+accuracy<c.radius)?"INSIDE":"OUTSIDE";
  }
+ if(verdict==="INSIDE_UNCERTAIN"){
+  // A point mapped inside the OSM campus, but close to the approximate
+  // boundary, is not sufficiently reliable to assert definitive INSIDE.
+  // Require a new GPS fix (403); NEVER mint a near-boundary allow token.
+  const headers=new Headers(head);
+  headers.set("Content-Type","application/json; charset=utf-8");
+  if(getCookie(req,SESSION_COOKIE))
+   headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,"",0));
+  if(getCookie(req,BLOCK_COOKIE))
+   headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  return new Response(JSON.stringify({
+   error:"CAMPUS_BOUNDARY_UNCERTAIN",blocked:true,retryable:true
+  }),{status:403,headers});
+ }
  if(verdict==="UNCERTAIN"){
-  // A GPS location near an approximate border does not prove INSIDE.
+  // A GPS location OUTSIDE the approximate campus border may receive a
+  // short 5-minute access token; a point reported INSIDE never may.
   if(cfg.polygonMode!=="enforce")return reply(403,{error:"LOCATION_UNCERTAIN"});
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
@@ -362,7 +377,7 @@ async function verify(req,url,cfg,env){
    headers.append("Set-Cookie",policyCookie(FRESH_BRIDGE_COOKIE,await mintFreshBridge(cfg,url.hostname),NAV_PROOF_TTL));
   headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
   const proof=recheckDocument?await visitProof(cfg,url.hostname,targetPath):null;
-  return new Response(JSON.stringify({verified:false,nearBoundary:true,expiresInSeconds:300,
+  return new Response(JSON.stringify({verified:false,nearBoundary:true,classification:"near_outside",expiresInSeconds:300,
    ...(proof?{navigationTicket:proof}:{})}),{status:200,headers});
  }
  if(verdict==="INSIDE"){
@@ -382,7 +397,7 @@ async function verify(req,url,cfg,env){
   headers.append("Set-Cookie",policyCookie(FRESH_BRIDGE_COOKIE,await mintFreshBridge(cfg,url.hostname),NAV_PROOF_TTL));
  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
  const proof=recheckDocument?await visitProof(cfg,url.hostname,targetPath):null;
- return new Response(JSON.stringify({verified:true,expiresInSeconds:SESSION_TTL,
+ return new Response(JSON.stringify({verified:true,classification:"outside",expiresInSeconds:SESSION_TTL,
     ...(proof?{navigationTicket:proof}:{})}),{
    status:200,headers
  });

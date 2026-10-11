@@ -25,13 +25,13 @@ test("two real OSM candidate interior centroids are classified INSIDE in researc
  assert.equal(decideCampusPolygons(parsed,5.461141,100.284225,5),"INSIDE");
  assert.equal(decideCampusPolygons(parsed,5.40,100.25,5),"OUTSIDE");
 });
-test("exact polygon vertices, edge midpoints and uncertainty bands are UNCERTAIN",()=>{
+test("campus vertices and inner perimeter can never receive an outside-near verdict",()=>{
  for(const feature of raw.features){
   const r=feature.geometry.coordinates[0];
   const vertex=r[0];
   const mid=[(r[0][0]+r[1][0])/2,(r[0][1]+r[1][1])/2];
-  assert.equal(decideCampusPolygons(parsed,vertex[1],vertex[0],1),"UNCERTAIN");
-  assert.equal(decideCampusPolygons(parsed,mid[1],mid[0],1),"UNCERTAIN");
+  assert.equal(decideCampusPolygons(parsed,vertex[1],vertex[0],1),"INSIDE_UNCERTAIN");
+  assert.equal(decideCampusPolygons(parsed,mid[1],mid[0],1),"INSIDE_UNCERTAIN");
  }
 });
 test("polygon shape validation rejects malformed, self-intersecting, duplicated or out-of-range geometry",()=>{
@@ -80,7 +80,17 @@ test("ring crossing, overlapping holes, nested multipolygon and wrong identifier
 test("30m edge buffer covers location accuracy without rejecting clearly outside users",()=>{
  assert.equal(decideCampusPolygons(parsed,5.367711,100.219932,5,30),"INSIDE");
  const vertex=raw.features[0].geometry.coordinates[0][0];
- assert.equal(decideCampusPolygons(parsed,vertex[1],vertex[0],5,30),"UNCERTAIN");
+ assert.equal(decideCampusPolygons(parsed,vertex[1],vertex[0],5,30),"INSIDE_UNCERTAIN");
  assert.equal(decideCampusPolygons(parsed,5.4,100.25,5,30),"OUTSIDE");
  assert.equal(decideCampusPolygons(parsed,5.4,100.25,5,101),"INVALID");
+});
+
+
+test("30m buffer distinguishes inner uncertain (deny) from outer uncertain (short allow)",()=>{
+ const insideClose=[5.36870,100.220435];
+ const outsideClose=[5.36875,100.22045];
+ assert.equal(decideCampusPolygons(parsed,...insideClose,5,30),"INSIDE_UNCERTAIN");
+ assert.equal(decideCampusPolygons(parsed,...outsideClose,5,30),"UNCERTAIN");
+ assert.equal(decideCampusPolygons(parsed,5.367711,100.219932,5,30),"INSIDE");
+ assert.equal(decideCampusPolygons(parsed,5.40,100.25,5,30),"OUTSIDE");
 });

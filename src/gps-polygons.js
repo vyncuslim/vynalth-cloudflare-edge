@@ -123,13 +123,13 @@ function distanceToSegment(p,a,b){
  const t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l));
  return Math.hypot(p[0]-(a[0]+t*dx),p[1]-(a[1]+t*dy));
 }
-/** Returns INSIDE, OUTSIDE, UNCERTAIN, or INVALID. No location is stored. */
+/** Returns INSIDE, INSIDE_UNCERTAIN, OUTSIDE, UNCERTAIN, or INVALID. No location is stored. */
 export function decideCampusPolygons(campuses,lat,lon,accuracy,bufferMeters=0){
  if(!Array.isArray(campuses)||campuses.length<1||
     ![lat,lon,accuracy].every(Number.isFinite)||Math.abs(lat)>90||
     Math.abs(lon)>180||accuracy<=0||accuracy>100||
     !Number.isFinite(bufferMeters)||bufferMeters<0||bufferMeters>100)return "INVALID";
- let inside=false,uncertain=false;
+ let confidentInside=false,nearInside=false,nearOutside=false;
  for(const campus of campuses){
   const p=projection([lon,lat],campus.lat0);
   for(const rings of campus.polygons){
@@ -138,9 +138,16 @@ export function decideCampusPolygons(campuses,lat,lon,accuracy,bufferMeters=0){
    let boundary=Infinity;
    for(const ring of rings)for(let i=0;i<ring.length-1;i++)
     boundary=Math.min(boundary,distanceToSegment(p,ring[i],ring[i+1]));
-   if(boundary<=accuracy+bufferMeters+EPS)uncertain=true;
-   if(within)inside=true;
+   const nearEdge=boundary<=accuracy+bufferMeters+EPS;
+   // A reported point inside the mapped school must never gain a 200
+   // "nearby" token merely because its accuracy overlaps the boundary.
+   // It may be a false positive: return retryable 403, not permanent block.
+   if(within&&nearEdge)nearInside=true;
+   else if(within)confidentInside=true;
+   else if(nearEdge)nearOutside=true;
   }
  }
- return uncertain?"UNCERTAIN":inside?"INSIDE":"OUTSIDE";
+ if(confidentInside)return "INSIDE";
+ if(nearInside)return "INSIDE_UNCERTAIN";
+ return nearOutside?"UNCERTAIN":"OUTSIDE";
 }
