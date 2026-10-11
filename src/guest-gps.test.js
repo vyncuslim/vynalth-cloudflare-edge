@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { Script } from "node:vm";
-import { guestGpsGate } from "./guest-gps.js";
+import { readFileSync } from "node:fs";
+import { guestGpsGate,gpsOutsideOrLegacyExempt } from "./guest-gps.js";
 
 const cryptoApi=globalThis.crypto || webcrypto;
 if(!globalThis.crypto)globalThis.crypto=cryptoApi;
@@ -53,8 +54,10 @@ async function initialGuestRedirect(host,path="/about"){
 
 test("GPS guest gate stays OFF without explicit configuration",async()=>{
  assert.equal(await invoke(req(),{...cfg,GPS_GATE_ENABLED:"false"}),null);
- assert.equal(await invoke(req(),{...cfg,GPS_CAMPUS_LAT:"invalid"}),null);
- assert.equal(await invoke(req(),{...cfg,GPS_ACCOUNT_STATUS_SECRET:undefined}),null);
+ const invalid=await invoke(req(),{...cfg,GPS_CAMPUS_LAT:"invalid"});
+ assert.equal(invalid.status,503);
+ const guest=await invoke(req(),{...cfg,GPS_ACCOUNT_STATUS_SECRET:undefined});
+ assert.equal(guest.status,403);
 });
 test("visitor with no signed status sees 403 GPS verification page",async()=>{
  const result=await invoke(req("/"));
@@ -137,12 +140,12 @@ test("both POWIIS campuses are separate provisional GPS test circles",async()=>{
  assert.equal((await overlap.json()).error,"LOCATION_UNCERTAIN");
 });
 
-test("invalid or incomplete provisional geofences cannot activate a block",async()=>{
+test("invalid provisional geofences do not silently disable an enabled gate",async()=>{
  for(const value of ["{oops", "[]",JSON.stringify([{id:"tanjung-bungah",lat:5.46113,lon:100.28420,radius:180},
  {id:"balik-pulau",lat:5.36770,lon:100.21995}]),
  JSON.stringify([{id:"tanjung-bungah",lat:5.46113,lon:100.28420,radius:180},
  {id:"tanjung-bungah",lat:5.36770,lon:100.21995,radius:180}])]){
-  assert.equal(await invoke(req("/"),{...cfg,GPS_CAMPUS_GEOFENCES_JSON:value}),null);
+  assert.equal((await invoke(req("/"),{...cfg,GPS_CAMPUS_GEOFENCES_JSON:value})).status,503);
  }
 });
 
@@ -406,4 +409,109 @@ test("CSRF-linked handoff cannot be injected into a different visitor session",a
  }));
  assert.equal(injected.status,403);
  assert.equal((await injected.json()).error,"HANDOFF_STATE_MISMATCH");
+});
+
+const researchOSM=readFileSync(new URL("../test/fixtures/powiis-osm-candidates.RESEARCH_ONLY.geojson",import.meta.url),"utf8");
+test("GPS polygon shadow mode never changes legacy circle outcomes or publishes shadow results",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"shadow",GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ for(const [lat,lon,acc] of [[5.3677,100.21995,5],[5.4,100.25,5],
+  [5.3687259,100.2204351,1]]){
+  const original=await verifyCoords(lat,lon,acc,cfg);
+  const shadow=await verifyCoords(lat,lon,acc,env);
+  assert.equal(shadow.status,original.status);
+  const originalBody=await original.json(),shadowBody=await shadow.json();
+  assert.equal(shadowBody.error,originalBody.error);
+  assert.equal(shadowBody.verified,originalBody.verified);
+  assert.ok(!("shadowDecision" in shadowBody));
+  assert.ok(!("lat" in shadowBody)&&!("lon" in shadowBody));
+ }
+});
+test("GPS research OSM polygons cannot be promoted to hard enforcement",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+  GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ const response=await verifyCoords(5.367711,100.219932,5,env);
+ assert.equal(response.status,503);
+ assert.equal((await response.json()).error,"GPS_GATE_CONFIGURATION_UNAVAILABLE");
+ const absentApproval=await invoke(req("/"),{...env,GPS_POLYGON_ENFORCEMENT_APPROVED:"false"});
+ assert.equal(absentApproval.status,503);
+ assert.equal(await invoke(req("/"),{...env,GPS_GATE_ENABLED:"false"}),null);
+});
+test("GPS polygon shadow requires valid GeoJSON and HMAC secret when gate enabled",async()=>{
+ for(const value of ["{broken","[]",undefined]){
+  const r=await invoke(req("/"),{...cfg,GPS_POLYGON_MODE:"shadow",
+   GPS_CAMPUS_POLYGONS_JSON:value});
+  assert.equal(r.status,503);
+ }
+ const noSecret=await invoke(req("/"),{...cfg,GPS_POLYGON_MODE:"shadow",
+  GPS_CAMPUS_POLYGONS_JSON:researchOSM,GPS_GATE_SESSION_SECRET:undefined});
+ assert.equal(noSecret.status,503);
+});
+test("approved synthetic polygon mode has INSIDE/OUTSIDE/UNCERTAIN outcomes without exposing position",async()=>{
+ // Synthetic approval is used only to exercise the code path; no production
+ // authoritative survey is asserted by these test-only feature attributes.
+ const data=JSON.parse(researchOSM);
+ data.features.forEach(f=>{f.properties.official_boundary_verified=true;});
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+  GPS_CAMPUS_POLYGONS_JSON:JSON.stringify(data)};
+ const inside=await verifyCoords(5.367711,100.219932,3,env);
+ assert.equal(inside.status,403);
+ assert.equal((await inside.json()).error,"CAMPUS_RESTRICTED");
+ const outside=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(outside.status,200);
+ assert.equal((await outside.json()).verified,true);
+ const edge=await verifyCoords(5.3687259,100.2204351,3,env);
+ assert.equal(edge.status,200);
+ const near=await edge.json();
+ assert.equal(near.nearBoundary,true);
+ assert.equal(near.verified,false);
+ const nearCookie=edge.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo="));
+ assert.match(nearCookie,/Max-Age=300/);
+ assert.equal(await invoke(req("/","GET",{Cookie:nearCookie.split(";")[0]}),env),null);
+});
+
+
+test("operator-approved uncertified OSM polygons use temporary near-border permissions",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+   GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED:"true",GPS_BOUNDARY_BUFFER_METERS:"30",
+   GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ const inside=await verifyCoords(5.367711,100.219932,5,env);
+ assert.equal(inside.status,403);
+ assert.equal((await inside.json()).error,"CAMPUS_RESTRICTED");
+ const outside=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(outside.status,200);
+ const near=await verifyCoords(5.3687259,100.2204351,5,env);
+ assert.equal(near.status,200);
+ assert.equal((await near.json()).nearBoundary,true);
+ // No location consent means no signed status, hence HTML and APIs are denied.
+ const sibling=await invoke(req("/","GET",{Accept:"text/html"}),env);
+ assert.equal(sibling.status,302);
+ assert.match(sibling.headers.get("Location"),/^https:\/\/vynalthai\.com\/__shield\/gps\/bridge/);
+ const api=await invoke(req("/api/protected","GET",{Accept:"application/json"}),env);
+ assert.equal(api.status,403);
+ const noConsentPage=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}),env);
+ assert.equal(noConsentPage.status,403);
+ assert.match(await noConsentPage.text(),/重新尝试|允许位置/);
+});
+
+test("explicit config-error bypass avoids a whole-site 503 but never grants a GPS verdict",async()=>{
+ const env={...cfg,GPS_CAMPUS_LAT:"broken",GPS_CONFIG_ERROR_ACTION:"bypass"};
+ assert.equal(await invoke(req("/"),env),null);
+ const status=await invoke(req("/__shield/gps/status"),env);
+ assert.equal(status.status,200);
+ assert.equal((await status.json()).configurationAvailable,false);
+ assert.equal((await invoke(req("/"),{...env,GPS_CONFIG_ERROR_ACTION:"closed"})).status,503);
+});
+
+test("proximity cookie cannot unlock private photo data",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+   GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED:"true",GPS_BOUNDARY_BUFFER_METERS:"30",
+   GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ const near=await verifyCoords(5.3687259,100.2204351,5,env);
+ assert.equal(near.status,200);
+ const nearCookie=near.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const rq=req("/private/picture.webp","GET",{Cookie:nearCookie});
+ assert.equal(await gpsOutsideOrLegacyExempt(rq,env,"vyncuslim.com"),false);
+ const outside=await verifyCoords(5.40,100.25,5,env);
+ const outsideCookie=outside.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ assert.equal(await gpsOutsideOrLegacyExempt(req("/private/picture.webp","GET",{Cookie:outsideCookie}),env,"vyncuslim.com"),true);
 });
