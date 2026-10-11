@@ -691,3 +691,39 @@ test("GPS status advertises active boundary-side policy revision without coordin
  assert.equal(bad.policyRevision,"gps-inner-boundary-403-v2");
  assert.equal(bad.configurationAvailable,false);
 });
+
+test("actual GPS boundary 403 hands Telegram notification to waitUntil without coordinates",async()=>{
+ const kvMap=new Map(),pending=[],messages=[];
+ const kv={async get(key){return kvMap.get(key)||null;},async put(key,val){kvMap.set(key,val);}};
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",
+  GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+  GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED:"true",
+  GPS_BOUNDARY_BUFFER_METERS:"30",
+  GPS_CAMPUS_POLYGONS_JSON:researchOSM,
+  GPS_TELEGRAM_ALERTS_ENABLED:"true",
+  TELEGRAM_BOT_TOKEN:"123456789:"+ "A".repeat(35),
+  TELEGRAM_CHAT_ID:"-1001234567890",CONSENT_KV:kv};
+ const request=req("/__shield/gps/verify","POST",{
+  "Origin":HOST,"Sec-Fetch-Site":"same-origin",
+  "Content-Type":"application/json","CF-Connecting-IP":"198.51.100.18"
+ },JSON.stringify({lat:5.36870,lon:100.220435,accuracy:5}));
+ const priorFetch=globalThis.fetch;
+ globalThis.fetch=async (url,options)=>{
+  messages.push(JSON.parse(options.body).text);
+  return new Response(JSON.stringify({ok:true}),{status:200});
+ };
+ try{
+  const denied=await guestGpsGate(request,env,new URL(request.url),
+   {waitUntil:p=>pending.push(p)},"33333333-4444-5555-6666-777777777777");
+  assert.equal(denied.status,403);
+  assert.equal((await denied.json()).error,"CAMPUS_BOUNDARY_UNCERTAIN");
+  assert.equal(denied.headers.get("Set-Cookie"),null);
+  await Promise.all(pending);
+  assert.equal(messages.length,1);
+  assert.match(messages[0],/CAMPUS_BOUNDARY_UNCERTAIN/);
+  assert.match(messages[0],/33333333-4444-5555-6666-777777777777/);
+  assert.equal(messages[0].includes("5.36870"),false);
+  assert.equal(messages[0].includes("100.220435"),false);
+  assert.equal(messages[0].includes("198.51.100.18"),false);
+ }finally{globalThis.fetch=priorFetch;}
+});
