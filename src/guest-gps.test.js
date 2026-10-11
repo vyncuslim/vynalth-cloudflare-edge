@@ -577,3 +577,38 @@ test("refresh on sibling domain forces new hub location check even with existing
  assert.equal(challenge.status,403);
  assert.match(await challenge.text(),/需要精确位置权限/);
 });
+
+test("sibling domain completes fresh cross-domain GPS recheck with exactly one target navigation",async()=>{
+ const seen=new Map();
+ const kv={get:async key=>seen.get(key)||null,put:async(key,value)=>{seen.set(key,value);}};
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:kv};
+ const sibling="https://vyncuslim.si";
+ const root="https://vynalthai.com";
+ const reqHtml=(url,cookie="")=>new Request(url,{headers:{Accept:"text/html","Sec-Fetch-Dest":"document",Cookie:cookie}});
+ const first=await invoke(reqHtml(sibling+"/c/session-123?tab=chat"),env);
+ assert.equal(first.status,302);
+ const challengeUrl=new URL(first.headers.get("Location"));
+ assert.equal(challengeUrl.pathname,"/__shield/gps/recheck");
+ assert.equal((await invoke(new Request(challengeUrl),env)).status,403);
+ const fresh=await invoke(new Request(root+"/__shield/gps/verify",{
+  method:"POST",headers:{Origin:root,"Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:8,returnPath:"/"})
+ }),env);
+ assert.equal(fresh.status,200);
+ const hubCookie=fresh.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const bridge=new URL(challengeUrl);
+ bridge.pathname="/__shield/gps/bridge";
+ const bridgeResponse=await invoke(new Request(bridge.toString(),{headers:{Cookie:hubCookie}}),env);
+ assert.equal(bridgeResponse.status,302);
+ const targetState=first.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo-handoff=")).split(";")[0];
+ const imported=await invoke(new Request(bridgeResponse.headers.get("Location"),{headers:{Cookie:targetState}}),env);
+ assert.equal(imported.status,302);
+ const destination=imported.headers.get("Location");
+ const redirected=new URL(sibling+destination);
+ assert.ok(redirected.searchParams.has("__vynalth_gps_visit"));
+ const targetCookie=imported.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ assert.equal(await invoke(reqHtml(redirected.toString(),targetCookie),env),null);
+ const onReload=await invoke(reqHtml(redirected.toString(),targetCookie),env);
+ assert.equal(onReload.status,302);
+ assert.equal(new URL(onReload.headers.get("Location")).pathname,"/__shield/gps/recheck");
+});
