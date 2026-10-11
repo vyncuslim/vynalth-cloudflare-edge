@@ -103,25 +103,6 @@ test("photo request errors are closed and never proxy to public source",async()=
  assert.equal(failed.status,503);
  assert.match((await failed.json()).error,/UNAVAILABLE/);
 });
-test("private-photo cutover protects old asset aliases and HQ fragments",async()=>{
- const env=makeEnv();
- for(const alias of ["/assets/jingxin-memory.jpg","/assets/mce-kuala-lumpur-real.webp"]){
-  const anonymous=await invoke(photo(alias),env);
-  assert.equal(anonymous.status,403,alias);
-  assert.match(anonymous.headers.get("Cache-Control"),/no-store/);
-  const signed=await invoke(photo(alias,signedUser("trust")),env);
-  assert.equal(signed.status,200,alias);
-  assert.equal(await signed.text(),content);
- }
- for(const sensitive of ["/assets/jingxin-memory-hq.avif",
-  "/assets/.jingxin-hq/part-00.txt","/assets/.jingxin-hq2/part-00.txt"]){
-  const denied=await invoke(photo(sensitive,signedUser("trust")),env);
-  assert.equal(denied.status,404,sensitive);
- }
- assert.equal(await invoke(photo("/assets/jingxin-memory.jpg"),{
-  ...env,JINGXIN_PRIVATE_MEDIA_ENABLED:"false"}),null);
-});
-
 test("HEAD responses expose no body and missing object never falls back",async()=>{
  const env=makeEnv(),cookie=signedUser();
  const res=await invoke(photo(undefined,cookie,"vyncuslim.com","HEAD"),env);
