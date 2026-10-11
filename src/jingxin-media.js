@@ -36,13 +36,16 @@ export async function handleJingxinMedia(request,env,url,root){
  const isPhoto=url.pathname.startsWith(MEDIA_PREFIX);
  const isStatus=url.pathname==="/jingxin/access-status";
  if(!isPhoto&&!isStatus)return null;
+ // Staged rollout: merging the Worker must NOT intercept existing public
+ // image routes while private storage migration is incomplete.
+ // Once explicitly enabled, missing R2 config fails CLOSED.
+ if(env?.JINGXIN_PRIVATE_MEDIA_ENABLED!=="true")return null;
  if(!recognizedHost(url.hostname)||root!==PHOTO_HOST)
   return response(404,{error:"NOT_FOUND"});
  if(request.method!=="GET"&&request.method!=="HEAD")
   return response(405,{error:"METHOD_NOT_ALLOWED"},{Allow:"GET, HEAD"});
- // Fail closed. A missing R2 bucket or disabled flag NEVER exposes origin.
- const configured=env?.JINGXIN_PRIVATE_MEDIA_ENABLED==="true"&&
-  typeof env?.JINGXIN_PRIVATE_MEDIA_R2?.get==="function";
+ // When explicitly enabled, a missing R2 bucket never exposes origin.
+ const configured=typeof env?.JINGXIN_PRIVATE_MEDIA_R2?.get==="function";
  let authorized=false;
  if(configured){
   try{authorized=await photoAuthorized(request,env,root,url.hostname);}
