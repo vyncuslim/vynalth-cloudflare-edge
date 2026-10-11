@@ -137,70 +137,37 @@ prove a person's school identity or prevent proxy/GPS spoofing.
 
 Keep `GPS_GATE_ENABLED=false` on production.
 
-## 4. Jingxin photo — private R2 migration
+## 4. Jingxin photos — preserve existing ASSETS/chunks (NO R2)
 
-The `/jingxin` story text remains publicly readable, but private
-photos are currently **not** guaranteed private. Existing
-`vyncuslim/vv` assets include:
+The user explicitly selected **the existing non-R2 architecture**.
 
-- `assets/jingxin-memory.jpg`
-- `assets/jingxin-memory-hq.avif`
-- `assets/mce-kuala-lumpur-real.webp`
-- `assets/.jingxin-hq/part-00.txt` and `assets/.jingxin-hq2/*`
-- any Vercel/preview, Cloudflare CDN, repo history, copied/derived images
+- The `vyncuslim/vv` repository and its **separate** Cloudflare Worker
+  named `vv` own `vyncuslim.com/jingxin`.
+- That Worker uses its existing `ASSETS` binding and reconstructs
+  the original HQ AVIF from 8 Base64 chunks at
+  `assets/.jingxin-hq2/part-00.txt` through `part-07.txt`.
+- The `/jingxin` story stays public; the Worker checks the school
+  IP/KV and signed school-browser Cookie **before fetching any image
+  parts**. The admin session needs a signed one-hour first-party Cookie.
+- NO Cloudflare R2 bucket, R2 binding, Supabase storage, or R2
+  credentials should be provisioned.
+- The dormant `JINGXIN_PRIVATE_MEDIA_ENABLED=false` module in this
+  repository came from a previous R2 proposal and MUST remain disabled.
+  Do not use it to handle `/jingxin`; `vv` already has its own route
+  and the correct ASSETS-backed image logic.
+- Specifically do NOT add `vyncuslim.com/*` to `vynalth-cloudflare-edge`
+  without a route-owner review, because `vv/wrangler.jsonc` declares
+  that apex route. Wildcard `*.vyncuslim.com/*` is separate.
 
-Provision a private bucket, for example:
+Companion security patch and detailed no-R2 checklist:
+https://github.com/vyncuslim/vv/pull/7
 
-```sh
-npx wrangler r2 bucket create vynalth-jingxin-private
-```
-
-Upload only appropriately authorized originals via Wrangler **after**
-confirming their exact local source files and cryptographic hashes:
-
-```sh
-npx wrangler r2 object put vynalth-jingxin-private/jingxin/shared-memory.jpg --file ./private-originals/shared-memory.jpg --content-type image/jpeg --remote
-npx wrangler r2 object put vynalth-jingxin-private/jingxin/mce-kuala-lumpur-real.webp --file ./private-originals/mce-kuala-lumpur-real.webp --content-type image/webp --remote
-```
-
-Then bind the actual bucket on the *existing* Worker (never expose
-public `r2.dev` or a public custom-domain endpoint):
-
-```toml
-[[r2_buckets]]
-binding = "JINGXIN_PRIVATE_MEDIA_R2"
-bucket_name = "vynalth-jingxin-private"
-```
-
-Important: **NO R2 provisioning or upload has been done by this PR**.
-Do NOT delete existing photo files before verifying a complete private
-backup and integrity. Then remove/restrict all public static copies
-and thumbnails from deployed Vercel/public CDN and invalidate permitted
-caches and reachable previews, test bypass on every origin and
-subdomain; previously downloaded copies cannot be revoked.
-
-Worker code now intercepts known legacy asset paths **once private
-media is explicitly enabled**, without falling back to the public
-Vercel origin. It intentionally does not intercept the historical
-paths while the feature is disabled, to avoid breaking the existing
-site before safe migration.
-
-**Route blocker:** the approved Worker `wrangler.toml` currently
-contains `*.vyncuslim.com/*` but **NOT `vyncuslim.com/*`**. The
-apex `https://vyncuslim.com/jingxin` cannot be considered Worker-
-protected until the actual root route / origin ownership is
-verified and configured. A wildcard does not cover the root.
-
-Release requires private R2 objects present, binding valid, apex
-routing verified, all old public URLs returning no image bytes,
-and full HTTP GET, HEAD, Range, Cache, content-type, signed-session,
-logout, forged/tampered Cookie, wrong-host, no-location, and failure
-tests. Only then enable `JINGXIN_PRIVATE_MEDIA_ENABLED`.
-
-Cloudflare docs:
-- https://developers.cloudflare.com/r2/api/workers/workers-api-reference/
-- https://developers.cloudflare.com/workers/wrangler/commands/r2/
-- https://developers.cloudflare.com/workers/configuration/routing/
+**Critical limit:** Public GitHub/preview/static `assets/` chunks and
+originals may be retrievable without either Worker. Base64 splitting
+is not encryption. Test direct origin, historical preview, GitHub asset
+copies, Range/HEAD and all aliases; you cannot guarantee privacy or
+retroactively revoke copies while the origin/public repository retains
+unencrypted image material.
 
 ## 5. Ordered release (never flip all flags together)
 
@@ -211,9 +178,9 @@ Cloudflare docs:
 3. Complete **Auth backend** school-email login denial and
    account/API-level enforcement, then enable the school gate behind
    a reviewed rollout on correctly routed hosts.
-4. Migrate private original photos and backups to R2; prove all
-   static-origin bypasses closed, add/prove apex routing, then enable
-   private-photo service.
+4. Keep the existing `vv` ASSETS/chunks solution; deploy the signed
+   admin-cookie fix only after Cloudflare secrets and all direct-origin
+   photo bypass tests pass. Do NOT enable dormant R2 media mode.
 5. GPS enforcement only after authoritative perimeter and minors
    privacy/accuracy review; otherwise retain staging only.
 6. Enable optional Cookie Consent in production only after positive
@@ -225,7 +192,7 @@ Cloudflare docs:
 Security tests MUST cover: tampered/bypassed SSO and denial Cookies,
 wrong host, expired token, school trusted-role override, logout,
 consent withdrawal, GPS spoofing/unreliable accuracy, campus polygons,
-photo asset alias and source-origin bypass, R2 outage, preview URLs,
+photo asset alias and source-origin bypass, missing ASSETS part, preview URLs,
 rate limits, repeat and cross-domain replay.
 
 Cloudflare zone ownership, resources and production SSO issuer have
