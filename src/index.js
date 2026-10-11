@@ -1,5 +1,6 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
+import { handleEgressIpCheck } from "./egress-ip-check.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
@@ -121,6 +122,14 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Dedicated, read-only, same-origin network observer for an opted-in
+    // administrator's mobile browser. Never creates an IP block or whitelist.
+    // Existing Cloudflare WAF runs before this Worker as usual.
+    const networkObservation = handleEgressIpCheck(request,incomingUrl);
+    if(networkObservation){
+      return edgeResponse(networkObservation,request,incomingUrl,requestId,rootDomain);
     }
 
     // Keep School IP Policy enforcement for protected photo bytes. A guest's
