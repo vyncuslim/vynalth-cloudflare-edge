@@ -674,3 +674,20 @@ test("GPS challenge and error screens are English without a language toggle",asy
  assert.match(js,/updateLanguage\("en"\)/);
  assert.doesNotMatch(js,/navigator\.language/);
 });
+
+
+test("GPS status advertises active boundary-side policy revision without coordinates",async()=>{
+ const healthy=await invoke(req("/__shield/gps/status"));
+ assert.equal(healthy.status,200);
+ const data=await healthy.json();
+ assert.equal(data.enabled,true);
+ assert.equal(data.configurationAvailable,true);
+ assert.equal(data.enforcing,true);
+ assert.equal(data.policyRevision,"gps-inner-boundary-403-v2");
+ assert.equal(JSON.stringify(data).includes("latitude"),false);
+ const invalid=await invoke(req("/__shield/gps/status"),{...cfg,GPS_GATE_SESSION_SECRET:undefined});
+ assert.equal(invalid.status,503);
+ const bad=await invalid.json();
+ assert.equal(bad.policyRevision,"gps-inner-boundary-403-v2");
+ assert.equal(bad.configurationAvailable,false);
+});
