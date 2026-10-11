@@ -29,6 +29,10 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
 GPS_GATE_ENABLED = "true"
+# Show GPS only when Cloudflare IP country is MY, browser timezone is MY,
+# or source location is unavailable. Foreign visitors first pass a lightweight
+# browser-timezone check; this is NOT a comprehensive VPN detection service.
+GPS_REGION_TIMEZONE_ENABLED = "true"
 # Server-side Telegram notification for GPS 403, separate from visitor access.
 # Requires Telegram Bot and Chat ID configured as Worker secrets.
 # Reuses existing TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID if bound.
