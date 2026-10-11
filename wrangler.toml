@@ -4,9 +4,9 @@ compatibility_date = "2026-09-19"
 workers_dev = true
 
 # Keep consent-management and account-policy exemptions disabled until:
-# 1) CONSENT_KV namespace is provisioned/bound in Cloudflare,
-# 2) SSO issuer creates signed per-domain assertions,
-# 3) the four-zone consent flow and core app routes pass review.
+# 1) CONSENT_KV is bound to the actual account namespace,
+# 2) optional SSO issuer creates signed per-domain assertions,
+# 3) the seven-domain consent flow and core app routes pass review.
 # Deploy routes belong at the TOML root. Do not put them inside [vars];
 # that would define env.vars.routes instead of Worker routing rules.
 # Exact eight requested routes across seven zones; apex is only vynalthai.com.
@@ -31,10 +31,18 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Keep BOTH GPS and Cookie Consent disabled in production until integration review.
 GPS_GATE_ENABLED = "false"
-# Private photos are withheld until a private R2 binding and origin cleanup are verified.
+# Jingxin remains on the existing vv Worker ASSETS/photo-chunk architecture (NO R2).
 JINGXIN_PRIVATE_MEDIA_ENABLED = "false"
 
+# Production GPS remains disabled. Do NOT add unverified campus
+# coordinates to this production vars block. Only test approximate
+# circles in a separately configured preview/staging environment.
+# GPS_CAMPUS_GEOFENCES_JSON is a non-secret Text variable with a
+# JSON array of {id,lat,lon,radius} values once boundaries are verified.
 
+[[kv_namespaces]]
+binding = "CONSENT_KV"
+id = "f687e465ac0441d7a6ca18aaa9ed91f8"
 
 # The existing edge Worker owns HTTP routes. The policy Worker has no routes:
 # it is called privately, so the origin and security/tracing logic is preserved.
