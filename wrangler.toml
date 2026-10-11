@@ -31,6 +31,11 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Keep BOTH GPS and Cookie Consent disabled in production until integration review.
 GPS_GATE_ENABLED = "false"
+# GeoJSON polygon research mode is independent of legacy GPS circle JSON.
+# Do not enable while candidate OSM boundaries lack certified land-survey proof.
+GPS_POLYGON_MODE = "off"
+GPS_POLYGON_ENFORCEMENT_APPROVED = "false"
+# NEVER set GPS_CAMPUS_POLYGONS_JSON to the OSM research fixture in production.
 # Jingxin remains on the existing vv Worker ASSETS/photo-chunk architecture (NO R2).
 JINGXIN_PRIVATE_MEDIA_ENABLED = "false"
 
