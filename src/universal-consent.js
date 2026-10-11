@@ -298,8 +298,15 @@ async function applyGuestSync(request,env,url,root){
     analytics:snapshot.choices.analytics,personalization:snapshot.choices.personalization,
     marketing:snapshot.choices.marketing
    }))return output(403,{error:"INVALID_GUEST_SYNC_TICKET"});
+ // A stored snapshot includes the necessary "essential" field, while the
+ // preferences write schema accepts only the three optional categories.
+ const optional={
+  analytics:snapshot.choices.analytics,
+  personalization:snapshot.choices.personalization,
+  marketing:snapshot.choices.marketing
+ };
  const applied=await writeConsent(env,root,null,null,{
-  action:snapshot.action,choices:snapshot.choices,sharedScope:false
+  action:snapshot.action,choices:optional,sharedScope:false
  });
  if(applied.error)return output(503,{error:applied.error});
  const last=step===GUEST_SYNC_HOSTS.length-1;
@@ -429,7 +436,7 @@ async function writeConsent(env,root,identity,anonId,input){
  const userKey=identity?await subjectKey(env,identity.sub):null;
  const prefix=keys(root,userKey,id);
  const existingShared=identity?await readKV(kv,prefKey(prefix,"shared",root)):null;
- // Unchecking the four-domain sharing option is a withdrawal of the earlier
+ // Unchecking the seven-domain sharing option is a withdrawal of the earlier
  // shared grant, not just a new site-only preference. Revoke the shared head
  // first, then save the user's desired local preference. KV propagation is
  // eventually consistent; a partial failure must never silently re-grant.
