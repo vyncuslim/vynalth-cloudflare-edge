@@ -56,6 +56,7 @@ def check(path: Path) -> None:
         "GPS_GATE_ENABLED",
         "SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED",
         "JINGXIN_PRIVATE_MEDIA_ENABLED",
+        "SCHOOL_EMAIL_GATE_ENABLED",
     ):
         assert config["vars"].get(flag) == "false", (
             f"Safety switch must remain disabled in this routing-only change: {flag}"

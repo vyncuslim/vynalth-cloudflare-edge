@@ -180,15 +180,17 @@ The service binding and routes are declared in `wrangler.toml`. Test before depl
 
 ## Universal Cookie Consent — Cloudflare Workers KV only (draft)
 
-**No Supabase integration.** One existing vynalth-cloudflare-edge Worker serves these four registrable domains and all their subdomains: vynalthai.com, vyncuslim.com, vynalthai.si, vyncuslim.si.
+**No Supabase integration.** One existing vynalth-cloudflare-edge Worker handles consent on seven registered zones: vynalthai.com, vyncuslim.com, vynalthai.si, vyncuslim.si, sleepsomno.com, powiismunc.com, vitamindai.online. Use proxied consent.<root> subdomains when an apex (especially vyncuslim.com) has another Worker.
 
 Each root domain receives an independent first-party __Secure-vynalth-consent Cookie, scoped using Domain=<root>, Secure, HttpOnly, SameSite=Lax, Path=/. Cookies are stored by the browser, **not literally in KV**. Workers KV stores the related consent preferences, version, timestamp, withdraw timestamp, site/share scope, and append-only history events.
 
 Anonymous guests use random per-domain identifiers, issued only after they save a preference; no device fingerprinting, third-party cookies or cross-domain anonymous linking. Optional purposes (analytics, personalization, marketing) default to OFF. Essential cookies remain ON.
 
-**Authenticated cross-domain consent** uses the existing SSO backend, not an unrelated database. A user signed into the same verified account on each of the four root domains obtains a fresh, first-party, HMAC-signed SSO assertion for that root domain. The Worker verifies identity, reads the common pseudonymous account preference in KV, and sets that site's own first-party Cookie. The browser never reads a different domain's Cookies. Existing SSO backend issuance is a REQUIRED integration step, not yet implemented or verified in this repository.
+**No login required:** anonymous visitors save, deny, and withdraw first-party consent at any site. To voluntarily copy the saved guest choices from the primary site to all six other zones, the user explicitly clicks a separate button. The browser follows first-party redirects through six `consent.<root>` hosts; a 180-second KV ticket transports a snapshot, and each zone sets its OWN first-party Cookie. This does not create a permanent cross-site visitor identifier or continuously synchronize later guest changes. Later withdrawals require a new sync and KV remains eventually consistent. Proxied DNS is required for all six consent hosts.
 
-Affirmative choices are written to shared scope only if the user is authenticated and explicitly ticks a notice mentioning ALL FOUR domains and purposes, with notice version vynalth-four-domains-v1. Without this, consent is local to the site. A subsequent withdrawal of a shared grant writes a new shared-revocation event; after new authenticated state sync, all four domains receive revoked choices. Local denials may override earlier affirmative shared choices.
+**Authenticated cross-domain consent** uses the existing SSO backend, not an unrelated database. A user signed into the same verified account on each of the seven root domains obtains a fresh, first-party, HMAC-signed SSO assertion for that root domain. The Worker verifies identity, reads the common pseudonymous account preference in KV, and sets that site's own first-party Cookie. The browser never reads a different domain's Cookies. Existing SSO backend issuance is only required for optional account-linked sharing; it is not required for local or explicit guest consent sync.
+
+Affirmative choices are written to shared scope only if the user is authenticated and explicitly ticks a notice mentioning ALL SEVEN domains and purposes, with notice version vynalth-seven-domains-v1. Without this, consent is local to the site. A subsequent withdrawal of a shared grant writes a new shared-revocation event; after new authenticated state sync, all seven domains receive revoked choices. Local denials may override earlier affirmative shared choices.
 
 ### API paths
 
@@ -223,7 +225,7 @@ KV snapshot keys use the prefix vynalth:consent:v1 with separate subject-pseudon
 
 KV is eventually consistent, not transactional. Concurrent updates can race, and permission withdrawal may take time to propagate. This does not provide a strictly atomic compliance audit or instant global revocation. For stronger guarantees use Cloudflare Durable Objects as a per-account coordinator, still without Supabase.
 
-Production acceptance is currently BLOCKED on provisioning CONSENT_KV, implementing and validating the actual SSO issuer, reviewing privacy/security policy, confirming four-zone routes, and passing unit/integration tests. Do not deploy or merge this draft until reviewed.
+Production acceptance is currently BLOCKED on provisioning CONSENT_KV, verifying six consent subdomain DNS hosts and any optional account SSO issuer, reviewing privacy/security policy, confirming seven-zone routes and six consent subdomain DNS records, and passing unit/integration tests. Do not deploy or merge this draft until reviewed.
 
 ### Tests
 
@@ -231,7 +233,7 @@ npm test
 node --check src/universal-consent.js
 node --check src/index.js
 
-The tests cover all four registrable domains and subdomains, anonymous denial, consent saving, CSRF and origin rejection, SSO impersonation, explicit sharing, history/withdrawal and Safari/Firefox third-party-cookie isolation.
+The tests cover all seven registrable domains and subdomains, anonymous denial, consent saving, CSRF and origin rejection, SSO impersonation, explicit sharing, history/withdrawal and Safari/Firefox third-party-cookie isolation.
 
 
 ### Canonical SSO source and cross-domain login handoff (vynalthai.com)
@@ -240,12 +242,12 @@ This amendment implements the operator's requirement that **all SSO identity and
 
 The target domain displays a first-party `Connect vynalthai.com account` link. The browser uses a visible top-level navigation, not a cross-site iframe or a third-party cookie:
 
-1. `GET https://vyncuslim.si/__vynalth/consent/link` sets a **signed 5-minute state cookie scoped to vyncuslim.si**, then redirects to the main site.
+1. `GET https://consent.vyncuslim.si/__vynalth/consent/link` sets a **signed 5-minute state cookie scoped to vyncuslim.si**, then redirects to the main site.
 2. `GET https://vynalthai.com/__vynalth/consent/authorize?client=vyncuslim.si&state=...` verifies the **existing** trusted vynalthai.com first-party login cookie and creates a **60-second opaque KV ticket** containing the verified user ID, session ID, status, target, expiry and originating hub.
-3. The hub redirects to `https://vyncuslim.si/__vynalth/consent/callback?code=...&state=...`.
+3. The hub redirects to `https://consent.vyncuslim.si/__vynalth/consent/callback?code=...&state=...`.
 4. The target verifies the original signed state cookie, target hostname, exact KV ticket, expiry and issuer; it deletes the ticket and mints **its own signed `__Secure-vynalth-sso` first-party cookie for at most 10 minutes**. The target then opens its first-party consent manager and reads preferences for the verified, linked account from the common KV namespace.
 
-This same approved flow applies to all three non-hub roots and their subdomains: vyncuslim.com, vynalthai.si, vyncuslim.si. `trust`, `contact`, and `status` roles are verified on the canonical site and are carried only in signed, host-bound cookies; the browser cannot choose its own role. The exemption flag is separate from consent, and existing Cloudflare WAF, DDoS and other compulsory protections remain in force.
+This same approved flow applies to all six non-hub roots and their subdomains: vyncuslim.com, vynalthai.si, vyncuslim.si, sleepsomno.com, powiismunc.com, vitamindai.online. `trust`, `contact`, and `status` roles are verified on the canonical site and are carried only in signed, host-bound cookies; the browser cannot choose its own role. The exemption flag is separate from consent, and existing Cloudflare WAF, DDoS and other compulsory protections remain in force.
 
 **Important limitations before production:**
 - Existing `vynalthai.com` auth has NOT yet been verified as issuing the expected canonical signed SSO assertion. The Worker does NOT invent a logged-in identity.

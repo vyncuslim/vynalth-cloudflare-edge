@@ -5,8 +5,11 @@ on:
       - review/universal-consent-kv-20261011
       - review/integrate-consent-gps-20261011
       - fix/wrangler-14-domain-routes-20261011
+      - feat/school-email-gate-preflight-20261011
     paths:
       - "src/universal-consent.js"
+      - "src/school-email-gate.js"
+      - "src/school-email-gate.test.js"
       - "src/guest-gps.js"
       - "src/guest-gps.test.js"
       - "src/jingxin-media.js"
@@ -18,11 +21,17 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "src/jingxin-media.js"
+      - "src/jingxin-media.test.js"
+      - "src/guest-gps.js"
+      - "src/guest-gps.test.js"
       - "wrangler.toml"
       - ".github/scripts/verify-routes.py"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/consent-tests.yml"
       - "src/universal-consent.js"
+      - "src/school-email-gate.js"
+      - "src/school-email-gate.test.js"
       - "src/universal-consent.test.js"
       - "src/index.js"
       - ".github/workflows/consent-tests.yml"
@@ -39,6 +48,8 @@ jobs:
           node-version: "22"
       - name: Syntax checks
         run: |
+          node --check src/school-email-gate.js
+          node --check src/school-email-gate.test.js
           node --check src/guest-gps.js
           node --check src/guest-gps.test.js
           node --check src/jingxin-media.js

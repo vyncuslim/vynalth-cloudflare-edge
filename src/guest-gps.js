@@ -1,3 +1,4 @@
+import { parseCampusPolygons, decideCampusPolygons } from "./gps-polygons.js";
 const GEO_HTML="<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Vynalth Shield · Location Verification</title><style>:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#04060a;color:#eef5ff}body{min-height:100vh;margin:0;display:grid;place-items:center;padding:20px;box-sizing:border-box;background:radial-gradient(circle at 15% 15%,#1a2c4b,#04060a 60%)}main{max-width:540px;background:#0d1626;border:1px solid #33455f;border-radius:22px;padding:32px;box-shadow:0 25px 60px #0009}.brand{font-size:13px;font-weight:850;letter-spacing:.1em;color:#a1ceff}h1{font-size:clamp(29px,5vw,39px);line-height:1.15}p{line-height:1.65;color:#becfe7;font-size:14px}button{background:#94c9ff;border:0;border-radius:10px;padding:15px 20px;width:100%;font-weight:800;cursor:pointer;margin-top:16px}button:disabled{opacity:.5}.warning{border:1px solid #496b90;background:#14283f;padding:14px;border-radius:12px;color:#c8dcf4;font-size:13px;line-height:1.7}.error{border-color:#9b5062;background:#351b28;color:#ffcad8}.meta{color:#90a7c5;font-size:12px}#status{margin-top:12px}a{color:#a1ceff}[hidden]{display:none!important}</style><script src=\"/__shield/gps/client.js\" defer></script></head><body><main><div class=\"brand\">✦ VYNALTH SHIELD</div><section id=\"prompt\"><h1>位置验证 · Location required</h1><p>访客必须主动允许浏览器请求精确位置，才可继续访问。拒绝授权则无法继续使用本站，但不会永久封锁账号。</p><p lang=\"ms\">Pelawat perlu memberi kebenaran lokasi tepat untuk meneruskan. Jika ditolak, akses laman tidak tersedia.</p><p lang=\"en\">Guests must explicitly grant precise location access to proceed. Refusing keeps this site unavailable, without banning an account.</p><div class=\"warning\">仅在你点击后请求浏览器权限。位置坐标通过 HTTPS 发给本站，仅用于这一次位置判断；不写入 Cookie、KV 或永久日志。定位不保证一定准确。已由服务器验证为 trust、contact 或 status 的账号不需要此验证。</div><button id=\"start\">允许位置并验证 · Verify location</button></section><section id=\"blocked\" hidden><h1>访问已限制 · Access blocked</h1><p class=\"warning error\" id=\"reason\">Location permission unavailable</p><p>可在浏览器网站权限中允许定位后重新尝试。也可以选择不提供位置并离开网站。</p><p lang=\"en\">Change the site's location permission in your browser settings to retry, or leave without sharing your position.</p><button id=\"retry\">重新尝试 · Retry</button></section><p class=\"meta\" id=\"status\" role=\"status\" aria-live=\"polite\"></p><p class=\"meta\"><p class=\"meta\" id=\"syncHint\" hidden>如果你已经在 Vynalth AI 主站完成验证，可手动同步签名状态（不会传送精确 GPS 坐标）。</p><p class=\"meta\"><a id=\"syncLink\" href=\"#\" hidden>🔗 使用其他 Vynalth AI 网站的验证结果</a></p><a href=\"/__shield/gps/disclaimer\" id=\"disclaimerLink\">声明 / Penafian / Disclaimer 🔗</a> · <a href=\"https://vynalthai.com/en/legal/privacy\" rel=\"noopener noreferrer\" referrerpolicy=\"no-referrer\">Privacy Policy</a></p><p class=\"meta\">Independent Vynalth AI policy · Not an official POWIIS service.</p></main></body></html>";
 const GEO_CLIENT="\"use strict\";const $=id=>document.getElementById(id);function blocked(text){$(\"prompt\").hidden=true;$(\"blocked\").hidden=false;$(\"reason\").textContent=text;$(\"status\").textContent=\"\";$(\"start\").disabled=false}function run(){\n const currentHost=location.hostname.toLowerCase();\n const isOutsideHub=currentHost!==\"vynalthai.com\" &&\n [\"vynalthai.com\",\"vyncuslim.com\",\"vynalthai.si\",\"vyncuslim.si\",\n \"vitamindai.online\",\"sleepsomno.com\",\"powiismunc.com\"]\n .some(root=>currentHost===root||currentHost.endsWith(\".\"+root));\n if(isOutsideHub){\n  const path=location.pathname.startsWith(\"/__shield/gps/\")?\"/\":location.pathname;\n  location.assign(\"/__shield/gps/link?recheck=1&return=\"+encodeURIComponent(path));\n  return;\n }\n $(\"blocked\").hidden=true;$(\"prompt\").hidden=false;const b=$(\"start\");b.disabled=true;$(\"status\").textContent=\"请求浏览器位置授权…\";if(!navigator.geolocation){blocked(\"此设备或浏览器不提供定位服务。\");return}navigator.geolocation.getCurrentPosition(async p=>{const c=p.coords;if(!(Number.isFinite(c.accuracy)&&c.accuracy<=100)){blocked(\"位置精度不足（要求 100 米以内）。\");return}$(\"status\").textContent=\"正在验证位置…\";try{const res=await fetch(\"/__shield/gps/verify\",{method:\"POST\",credentials:\"same-origin\",cache:\"no-store\",headers:{\"Content-Type\":\"application/json\"},body:JSON.stringify({lat:c.latitude,lon:c.longitude,accuracy:c.accuracy})});const data=await res.json();if(!res.ok){blocked(data.error===\"CAMPUS_RESTRICTED\"?\"当前位置位于配置的校园限制区域内，访问已限制。\":\"位置验证失败：\"+(data.error||res.status));return}if(location.pathname===\"/__shield/gps/recheck\"){\n  const dest=new URL(location.href);dest.pathname=\"/__shield/gps/bridge\";\n  location.replace(dest.toString());\n }else location.reload()}catch{blocked(\"无法连接位置验证服务。\")}},err=>{blocked(err.code===1?\"GPS 授权被拒绝：无法继续使用本站。\":err.code===2?\"无法取得位置：无法继续使用本站。\":\"GPS 定位超时或不准确。\")},{enableHighAccuracy:true,timeout:15000,maximumAge:0})}$(\"start\").onclick=run;$(\"retry\").onclick=run;\n(function(){\n const validHosts=new Set([\"vyncuslim.com\",\"vynalthai.si\",\"vyncuslim.si\",\n  \"vitamindai.online\",\"sleepsomno.com\",\"powiismunc.com\"]);\n if(!validHosts.has(location.hostname))return;\n const hint=document.getElementById(\"syncHint\"),link=document.getElementById(\"syncLink\");\n if(!hint||!link)return;\n link.href=\"/__shield/gps/link?return=\"+encodeURIComponent(location.pathname);\n hint.hidden=false;link.hidden=false;\n})();\n";
 const DISCLAIMER_HTML="<!doctype html>\n<html lang=\"zh-CN\">\n<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\"><meta name=\"referrer\" content=\"no-referrer\">\n<title>GPS Verification Disclaimer · Vynalth Shield</title>\n<style>\n:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#eaf1fc;background:#05070e}\nbody{padding:28px 17px;margin:0;background:radial-gradient(circle at 20% 0,#172840,transparent 60%),#05070e}\nmain{margin:auto;max-width:780px;background:#101827;border:1px solid #364563;border-radius:21px;padding:clamp(24px,4vw,42px)}\nheader{color:#98c8ff;font-size:12px;font-weight:800;letter-spacing:.1em}\nh1{font-size:clamp(30px,5vw,42px);margin:16px 0}\nh2{font-size:18px;color:#d6e7ff;margin:26px 0 10px}\np,li{color:#bbcbdf;line-height:1.8;font-size:14px}\na{color:#9cceff}aside{padding:14px;border:1px solid #465b81;border-radius:12px;background:#192b44}\n</style></head>\n<body><main><header>✦ VYNALTH SHIELD · LOCATION POLICY</header>\n<h1>声明 · Penafian · Disclaimer</h1>\n<aside>\n<strong>独立网站政策 / Dasar laman bebas / Independent website policy</strong>\n<p>此功能由 Vynalth AI 网站运营者提供，不属于 POWIIS 校方官方定位或访问系统。</p>\n<p>Fungsi ini bukan perkhidmatan rasmi POWIIS.</p>\n<p>This location requirement is not operated or endorsed by POWIIS.</p>\n</aside>\n<h2>1. 为什么请求位置 / Tujuan / Purpose</h2>\n<p>网页仅在访客点击授权按钮、并同意浏览器的位置权限后才请求地理位置，用于判断设备报告的位置是否位于网站运营者设置的校园地理围栏之内。精确位置并不能可靠证明某人的学校身份、账号身份或当前网络。</p>\n<p>Lokasi hanya diminta selepas persetujuan melalui pelayar, bagi semakan kawasan geografi. Lokasi bukan bukti identiti.</p>\n<p>After browser permission, the reported position is checked against an operator-defined campus area. Browser location can be inaccurate or spoofed.</p>\n<h2>2. 不提供位置 / Jika menolak / If you decline</h2>\n<p>访客可以拒绝授权，但启用此功能的网站可能因此不允许继续访问并展示访问限制页面。拒绝授权本身不会导致永久账号封锁。你可以修改浏览器权限后重新尝试。</p>\n<p>Anda boleh menolak; akses tetamu mungkin dihadkan, tetapi akaun tidak diharamkan secara kekal hanya kerana penolakan.</p>\n<p>You may refuse location access. When the gate is enabled, guest access may be restricted, but refusing does not permanently ban your account.</p>\n<h2>3. Cookie 与数据 / Kuki dan data / Cookies and data</h2>\n<p>验证时通过 HTTPS 将报告的经纬度及精度传送至本站 Worker，本功能不主动将精确 GPS 坐标写入 Cookie 或 KV。成功通过验证或处于限制区域时，本站可设置最长约 15 分钟、仅对本站有效的签名状态 Cookie。浏览器可在设置中删除 Cookie；各独立根域名无法直接读取其他域的 Cookie。</p>\n<p>Koordinat digunakan untuk keputusan permintaan sahaja dan tidak disimpan dalam kuki. Kuki status sementara terikat pada domain sendiri.</p>\n<p>Precise coordinates are used for the current verification and are not intentionally stored in persistent application data by this feature. Short-lived signed status cookies do not contain GPS coordinates. Standard server/network logs and browser behavior are governed by their own policies.</p>\n<h2>4. 豁免和错误 / Pengecualian dan ralat / Exemptions and mistakes</h2>\n<p>由服务器身份验证并确认状态为 <strong>trust</strong> 或 <strong>contact</strong> 的账号可豁免此项 GPS 检查。浏览器自身声明并不构成有效凭证。如判断有误、设备无法定位、位于边界或需要访问帮助，请联系网站管理员；可要求人工复核与删除相关记录。</p>\n<p>Status akaun trust/contact mesti disahkan oleh pelayan. Untuk semakan atau pemadaman, hubungi pentadbir laman.</p>\n<p>Authenticated trust/contact accounts are exempt once the website validates their status server-side. Contact the website operator to dispute a decision or request applicable data deletion.</p>\n<h2>5. 儿童及未成年人 / Pengguna bawah umur / Minors</h2>\n<p>学校访客可能包括未成年人。请勿在未经适当授权的情况下提交他人位置，亦不要通过其他设备代替他人授权。网站不会因为一次位置报告而永久封锁账号。</p>\n<p>Jangan kongsi lokasi orang lain tanpa persetujuan yang sewajarnya.</p>\n<p>Do not submit someone else's location without appropriate permission. This feature must be reviewed for applicable privacy requirements before production activation.</p>\n<p><a href=\"https://vynalthai.com/en/legal/privacy\" rel=\"noopener noreferrer\" referrerpolicy=\"no-referrer\">Vynalth AI Privacy Policy</a></p>\n<p><a href=\"/__shield/gps/verify-info\">查看位置验证信息 / View verification information</a></p>\n</main></body></html>";
@@ -37,32 +38,50 @@ function getCookie(req,name){const x=(req.headers.get("Cookie")||"").split(";").
 function config(env){
  if(env?.GPS_GATE_ENABLED!=="true")return null;
  const {GPS_GATE_SESSION_SECRET:s,GPS_ACCOUNT_STATUS_SECRET:a}=env||{};
- // A list enables *draft testing* of both POWIIS campuses. The 180 m
- // circles are engineering test approximations, NOT surveyed school borders.
- // Invalid configuration deliberately disables the whole gate (fail open).
- let campuses;
- if(env?.GPS_CAMPUS_GEOFENCES_JSON!==undefined){
-  const raw=env.GPS_CAMPUS_GEOFENCES_JSON;
-  if(typeof raw!=="string"||raw.length>4096)return null;
-  try{campuses=JSON.parse(raw);}catch{return null;}
- }else{
-  const numeric=v=>(typeof v==="string"&&v.trim()==="")?NaN:Number(v);
-  campuses=[{id:"legacy",lat:numeric(env?.GPS_CAMPUS_LAT),
-   lon:numeric(env?.GPS_CAMPUS_LON),radius:numeric(env?.GPS_CAMPUS_RADIUS_METERS)}];
+ const polygonMode=env?.GPS_POLYGON_MODE??"off";
+ if(!["off","shadow","enforce"].includes(polygonMode)||
+    typeof s!=="string"||s.length<32)return null;
+ let polygons=null;
+ if(polygonMode!=="off"){
+  polygons=parseCampusPolygons(env?.GPS_CAMPUS_POLYGONS_JSON);
+  if(!polygons)return null;
  }
- if(typeof s!=="string"||s.length<32||typeof a!=="string"||a.length<32||
-    !Array.isArray(campuses)||campuses.length<1||campuses.length>8||
-    campuses.some(c=>!c||typeof c!=="object"||typeof c.id!=="string"||
-     !/^[a-z0-9-]{2,48}$/.test(c.id)||typeof c.lat!=="number"||
-     typeof c.lon!=="number"||typeof c.radius!=="number"||
-     !Number.isFinite(c.lat)||!Number.isFinite(c.lon)||!Number.isFinite(c.radius)||
-     Math.abs(c.lat)>90||Math.abs(c.lon)>180||c.radius<50||c.radius>1000)||
-    new Set(campuses.map(c=>c.id)).size!==campuses.length)return null;
- return {s,a,campuses}
+ // Candidate OSM polygons are not certified. Approximate enforcement requires
+ // explicit separate operator consent and will never claim survey authority.
+ const provisional=env?.GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED==="true";
+ if(polygonMode==="enforce"&&(
+    env?.GPS_POLYGON_ENFORCEMENT_APPROVED!=="true"||
+    polygons.some(c=>!c.officialBoundaryVerified&&! (
+      provisional&&c.boundaryClassification==="OSM_MAPPED"&&
+      ["powiis-balik-pulau","powiis-tanjung-bungah"].includes(c.id)))))return null;
+ const bufferMeters=polygonMode==="enforce"?Number(env?.GPS_BOUNDARY_BUFFER_METERS??30):0;
+ if(!Number.isFinite(bufferMeters)||bufferMeters<0||bufferMeters>100)return null;
+ let campuses=[];
+ if(polygonMode!=="enforce"){
+  // Legacy circle policy is still authoritative while shadow evaluates.
+  if(env?.GPS_CAMPUS_GEOFENCES_JSON!==undefined){
+   const raw=env.GPS_CAMPUS_GEOFENCES_JSON;
+   if(typeof raw!=="string"||raw.length>4096)return null;
+   try{campuses=JSON.parse(raw);}catch{return null;}
+  }else{
+   const numeric=v=>(typeof v==="string"&&v.trim()==="")?NaN:Number(v);
+   campuses=[{id:"legacy",lat:numeric(env?.GPS_CAMPUS_LAT),
+    lon:numeric(env?.GPS_CAMPUS_LON),radius:numeric(env?.GPS_CAMPUS_RADIUS_METERS)}];
+  }
+  if(!Array.isArray(campuses)||campuses.length<1||campuses.length>8||
+     campuses.some(c=>!c||typeof c!=="object"||typeof c.id!=="string"||
+      !/^[a-z0-9-]{2,48}$/.test(c.id)||typeof c.lat!=="number"||
+      typeof c.lon!=="number"||typeof c.radius!=="number"||
+      !Number.isFinite(c.lat)||!Number.isFinite(c.lon)||!Number.isFinite(c.radius)||
+      Math.abs(c.lat)>90||Math.abs(c.lon)>180||c.radius<50||c.radius>1000)||
+     new Set(campuses.map(c=>c.id)).size!==campuses.length)return null;
+ }
+ return {s,a:typeof a==="string"&&a.length>=32?a:null,campuses,polygons,polygonMode,bufferMeters};
 }
 async function exempt(req,cfg,host){
  // Only the trusted application's server can mint a valid signed status cookie.
  // Format: exp.status.nonce.signature. Signature covers the originating host.
+ if(!cfg.a)return false; // Guest GPS does not require login/SSO or an account-status key.
  const value=getCookie(req,STATUS_COOKIE);if(!value||value.length>320)return false;
  const parts=value.split(".");if(parts.length!==4)return false;
  const [exp,status,nonce,tag]=parts;
@@ -72,22 +91,25 @@ async function exempt(req,cfg,host){
  if(ttl<=now||ttl>now+3600)return false;
  return valid(cfg.a,[exp,status,nonce,host].join("|"),tag);
 }
-async function permitted(req,cfg,host){
- const value=getCookie(req,SESSION_COOKIE);if(!value||value.length>320)return false;
- const parts=value.split(".");if(parts.length!==3)return false;
+async function sessionVerdict(req,cfg,host){
+ const value=getCookie(req,SESSION_COOKIE);if(!value||value.length>320)return null;
+ const parts=value.split(".");if(parts.length!==3)return null;
  const [exp,nonce,tag]=parts;
- if(!/^\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return false;
+ if(!/^\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return null;
  const now=Math.floor(Date.now()/1000),time=Number(exp);
- if(time<=now||time>now+SESSION_TTL)return false;
- return valid(cfg.s,[exp,nonce,host,"outside"].join("|"),tag);
+ if(time<=now||time>now+SESSION_TTL)return null;
+ if(await valid(cfg.s,[exp,nonce,host,"outside"].join("|"),tag))return "outside";
+ if(time<=now+300&&await valid(cfg.s,[exp,nonce,host,"nearby"].join("|"),tag))return "nearby";
+ return null;
 }
+async function permitted(req,cfg,host){return (await sessionVerdict(req,cfg,host))!==null;}
 
 function policyCookie(name,value,age=SESSION_TTL){
  return name+"="+value+"; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age="+age;
 }
 async function verdictToken(cfg,host,verdict){
- if(verdict!=="inside"&&verdict!=="outside")throw Error("Invalid verdict");
- const expiry=Math.floor(Date.now()/1000)+SESSION_TTL;
+ if(!["inside","outside","nearby"].includes(verdict))throw Error("Invalid verdict");
+ const expiry=Math.floor(Date.now()/1000)+(verdict==="nearby"?300:SESSION_TTL);
  const nonceBytes=new Uint8Array(16);crypto.getRandomValues(nonceBytes);
  const nonce=b64(nonceBytes);
  const sig=await sign(cfg.s,[expiry,nonce,host,verdict].join("|"));
@@ -131,7 +153,7 @@ async function validateHandoff(cfg,target,path,state,ticket){
  const parts=ticket.split(".");
  if(parts.length!==4)return null;
  const [expires,verdict,nonce,tag]=parts;
- if(verdict!=="inside"&&verdict!=="outside")return null;
+ if(!["inside","outside","nearby"].includes(verdict))return null;
  if(!/^\d{10,12}$/.test(expires)||!/^[A-Za-z0-9_-]{22}$/.test(nonce))return null;
  const expiry=Number(expires),now=Math.floor(Date.now()/1000);
  if(expiry<=now||expiry>now+60)return null;
@@ -167,7 +189,7 @@ async function bridge(request,url,cfg){
    return reply(400,{error:"INVALID_BRIDGE_DESTINATION"});
  let verdict=null;
  if(await hasBlockVerdict(request,cfg,url.hostname))verdict="inside";
- else if(await permitted(request,cfg,url.hostname))verdict="outside";
+ else verdict=await sessionVerdict(request,cfg,url.hostname);
  if(!verdict)return page(); // First-party hub asks for browser GPS; NO login needed.
  const ticket=await handoffToken(cfg,target,path,state,verdict);
  const destination=new URL("https://"+target+"/__shield/gps/import");
@@ -189,7 +211,7 @@ async function importHandoff(request,url,cfg){
  const value=await verdictToken(cfg,url.hostname,verdict);
  const headers=new Headers(head);
  headers.set("Location",path);
- headers.append("Set-Cookie",policyCookie(name,value));
+ headers.append("Set-Cookie",policyCookie(name,value,verdict==="nearby"?300:SESSION_TTL));
  headers.append("Set-Cookie",policyCookie(old,"",0));
  headers.append("Set-Cookie",policyCookie(HANDOFF_STATE_COOKIE,"",0));
  return new Response(null,{status:302,headers});
@@ -211,14 +233,30 @@ async function verify(req,url,cfg){
  let data;try{const raw=await req.text();if(raw.length>256)return reply(413,{error:"REQUEST_TOO_LARGE"});data=JSON.parse(raw)}catch{return reply(400,{error:"INVALID_JSON"})}
  const {lat,lon,accuracy}=data||{};
  if([lat,lon,accuracy].some(x=>typeof x!=="number"||!Number.isFinite(x))||Math.abs(lat)>90||Math.abs(lon)>180||accuracy<=0||accuracy>100)return reply(422,{error:"PRECISE_LOCATION_UNAVAILABLE"});
- // A verified outside verdict requires being clear of *every* test circle.
- // Uncertain overlaps never produce an allow cookie; campus-specific
- // coordinates are not included in response bodies or cookies.
- const circles=cfg.campuses.map(c=>({distance:distance(lat,lon,c.lat,c.lon),
-  radius:c.radius}));
- if(circles.some(c=>Math.abs(c.distance-c.radius)<=accuracy))
-  return reply(403,{error:"LOCATION_UNCERTAIN"});
- if(circles.some(c=>c.distance+accuracy<c.radius)){
+ // Polygon assessment is intentionally side-effect free: no persistence,
+ // response field or analytics carries exact GPS coordinates or shadow verdict.
+ let verdict;
+ if(cfg.polygonMode==="enforce"){
+  verdict=decideCampusPolygons(cfg.polygons,lat,lon,accuracy,cfg.bufferMeters);
+  if(verdict==="INVALID")return reply(503,{error:"GPS_POLYGON_CONFIGURATION_UNAVAILABLE"});
+ }else{
+  if(cfg.polygonMode==="shadow")void decideCampusPolygons(cfg.polygons,lat,lon,accuracy);
+  // Existing circle decisions remain completely unchanged for shadow mode.
+  const circles=cfg.campuses.map(c=>({distance:distance(lat,lon,c.lat,c.lon),
+   radius:c.radius}));
+  verdict=circles.some(c=>Math.abs(c.distance-c.radius)<=accuracy)?"UNCERTAIN":
+   circles.some(c=>c.distance+accuracy<c.radius)?"INSIDE":"OUTSIDE";
+ }
+ if(verdict==="UNCERTAIN"){
+  // A GPS location near an approximate border does not prove INSIDE.
+  if(cfg.polygonMode!=="enforce")return reply(403,{error:"LOCATION_UNCERTAIN"});
+  const headers=new Headers(head);
+  headers.set("Content-Type","application/json; charset=utf-8");
+  headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,await verdictToken(cfg,url.hostname,"nearby"),300));
+  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  return new Response(JSON.stringify({verified:false,nearBoundary:true,expiresInSeconds:300}),{status:200,headers});
+ }
+ if(verdict==="INSIDE"){
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
   headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,await verdictToken(cfg,url.hostname,"inside")));
@@ -264,8 +302,21 @@ export async function guestGpsGate(request,env,url){
     crossDomainCookieReading:false,defaultEnabled:false});
  }
 
+ if(env?.GPS_GATE_ENABLED!=="true")return null;
  const cfg=config(env);
- if(!cfg)return null; // disabled or misconfigured -> site works normally
+ // An explicitly enabled GPS gate must never quietly become permissive
+ // because a signing key or geofence config was missing or malformed.
+ if(!cfg&&!skip(url.pathname)){
+  // Owner-opted recovery: no OUTSIDE verdict and no cookies are minted;
+  // only the config outage can suspend GPS checks, not permission refusal.
+  if(env?.GPS_CONFIG_ERROR_ACTION==="bypass"){
+   console.error("GPS_GATE_CONFIGURATION_UNAVAILABLE: operator-approved bypass");
+   if(url.pathname==="/__shield/gps/status")return reply(200,{enabled:false,configurationAvailable:false,recoveryMode:"bypass"});
+   return null;
+  }
+  return reply(503,{error:"GPS_GATE_CONFIGURATION_UNAVAILABLE",blocked:true});
+ }
+ if(!cfg)return null;
  if(url.pathname==="/__shield/gps/recheck"){
   if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
    return reply(404,{error:"NOT_FOUND"});

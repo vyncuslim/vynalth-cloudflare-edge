@@ -1,6 +1,8 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
+import { handleConsentSsoBridge } from "./consent-sso-bridge.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
+import { schoolEmailGate } from "./school-email-gate.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -123,6 +125,13 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
+    // Account restrictions must run before role/GPS/consent/photo exemptions.
+    // Only a signed, verified canonical login assertion can identify school email.
+    const schoolEmailDenial=await schoolEmailGate(request,env,incomingUrl,rootDomain);
+    if(schoolEmailDenial){
+      return edgeResponse(schoolEmailDenial,request,incomingUrl,requestId,rootDomain);
+    }
+
     // Keep School IP Policy enforcement for protected photo bytes. A guest's
     // self-reported GPS verdict alone must never bypass independent School
     // IP restrictions. Canonical server-signed trust/contact/status identities
@@ -142,6 +151,14 @@ export default {
     const photoDecision = await handleJingxinMedia(request,env,incomingUrl,rootDomain);
     if (photoDecision) {
       return edgeResponse(photoDecision,request,incomingUrl,requestId,rootDomain);
+    }
+
+    // Bind canonical Vynalth AI SSO only from a real backend-signed
+    // assertion. No browser-provided role or self-reported user is trusted.
+    // This bridge is independent of the Consent CMP on/off state.
+    const ssoDecision = await handleConsentSsoBridge(request,env,incomingUrl);
+    if(ssoDecision){
+      return edgeResponse(ssoDecision,request,incomingUrl,requestId,rootDomain);
     }
 
     // Dedicated consent endpoints are first-party and must work without GPS
