@@ -16,6 +16,7 @@ on:
       - "test/edge.test.js"
       - "src/universal-consent.test.js"
       - "src/index.js"
+      - "src/temporary-ip-block.js"
       - ".github/workflows/consent-tests.yml"
   pull_request:
     branches: [main]
@@ -32,6 +33,7 @@ on:
       - "src/gps-telegram-alert.test.js"
       - "src/gps-verification-ui.js"
       - "src/index.js"
+      - "src/temporary-ip-block.js"
       - ".github/workflows/consent-tests.yml"
   workflow_dispatch:
 permissions:
@@ -55,6 +57,7 @@ jobs:
           node --check src/jingxin-media.test.js
           node --check src/universal-consent.js
           node --check src/universal-consent.test.js
+          node --check src/temporary-ip-block.js
           node --check src/index.js
       - uses: actions/setup-python@v5
         with:
