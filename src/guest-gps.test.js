@@ -64,7 +64,7 @@ test("visitor with no signed status sees 403 GPS verification page",async()=>{
  assert.equal(result.status,403);
  const html=await result.text();
  assert.match(html,/精确位置/);
- assert.match(html,/拒绝授权/);
+ assert.match(html,/权限|定位/);
  assert.match(html,/contact/);
  assert.doesNotMatch(html,/GPS_CAMPUS_LAT/);
 });
@@ -73,6 +73,9 @@ test("client script serves before GPS grant and includes denial state",async()=>
  assert.equal(response.status,200);
  const script=await response.text();
  assert.match(script,/enableHighAccuracy:true/);
+ assert.match(script,/navigator\.geolocation\.getCurrentPosition/);
+ assert.match(script,/autoRequest\(\)/);
+ assert.match(script,/navigator\.permissions\.query/);
  assert.match(script,/授权被拒绝/);
  assert.match(script,/location\.reload/);
  assert.doesNotThrow(()=>new Script(script),"GPS browser challenge client must parse as valid JavaScript");
@@ -108,13 +111,17 @@ test("proven guest outside campus gets short-lived signed Cookie",async()=>{
  const rejected=await invoke(req("/","GET",{Cookie:forged}));
  assert.equal(rejected.status,403);
 });
-test("verified campus coordinates return 403 and emit only a short-lived restriction cookie",async()=>{
- const response=await verifyCoords(5.3677,100.21995,10);
- assert.equal(response.status,403);
- assert.equal((await response.json()).error,"CAMPUS_RESTRICTED");
- assert.ok(response.headers.getSetCookie().some(v=>v.startsWith("__Host-vynalth-geo-block=")));
- assert.equal(response.headers.getSetCookie().some(v=>v.includes("lat=")||v.includes("lon=")),false);
+test("confirmed campus returns 403 and only expires stale credentials",async()=>{
+ const result=await verifyCoords(5.3677,100.21995,10);
+ assert.equal(result.status,403);
+ assert.equal((await result.json()).error,"CAMPUS_RESTRICTED");
+ const cookies=result.headers.getSetCookie();
+ assert.equal(cookies.length,0,"New INSIDE denials send no Set-Cookie");
+ assert.ok(cookies.every(v=>v.includes("Max-Age=0")));
+ assert.equal(cookies.some(v=>v.includes("Max-Age=900")||v.includes("Max-Age=300")),false);
+ assert.equal(cookies.some(v=>v.includes("lat=")||v.includes("lon=")),false);
 });
+
 test("boundary uncertainty and insufficient precision are rejected",async()=>{
  const ambiguous=await verifyCoords(5.3688,100.21995,100);
  assert.equal(ambiguous.status,403);
@@ -199,19 +206,19 @@ test("GPS declaration is readable without location consent and contains three la
  assert.match(original,/href="\/__shield\/gps\/disclaimer"/);
 });
 
-test("a confirmed campus coordinate creates a short-lived block Cookie and shows blocked page",async()=>{
- const denied=await verifyCoords(5.3677,100.21995,15);
+test("in-campus GPS 403 clears any existing outside cookie without minting a block cookie",async()=>{
+ const allowed=await verifyCoords(5.40,100.25,10);
+ assert.equal(allowed.status,200);
+ const cookie=allowed.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ assert.equal(await invoke(req("/","GET",{Cookie:cookie})),null);
+ const denied=await invoke(req("/__shield/gps/verify","POST",{
+   Origin:HOST,"Sec-Fetch-Site":"same-origin","Content-Type":"application/json",Cookie:cookie
+ },JSON.stringify({lat:5.3677,lon:100.21995,accuracy:15})));
  assert.equal(denied.status,403);
  assert.equal((await denied.json()).error,"CAMPUS_RESTRICTED");
- const cookies=denied.headers.getSetCookie();
- assert.ok(cookies.some(v=>v.includes("__Host-vynalth-geo-block=")));
- assert.ok(cookies.some(v=>v.includes("Max-Age=900")));
- const first=cookies.find(v=>v.startsWith("__Host-vynalth-geo-block=")).split(";")[0];
- const page=await invoke(req("/","GET",{Cookie:first}));
- assert.equal(page.status,403);
- assert.match(await page.text(),/id="blocked"/);
+ assert.ok(denied.headers.getSetCookie().every(v=>v.includes("Max-Age=0")));
+ assert.equal((await invoke(req("/"))).status,403);
 });
-
 
 test("signed anonymous hub transfer is bound to recipient first-party state Cookie",async()=>{
  const outside=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
@@ -316,38 +323,25 @@ test("anonymous guest approved at hub gets per-domain 15-minute Cookies on six s
 
 
 
-test("anonymous guest campus restriction synchronizes through the hub",async()=>{
+test("an inside-campus denial never generates cross-domain transferable block cookies",async()=>{
  const denied=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
   method:"POST",headers:{"Origin":"https://vynalthai.com",
     "Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
   body:JSON.stringify({lat:5.3677,lon:100.21995,accuracy:10})
  }));
  assert.equal(denied.status,403);
- const hubCookie=denied.headers.getSetCookie()
-   .find(x=>x.startsWith("__Host-vynalth-geo-block=")).split(";")[0];
+ assert.ok(denied.headers.getSetCookie().every(v=>v.includes("Max-Age=0")));
  const first=await initialGuestRedirect("vyncuslim.si","/");
- const hub=await invoke(new Request(first.hubUrl,{headers:{Cookie:hubCookie}}));
- assert.equal(hub.status,302);
- const importResponse=await invoke(new Request(hub.headers.get("Location"),{
-  headers:{Cookie:first.stateCookie}
- }));
- assert.equal(importResponse.status,302);
- const siteCookie=importResponse.headers.getSetCookie()
-   .find(x=>x.startsWith("__Host-vynalth-geo-block=")).split(";")[0];
- const blocked=await invoke(new Request("https://vyncuslim.si/",{
-  headers:{Cookie:siteCookie,Accept:"text/html","Sec-Fetch-Dest":"document"}
- }));
- assert.equal(blocked.status,403);
- assert.match(await blocked.text(),/id="blocked"/);
+ const hub=await invoke(new Request(first.hubUrl));
+ assert.equal(hub.status,403);
+ assert.match(await hub.text(),/id="prompt"/);
 });
-
-
 
 test("guest without GPS grant and with inadequate accuracy cannot obtain signed verdict",async()=>{
  const first=await initialGuestRedirect("vyncuslim.com","/");
  const prompt=await invoke(new Request(first.hubUrl));
  assert.equal(prompt.status,403);
- assert.match(await prompt.text(),/Location required/);
+ assert.match(await prompt.text(),/需要精确位置权限/);
  assert.equal(prompt.headers.get("Set-Cookie"),null);
  const inaccurate=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
   method:"POST",headers:{"Origin":"https://vynalthai.com",
@@ -391,7 +385,7 @@ test("explicit re-verification is accessible after a previous inside verdict",as
  assert.equal(dest.pathname,"/__shield/gps/recheck");
  const content=await invoke(new Request(dest.toString()));
  assert.equal(content.status,403);
- assert.match(await content.text(),/getCurrentPosition|Location required/);
+ assert.match(await content.text(),/需要精确位置权限|位置验证/);
 });
 
 test("CSRF-linked handoff cannot be injected into a different visitor session",async()=>{
@@ -514,4 +508,18 @@ test("proximity cookie cannot unlock private photo data",async()=>{
  const outside=await verifyCoords(5.40,100.25,5,env);
  const outsideCookie=outside.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
  assert.equal(await gpsOutsideOrLegacyExempt(req("/private/picture.webp","GET",{Cookie:outsideCookie}),env,"vyncuslim.com"),true);
+});
+
+
+test("new GPS UI matches Vynalth AI site branding and offers browser permission controls",async()=>{
+ const resp=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}));
+ const html=await resp.text();
+ assert.match(html,/Vynalth AI/);
+ assert.doesNotMatch(html,/VYNALTH SHIELD/i);
+ assert.match(html,/data-lang="zh"/);
+ assert.match(html,/data-lang="en"/);
+ assert.match(html,/data-lang="ms"/);
+ assert.match(html,/id="start"/);
+ assert.match(html,/id="retry"/);
+ assert.match(html,/#0b0c0f/);
 });
