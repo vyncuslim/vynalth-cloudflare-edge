@@ -20,8 +20,16 @@ const bytes=b=>Array.from(new Uint8Array(b)).map(v=>String.fromCharCode(v)).join
 const toB64=b=>btoa(bytes(b)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 const keyFor=async s=>crypto.subtle.importKey("raw",enc.encode(s),{name:"HMAC",hash:"SHA-256"},false,["sign","verify"]);
 const sign=async(s,msg)=>toB64(await crypto.subtle.sign("HMAC",await keyFor(s),enc.encode(msg)));
-const equal=async(s,msg,mac)=>typeof mac==="string"&&/^[A-Za-z0-9_-]{43}$/.test(mac)&&
- (await sign(s,msg))===mac;
+const equal=async(s,msg,mac)=>{
+ if(typeof mac!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(mac))return false;
+ try{
+  const b64=mac.replace(/-/g,"+").replace(/_/g,"/");
+  const signature=Uint8Array.from(atob(b64+"=".repeat((4-b64.length%4)%4)),
+   c=>c.charCodeAt(0));
+  return signature.length===32&&
+   await crypto.subtle.verify("HMAC",await keyFor(s),signature,enc.encode(msg));
+ }catch{return false;}
+};
 const secret=env=>typeof env?.SCHOOL_EGRESS_SIGNING_SECRET==="string"&&
  env.SCHOOL_EGRESS_SIGNING_SECRET.length>=32?env.SCHOOL_EGRESS_SIGNING_SECRET:null;
 const kv=env=>env?.SCHOOL_EGRESS_KV&&
