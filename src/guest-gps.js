@@ -39,7 +39,7 @@ function config(env){
  const {GPS_GATE_SESSION_SECRET:s,GPS_ACCOUNT_STATUS_SECRET:a}=env||{};
  // A list enables *draft testing* of both POWIIS campuses. The 180 m
  // circles are engineering test approximations, NOT surveyed school borders.
- // Invalid configuration deliberately disables the whole gate (fail open).
+ // Invalid configuration is handled fail-closed by guestGpsGate when enabled.
  let campuses;
  if(env?.GPS_CAMPUS_GEOFENCES_JSON!==undefined){
   const raw=env.GPS_CAMPUS_GEOFENCES_JSON;
@@ -50,7 +50,7 @@ function config(env){
   campuses=[{id:"legacy",lat:numeric(env?.GPS_CAMPUS_LAT),
    lon:numeric(env?.GPS_CAMPUS_LON),radius:numeric(env?.GPS_CAMPUS_RADIUS_METERS)}];
  }
- if(typeof s!=="string"||s.length<32||typeof a!=="string"||a.length<32||
+ if(typeof s!=="string"||s.length<32||
     !Array.isArray(campuses)||campuses.length<1||campuses.length>8||
     campuses.some(c=>!c||typeof c!=="object"||typeof c.id!=="string"||
      !/^[a-z0-9-]{2,48}$/.test(c.id)||typeof c.lat!=="number"||
@@ -58,11 +58,12 @@ function config(env){
      !Number.isFinite(c.lat)||!Number.isFinite(c.lon)||!Number.isFinite(c.radius)||
      Math.abs(c.lat)>90||Math.abs(c.lon)>180||c.radius<50||c.radius>1000)||
     new Set(campuses.map(c=>c.id)).size!==campuses.length)return null;
- return {s,a,campuses}
+ return {s,a:typeof a==="string"&&a.length>=32?a:null,campuses}
 }
 async function exempt(req,cfg,host){
  // Only the trusted application's server can mint a valid signed status cookie.
  // Format: exp.status.nonce.signature. Signature covers the originating host.
+ if(!cfg.a)return false; // Guest GPS does not require login/SSO or an account-status key.
  const value=getCookie(req,STATUS_COOKIE);if(!value||value.length>320)return false;
  const parts=value.split(".");if(parts.length!==4)return false;
  const [exp,status,nonce,tag]=parts;
@@ -264,8 +265,14 @@ export async function guestGpsGate(request,env,url){
     crossDomainCookieReading:false,defaultEnabled:false});
  }
 
+ if(env?.GPS_GATE_ENABLED!=="true")return null;
  const cfg=config(env);
- if(!cfg)return null; // disabled or misconfigured -> site works normally
+ // An explicitly enabled GPS gate must never quietly become permissive
+ // because a signing key or geofence config was missing or malformed.
+ if(!cfg&&!skip(url.pathname))return reply(503,{
+   error:"GPS_GATE_CONFIGURATION_UNAVAILABLE",blocked:true
+ });
+ if(!cfg)return null;
  if(url.pathname==="/__shield/gps/recheck"){
   if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
    return reply(404,{error:"NOT_FOUND"});
