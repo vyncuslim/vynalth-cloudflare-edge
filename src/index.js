@@ -1,5 +1,6 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
+import { handleConsentSsoBridge } from "./consent-sso-bridge.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 import { schoolEmailGate } from "./school-email-gate.js";
 const ROOT_DOMAINS = [
@@ -150,6 +151,14 @@ export default {
     const photoDecision = await handleJingxinMedia(request,env,incomingUrl,rootDomain);
     if (photoDecision) {
       return edgeResponse(photoDecision,request,incomingUrl,requestId,rootDomain);
+    }
+
+    // Bind canonical Vynalth AI SSO only from a real backend-signed
+    // assertion. No browser-provided role or self-reported user is trusted.
+    // This bridge is independent of the Consent CMP on/off state.
+    const ssoDecision = await handleConsentSsoBridge(request,env,incomingUrl);
+    if(ssoDecision){
+      return edgeResponse(ssoDecision,request,incomingUrl,requestId,rootDomain);
     }
 
     // Dedicated consent endpoints are first-party and must work without GPS
