@@ -589,6 +589,7 @@ test("sibling domain completes fresh cross-domain GPS recheck with exactly one t
  assert.equal(first.status,302);
  const challengeUrl=new URL(first.headers.get("Location"));
  assert.equal(challengeUrl.pathname,"/__shield/gps/recheck");
+ assert.equal(challengeUrl.searchParams.get("return"),"/c/session-123?tab=chat");
  assert.equal((await invoke(new Request(challengeUrl),env)).status,403);
  const fresh=await invoke(new Request(root+"/__shield/gps/verify",{
   method:"POST",headers:{Origin:root,"Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
@@ -606,6 +607,7 @@ test("sibling domain completes fresh cross-domain GPS recheck with exactly one t
  const destination=imported.headers.get("Location");
  const redirected=new URL(sibling+destination);
  assert.ok(redirected.searchParams.has("__vynalth_gps_visit"));
+ assert.equal(redirected.searchParams.get("tab"),"chat");
  const targetCookie=imported.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
  assert.equal(await invoke(reqHtml(redirected.toString(),targetCookie),env),null);
  const onReload=await invoke(reqHtml(redirected.toString(),targetCookie),env);
