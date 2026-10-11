@@ -288,6 +288,98 @@ async function linkFromPrimarySSO(e,target,role="status",email){
  return {firstPartyCookie,started,hub,completed,callback,stateCookie};
 }
 
+test("guest can explicitly sync an anonymous saved snapshot across all seven via first-party visits",async()=>{
+ const e=env(),hub="vynalthai.com";
+ const session=await begin(e,hub);
+ const saved=await update(e,hub,session,body(approved,false));
+ assert.equal(saved.status,200);
+ const hubAnonCookie=saved.headers.get("Set-Cookie").split(";")[0];
+ const cookie=[session.cookies,hubAnonCookie].join("; ");
+ // No authentication or account-linked SSO Cookie is involved.
+ const start=await call(e,hub,policy+"/guest-sync/start","POST",{
+   explicit:true,noticeVersion:SHARED_NOTICE_VERSION
+ },cookie,{"X-Vynalth-Consent-CSRF":session.csrf});
+ assert.equal(start.status,200);
+ let next=(await start.json()).next;
+ const visited=[];
+ for(let step=0;step<6;step++){
+  const u=new URL(next);
+  const zone=u.hostname.slice("consent.".length);
+  assert.equal(zone,CONSENT_DOMAINS[step+1]);
+  const result=await call(e,u.hostname,u.pathname+u.search);
+  assert.equal(result.status,303,zone);
+  const firstParty=result.headers.get("Set-Cookie");
+  assert.match(firstParty,new RegExp("Domain="+zone.replaceAll(".","\\.")),zone);
+  assert.match(firstParty,/Secure/);
+  assert.match(firstParty,/HttpOnly/);
+  assert.match(firstParty,/SameSite=Lax/);
+  const visitorCookie=firstParty.split(";")[0];
+  const synced=await status(e,zone,visitorCookie);
+  assert.equal(synced.choices.analytics,true,zone);
+  assert.equal(synced.choices.personalization,true,zone);
+  assert.equal(synced.choices.marketing,false,zone);
+  assert.equal(synced.authenticated,false,zone);
+  visited.push(zone);
+  next=result.headers.get("Location");
+ }
+ assert.equal(next,"https://vynalthai.com"+policy+"?guest-sync=complete");
+ assert.equal(visited.length,6);
+ const own=await status(e,hub,hubAnonCookie);
+ assert.equal(own.choices.analytics,true);
+});
+test("guest sync rejects missing explicit consent, unverified origin and spoofed target hosts",async()=>{
+ const e=env(),hub="vynalthai.com";
+ const session=await begin(e,hub);
+ const missing=await call(e,hub,policy+"/guest-sync/start","POST",{
+  explicit:true,noticeVersion:SHARED_NOTICE_VERSION
+ },session.cookies,{"X-Vynalth-Consent-CSRF":session.csrf});
+ assert.equal(missing.status,409);
+ const saved=await update(e,hub,session,body(approved,false));
+ const c=[session.cookies,saved.headers.get("Set-Cookie").split(";")[0]].join("; ");
+ const invalidVersion=await call(e,hub,policy+"/guest-sync/start","POST",{
+  explicit:true,noticeVersion:"outdated"
+ },c,{"X-Vynalth-Consent-CSRF":session.csrf});
+ assert.equal(invalidVersion.status,400);
+ const crossSite=await call(e,hub,policy+"/guest-sync/start","POST",{
+  explicit:true,noticeVersion:SHARED_NOTICE_VERSION
+ },c,{"X-Vynalth-Consent-CSRF":session.csrf,Origin:"https://attacker.example"});
+ assert.equal(crossSite.status,403);
+ const legitimate=await call(e,hub,policy+"/guest-sync/start","POST",{
+  explicit:true,noticeVersion:SHARED_NOTICE_VERSION
+ },c,{"X-Vynalth-Consent-CSRF":session.csrf});
+ assert.equal(legitimate.status,200);
+ const target=new URL((await legitimate.json()).next);
+ const spoof=await call(e,"attacker.invalid",target.pathname+target.search);
+ assert.equal(spoof,null);
+ const wrongZone=await call(e,"consent.vynalthai.com",target.pathname+target.search);
+ assert.equal(wrongZone.status,403);
+ const wrongStep=await call(e,"consent.vyncuslim.com",
+  target.pathname+target.search.replace("step=0","step=4"));
+ assert.equal(wrongStep.status,403);
+});
+test("guest withdrawal propagates only after an explicit fresh sync (not silent background tracking)",async()=>{
+ const e=env(),hub="vynalthai.com";
+ const initial=await begin(e,hub);
+ const saved=await update(e,hub,initial,body(approved,false));
+ const hubCookie=saved.headers.get("Set-Cookie").split(";")[0];
+ const c=[initial.cookies,hubCookie].join("; ");
+ const withdrawn=await update(e,hub,{...initial,cookies:c},body(defaults,false,"withdraw"));
+ assert.equal(withdrawn.status,200);
+ const updatedAnon=withdrawn.headers.get("Set-Cookie").split(";")[0];
+ const start=await call(e,hub,policy+"/guest-sync/start","POST",{
+  explicit:true,noticeVersion:SHARED_NOTICE_VERSION
+ },[initial.cookies,updatedAnon].join("; "),{
+ "X-Vynalth-Consent-CSRF":initial.csrf});
+ assert.equal(start.status,200);
+ let next=(await start.json()).next;
+ const target=new URL(next);
+ const result=await call(e,target.hostname,target.pathname+target.search);
+ assert.equal(result.status,303);
+ const imported=result.headers.get("Set-Cookie").split(";")[0];
+ const state=await status(e,"vyncuslim.com",imported);
+ assert.equal(state.choices.analytics,false);
+ assert.ok(state.withdrawnAt);
+});
 test("vynalthai.com is canonical source for seven root-domain linked SSO sessions",async()=>{
  const e=env(),out={};
  for(const root of CONSENT_DOMAINS.slice(1)){
