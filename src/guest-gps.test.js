@@ -523,3 +523,55 @@ test("new GPS UI matches Vynalth AI site branding and offers browser permission 
  assert.match(html,/id="retry"/);
  assert.match(html,/#0b0c0f/);
 });
+
+test("each document refresh requires fresh GPS even with a signed 15-minute cookie",async()=>{
+ const seen=new Map();
+ const kv={get:async key=>seen.get(key)||null,put:async(key,value)=>{seen.set(key,value);}};
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:kv};
+ const hub="https://vynalthai.com";
+ const html=(path="/")=>new Request(hub+path,{headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}});
+ const challenge=await invoke(html("/dashboard"));
+ assert.equal(challenge.status,403);
+ const verify=await invoke(new Request(hub+"/__shield/gps/verify",{
+   method:"POST",headers:{Origin:hub,"Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+   body:JSON.stringify({lat:5.4,lon:100.25,accuracy:5,returnPath:"/dashboard"})
+ }),env);
+ assert.equal(verify.status,200);
+ const data=await verify.json();
+ assert.match(data.navigationTicket,/^[^.]+\.[^.]+\.[^.]+$/);
+ const geo=verify.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const headers={Accept:"text/html","Sec-Fetch-Dest":"document",Cookie:geo};
+ const reqDoc=(path)=>new Request(hub+path,{headers});
+ // A cookie from an earlier visit MUST NOT bypass a new page navigation.
+ assert.equal((await invoke(reqDoc("/dashboard"),env)).status,403);
+ const url="/dashboard?__vynalth_gps_visit="+encodeURIComponent(data.navigationTicket);
+ assert.equal(await invoke(reqDoc(url),env),null,"single freshly-verified document is allowed");
+ assert.equal((await invoke(reqDoc(url),env)).status,403,"F5/replay of same URL is challenged");
+ assert.equal((await invoke(reqDoc("/dashboard"),env)).status,403,"refresh after clean URL is challenged");
+ assert.equal((await invoke(reqDoc("/another?__vynalth_gps_visit="+data.navigationTicket),env)).status,403,"proof is path bound");
+ assert.equal(await invoke(new Request(hub+"/api/protected",{
+   headers:{Cookie:geo,Accept:"application/json"}
+ }),env),null,"authenticated resource/API traffic keeps the signed session");
+});
+test("navigation proof is only issued when one-visit replay storage is bound",async()=>{
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:undefined};
+ const res=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(res.status,503);
+ assert.equal((await res.json()).error,"GPS_NAVIGATION_STATE_UNAVAILABLE");
+ assert.equal(res.headers.get("Set-Cookie"),null);
+});
+test("refresh on sibling domain forces new hub location check even with existing signed cookie",async()=>{
+ const seen=new Map();
+ const kv={get:async key=>seen.get(key)||null,put:async(key,value)=>{seen.set(key,value);}};
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:kv};
+ const outside=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(outside.status,200);
+ const cookie=outside.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const refresh=await invoke(req("/dashboard","GET",{Cookie:cookie,Accept:"text/html","Sec-Fetch-Dest":"document"}),env);
+ assert.equal(refresh.status,302);
+ const destination=new URL(refresh.headers.get("Location"));
+ assert.equal(destination.pathname,"/__shield/gps/recheck");
+ const challenge=await invoke(new Request(destination.toString()),env);
+ assert.equal(challenge.status,403);
+ assert.match(await challenge.text(),/需要精确位置权限/);
+});
