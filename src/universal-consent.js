@@ -176,6 +176,10 @@ async function authorizeAtHub(request,env,url,root){
   // one-time redemption under concurrent replay or POP propagation.
   await env.CONSENT_KV.put(linkCodeKey(code),JSON.stringify({
    sub:identity.sub,status:identity.status,sid:identity.sid,
+   // Transfer the issuer-verified email claim (not a browser supplied value)
+   // so a linked .si or .com session cannot discard school restrictions.
+   ...(identity.email?{email:identity.email,
+     email_verified:identity.email_verified===true}:{}),
    target,state,exp:now+CODE_SECONDS,issuer:HUB_ROOT
   }),{expirationTtl:CODE_SECONDS});
  }catch{return output(503,{error:"SSO_TICKET_STORAGE_UNAVAILABLE"});}
@@ -204,13 +208,18 @@ async function completeLink(request,env,url,root){
      !Number.isInteger(ticket.exp)||ticket.exp<=Math.floor(Date.now()/1000)||
      !/^[A-Za-z0-9:_-]{8,128}$/.test(ticket.sub||"")||
      !/^[A-Za-z0-9:_-]{8,128}$/.test(ticket.sid||"")||
-     typeof ticket.status!=="string"||ticket.status.length>32)
+     typeof ticket.status!=="string"||ticket.status.length>32||
+     (Object.hasOwn(ticket,"email")&&(
+       typeof ticket.email!=="string"||ticket.email.length>254||
+       !/^[^\\s@]{1,64}@[A-Za-z0-9.-]{1,190}$/.test(ticket.email)||
+       typeof ticket.email_verified!=="boolean")))
    return output(403,{error:"SSO_TICKET_INVALID"});
   await env.CONSENT_KV.delete(linkCodeKey(code));
  }catch{return output(503,{error:"SSO_TICKET_UNAVAILABLE"});}
  const exp=Math.floor(Date.now()/1000)+BOUND_SSO_SECONDS;
  const payload=base64(te.encode(JSON.stringify({
-  sub:ticket.sub,status:ticket.status,sid:ticket.sid,host:root,exp
+  sub:ticket.sub,status:ticket.status,sid:ticket.sid,host:root,exp,
+  ...(ticket.email?{email:ticket.email,email_verified:ticket.email_verified}:{})
  })));
  const signature=await sig(env.CONSENT_SSO_SIGNING_SECRET,payload);
  const headers=new Headers(RESP);
