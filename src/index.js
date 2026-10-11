@@ -227,6 +227,22 @@ export default {
       );
     }
 
+    // On every reload the browser must reach the Worker again, not use a
+    // cached HTML copy of a previous successful GPS visit. Never leak a
+    // navigation proof through referrers to third parties.
+    if (env?.GPS_RECHECK_EVERY_DOCUMENT === "true" &&
+        request.headers.get("Accept")?.includes("text/html") &&
+        (request.headers.get("Sec-Fetch-Dest") || "document") === "document" &&
+        originResponse.headers.get("Content-Type")?.includes("text/html")) {
+      const safeHeaders = new Headers(originResponse.headers);
+      safeHeaders.set("Cache-Control", "private, no-store, max-age=0");
+      safeHeaders.set("Referrer-Policy", "no-referrer");
+      originResponse = new Response(originResponse.body, {
+        status: originResponse.status,
+        statusText: originResponse.statusText,
+        headers: safeHeaders
+      });
+    }
     return edgeResponse(
       originResponse,
       request,

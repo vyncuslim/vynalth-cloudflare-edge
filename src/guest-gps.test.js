@@ -77,7 +77,9 @@ test("client script serves before GPS grant and includes denial state",async()=>
  assert.match(script,/autoRequest\(\)/);
  assert.match(script,/navigator\.permissions\.query/);
  assert.match(script,/授权被拒绝/);
- assert.match(script,/location\.reload/);
+ assert.match(script,/navigationTicket/);
+ assert.match(script,/location\.replace/);
+ assert.doesNotMatch(script,/location\.reload/);
  assert.doesNotThrow(()=>new Script(script),"GPS browser challenge client must parse as valid JavaScript");
 });
 test("forged status cannot bypass, valid signed trust and contact can",async()=>{
@@ -522,4 +524,102 @@ test("new GPS UI matches Vynalth AI site branding and offers browser permission 
  assert.match(html,/id="start"/);
  assert.match(html,/id="retry"/);
  assert.match(html,/#0b0c0f/);
+});
+
+test("each document refresh requires fresh GPS even with a signed 15-minute cookie",async()=>{
+ const seen=new Map();
+ const kv={get:async key=>seen.get(key)||null,put:async(key,value)=>{seen.set(key,value);}};
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:kv};
+ const hub="https://vynalthai.com";
+ const html=(path="/")=>new Request(hub+path,{headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}});
+ const challenge=await invoke(html("/dashboard"));
+ assert.equal(challenge.status,403);
+ const verify=await invoke(new Request(hub+"/__shield/gps/verify",{
+   method:"POST",headers:{Origin:hub,"Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+   body:JSON.stringify({lat:5.4,lon:100.25,accuracy:5,returnPath:"/dashboard"})
+ }),env);
+ assert.equal(verify.status,200);
+ const data=await verify.json();
+ assert.match(data.navigationTicket,/^[^.]+\.[^.]+\.[^.]+$/);
+ const geo=verify.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const headers={Accept:"text/html","Sec-Fetch-Dest":"document",Cookie:geo};
+ const reqDoc=(path)=>new Request(hub+path,{headers});
+ // A cookie from an earlier visit MUST NOT bypass a new page navigation.
+ assert.equal((await invoke(reqDoc("/dashboard"),env)).status,403);
+ const url="/dashboard?__vynalth_gps_visit="+encodeURIComponent(data.navigationTicket);
+ assert.equal(await invoke(reqDoc(url),env),null,"single freshly-verified document is allowed");
+ assert.equal((await invoke(reqDoc(url),env)).status,403,"F5/replay of same URL is challenged");
+ assert.equal((await invoke(reqDoc("/dashboard"),env)).status,403,"refresh after clean URL is challenged");
+ assert.equal((await invoke(reqDoc("/another?__vynalth_gps_visit="+data.navigationTicket),env)).status,403,"proof is path bound");
+ assert.equal(await invoke(new Request(hub+"/api/protected",{
+   headers:{Cookie:geo,Accept:"application/json"}
+ }),env),null,"authenticated resource/API traffic keeps the signed session");
+});
+test("navigation proof is only issued when one-visit replay storage is bound",async()=>{
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:undefined};
+ const res=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(res.status,503);
+ assert.equal((await res.json()).error,"GPS_NAVIGATION_STATE_UNAVAILABLE");
+ assert.equal(res.headers.get("Set-Cookie"),null);
+});
+test("refresh on sibling domain forces new hub location check even with existing signed cookie",async()=>{
+ const seen=new Map();
+ const kv={get:async key=>seen.get(key)||null,put:async(key,value)=>{seen.set(key,value);}};
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:kv};
+ const outside=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(outside.status,200);
+ const cookie=outside.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const refresh=await invoke(req("/dashboard","GET",{Cookie:cookie,Accept:"text/html","Sec-Fetch-Dest":"document"}),env);
+ assert.equal(refresh.status,302);
+ const destination=new URL(refresh.headers.get("Location"));
+ assert.equal(destination.pathname,"/__shield/gps/recheck");
+ const challenge=await invoke(new Request(destination.toString()),env);
+ assert.equal(challenge.status,403);
+ assert.match(await challenge.text(),/需要精确位置权限/);
+});
+
+test("sibling domain completes fresh cross-domain GPS recheck with exactly one target navigation",async()=>{
+ const seen=new Map();
+ const kv={get:async key=>seen.get(key)||null,put:async(key,value)=>{seen.set(key,value);}};
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",CONSENT_KV:kv};
+ const sibling="https://vyncuslim.si";
+ const root="https://vynalthai.com";
+ const reqHtml=(url,cookie="")=>new Request(url,{headers:{Accept:"text/html","Sec-Fetch-Dest":"document",Cookie:cookie}});
+ const first=await invoke(reqHtml(sibling+"/c/session-123?tab=chat"),env);
+ assert.equal(first.status,302);
+ const challengeUrl=new URL(first.headers.get("Location"));
+ assert.equal(challengeUrl.pathname,"/__shield/gps/recheck");
+ assert.equal(challengeUrl.searchParams.get("return"),"/c/session-123");
+ assert.equal((await invoke(new Request(challengeUrl),env)).status,403);
+ const fresh=await invoke(new Request(root+"/__shield/gps/verify",{
+  method:"POST",headers:{Origin:root,"Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:8,returnPath:"/"})
+ }),env);
+ assert.equal(fresh.status,200);
+ const hubCookies=fresh.headers.getSetCookie();
+ const hubCookie=hubCookies.filter(x=>x.startsWith("__Host-vynalth-geo=")||
+   x.startsWith("__Host-vynalth-gps-fresh=")).map(x=>x.split(";")[0]).join("; ");
+ assert.match(hubCookie,/__Host-vynalth-gps-fresh=/);
+ const bridge=new URL(challengeUrl);
+ bridge.pathname="/__shield/gps/bridge";
+ const oldOnly=hubCookie.split("; ").find(x=>x.startsWith("__Host-vynalth-geo="));
+ const staleBridge=await invoke(new Request(bridge.toString(),{headers:{Cookie:oldOnly}}),env);
+ assert.equal(staleBridge.status,403,"Old location cookie cannot bypass new GPS check");
+ assert.equal((await staleBridge.json()).error,"FRESH_GPS_REQUIRED");
+ const bridgeResponse=await invoke(new Request(bridge.toString(),{headers:{Cookie:hubCookie}}),env);
+ assert.equal(bridgeResponse.status,302);
+ assert.equal((await invoke(new Request(bridge.toString(),{headers:{Cookie:hubCookie}}),env)).status,403,
+   "Fresh bridge grant can only be used once");
+ const targetState=first.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo-handoff=")).split(";")[0];
+ const imported=await invoke(new Request(bridgeResponse.headers.get("Location"),{headers:{Cookie:targetState}}),env);
+ assert.equal(imported.status,302);
+ const destination=imported.headers.get("Location");
+ const redirected=new URL(sibling+destination);
+ assert.ok(redirected.searchParams.has("__vynalth_gps_visit"));
+ assert.equal(redirected.searchParams.get("tab"),null,"Never forward sensitive query through GPS hub");
+ const targetCookie=imported.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ assert.equal(await invoke(reqHtml(redirected.toString(),targetCookie),env),null);
+ const onReload=await invoke(reqHtml(redirected.toString(),targetCookie),env);
+ assert.equal(onReload.status,302);
+ assert.equal(new URL(onReload.headers.get("Location")).pathname,"/__shield/gps/recheck");
 });
