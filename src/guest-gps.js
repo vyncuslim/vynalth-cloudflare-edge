@@ -397,8 +397,18 @@ function blockedPage(){
  const visible=GEO_HTML.replace('<section id="prompt">','<section id="prompt" hidden>')
   .replace('<section id="blocked" hidden>','<section id="blocked">')
   .replace('<p class="notice-error" id="reason" role="alert">Location permission unavailable</p>',
-    '<p class="notice-error" id="reason" role="alert">此前的位置验证结果属于限制区域。可以重新定位，但在通过前无法继续访问受保护的内容。</p>');
+    '<p class="notice-error" id="reason" role="alert">Your last location fell within a restricted area. Please retry verification; protected content remains unavailable until the check passes.</p>');
  return new Response(visible,{status:403,headers:{...head,"Content-Type":"text/html; charset=utf-8",
+   "X-Frame-Options":"DENY",
+   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}});
+}
+function unavailablePage(){
+ const visible=GEO_HTML.replace('<section id="prompt">','<section id="prompt" hidden>')
+  .replace('<section id="blocked" hidden>','<section id="blocked">')
+  .replace('<p class="notice-error" id="reason" role="alert">Location permission unavailable</p>',
+    '<p class="notice-error" id="reason" role="alert">Location verification is temporarily unavailable. Protected content cannot be accessed until service is restored.</p>');
+ return new Response(visible,{status:503,headers:{...head,
+   "Content-Type":"text/html; charset=utf-8",
    "X-Frame-Options":"DENY",
    "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}});
 }
@@ -423,13 +433,14 @@ export async function guestGpsGate(request,env,url){
  // An explicitly enabled GPS gate must never quietly become permissive
  // because a signing key or geofence config was missing or malformed.
  if(!cfg&&!skip(url.pathname)){
-  // Owner-opted recovery: no OUTSIDE verdict and no cookies are minted;
-  // only the config outage can suspend GPS checks, not permission refusal.
-  if(env?.GPS_CONFIG_ERROR_ACTION==="bypass"){
-   console.error("GPS_GATE_CONFIGURATION_UNAVAILABLE: operator-approved bypass");
-   if(url.pathname==="/__shield/gps/status")return reply(200,{enabled:false,configurationAvailable:false,recoveryMode:"bypass"});
-   return null;
-  }
+  // Do not allow origin traffic when the GPS signing secret or boundary
+  // configuration is invalid. All optional legal/recovery routes remain open.
+  console.error("GPS_GATE_CONFIGURATION_UNAVAILABLE: protected access denied");
+  if(url.pathname==="/__shield/gps/status")
+   return reply(503,{enabled:true,configurationAvailable:false,
+     enforcing:false,error:"GPS_GATE_CONFIGURATION_UNAVAILABLE"});
+  if(isBrowserDocument(request)&&!url.pathname.startsWith("/__shield/gps/"))
+   return unavailablePage();
   return reply(503,{error:"GPS_GATE_CONFIGURATION_UNAVAILABLE",blocked:true});
  }
  if(!cfg)return null;
@@ -454,7 +465,8 @@ export async function guestGpsGate(request,env,url){
  if(url.pathname==="/__shield/gps/client.js"&&request.method==="GET")return script();
  if(url.pathname==="/__shield/gps/verify")return verify(request,url,cfg,env);
  if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
-  return reply(200,{enabled:true,verified:await permitted(request,cfg,url.hostname),
+  return reply(200,{enabled:true,configurationAvailable:true,enforcing:true,
+   verified:await permitted(request,cfg,url.hostname),
    exempt:await exempt(request,cfg,url.hostname)});
  if(skip(url.pathname))return null;
  // Existing trusted server-verified account states bypass this GPS policy.
