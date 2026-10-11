@@ -1,6 +1,7 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
+import { schoolEmailGate } from "./school-email-gate.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -121,6 +122,14 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+    // Identity restrictions take precedence over trust/contact/status, GPS,
+    // consent linking and private media. Never infer login email from user
+    // inputs; only a valid signed SSO assertion from canonical Auth is used.
+    const schoolEmailDenial=await schoolEmailGate(
+      request,env,incomingUrl,rootDomain);
+    if(schoolEmailDenial){
+      return edgeResponse(schoolEmailDenial,request,incomingUrl,requestId,rootDomain);
     }
 
     // Keep School IP Policy enforcement for protected photo bytes. A guest's
