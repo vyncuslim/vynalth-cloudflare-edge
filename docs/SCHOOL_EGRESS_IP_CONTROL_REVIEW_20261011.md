@@ -34,14 +34,20 @@ non-authoritative location advisory.
 - Generate an **independent** strong random key, `SCHOOL_EGRESS_SIGNING_SECRET`, and set its **same secret value** in the **traffic-serving** Cloudflare Worker and Vercel backend Production. Never print, publish, or expose it in `VITE_*` variables. Do not repurpose SSO / GPS secrets.
 - Ensure the existing KV namespace `f687e465ac0441d7a6ca18aaa9ed91f8` is attached as `SCHOOL_EGRESS_KV`. This does not require creating another KV namespace or overwriting Consent keys.
 - Deploy reviewed backend, frontend, and Edge versions with a human-monitored rollback plan.
-- Explicitly enable **both** Cloudflare `SCHOOL_EGRESS_BLOCK_ENABLED="true"` and backend `SCHOOL_EGRESS_BLOCK_ENABLED=true` only after dry-run and staging acceptance.
+- Explicitly enable **both** Cloudflare `SCHOOL_EGRESS_BLOCK_ENABLED="true"` and backend `SCHOOL_EGRESS_APPROVAL_ENABLED="true"` only after dry-run and staging acceptance.
 - From an authorized founder test account, connect to a controlled test network, verify actual CF IP, authorize short TTL block and verify 403 on website protected pages from the same IP. Verify mobile/cellular switch does NOT cause automatic block. Test 3h expiry and emergency revoke. Other normal origin routes and WAF must remain safe.
 - Deploying code / passing CI does **not** enable the feature. Do not auto-merge or deploy this Draft PR.
 
 ## Explicit rollback
 
-Immediately disable both issuance and enforcement flags, then use owner-authorized `/revoke` and Edge `/clear`. Verify the KV policy is deleted and the same source IP can access a normal protected page. KV eventual consistency may delay propagation. Existing Cloudflare WAF IP Access Rules are unrelated; this mechanism never creates such a rule.
+Immediately disable backend `SCHOOL_EGRESS_APPROVAL_ENABLED` and Edge `SCHOOL_EGRESS_BLOCK_ENABLED`, then use owner-authorized `/revoke` and Edge `/clear`. Verify the KV policy is deleted and the same source IP can access a normal protected page. KV eventual consistency may delay propagation. Existing Cloudflare WAF IP Access Rules are unrelated; this mechanism never creates such a rule.
 
 ## Coexistence with SSO/GPS Draft PR #10
 
 This network feature is developed from `main` in a **separate branch** and will need a normal merge/rebase conflict review of `src/index.js` and `wrangler.toml` if combined with Draft PR #10. Do not replace SSO/GPS changes by overwriting one branch with another. `GPS_GATE_ENABLED` remains `false`; GPS advisory on the founder page is not a production geofence.
+
+## Browser-session continuity
+
+The frontend stores the operator-confirmed active IP and TTL **only in localStorage** while unexpired, so reloading the admin page does not silently lose the renewal candidate. On every renewal it contacts the Cloudflare Edge again: if the actual observed source IP differs, the controller clears its local approval and refuses to arm the new network until the founder explicitly reconfirms. This does not guarantee background execution while Android suspends or kills the tab. No IP history, raw user GPS, or privileged session credential is placed into the Edge KV.
+
+Existing independently signed `trust/contact/status` account exemptions remain in the optional Edge check; unverified user-supplied role/status fields never bypass it. This needs live browser acceptance on a controlled network before production.
