@@ -28,6 +28,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
+const GPS_POLICY_REVISION="gps-inner-boundary-403-v2";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -453,7 +454,7 @@ export async function guestGpsGate(request,env,url){
   console.error("GPS_GATE_CONFIGURATION_UNAVAILABLE: protected access denied");
   if(url.pathname==="/__shield/gps/status")
    return reply(503,{enabled:true,configurationAvailable:false,
-     enforcing:false,error:"GPS_GATE_CONFIGURATION_UNAVAILABLE"});
+     enforcing:false,policyRevision:GPS_POLICY_REVISION,error:"GPS_GATE_CONFIGURATION_UNAVAILABLE"});
   if(isBrowserDocument(request)&&!url.pathname.startsWith("/__shield/gps/"))
    return unavailablePage();
   return reply(503,{error:"GPS_GATE_CONFIGURATION_UNAVAILABLE",blocked:true});
@@ -481,6 +482,7 @@ export async function guestGpsGate(request,env,url){
  if(url.pathname==="/__shield/gps/verify")return verify(request,url,cfg,env);
  if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
   return reply(200,{enabled:true,configurationAvailable:true,enforcing:true,
+   policyRevision:GPS_POLICY_REVISION,
    verified:await permitted(request,cfg,url.hostname),
    exempt:await exempt(request,cfg,url.hostname)});
  if(skip(url.pathname))return null;
