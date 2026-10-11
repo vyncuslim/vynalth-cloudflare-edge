@@ -212,8 +212,8 @@ async function importHandoff(request,url,cfg){
  if(verdict==="inside"){
   const denial=blockedPage();
   const headers=new Headers(denial.headers);
-  headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,"",0));
-  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  if(getCookie(request,SESSION_COOKIE))headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,"",0));
+  if(getCookie(request,BLOCK_COOKIE))headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
   return new Response(denial.body,{status:403,headers});
  }
  const name=SESSION_COOKIE;
@@ -272,8 +272,8 @@ async function verify(req,url,cfg){
   // a visitor cannot simply reload with the older authorization.
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
-  headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,"",0));
-  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  if(getCookie(req,SESSION_COOKIE))headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,"",0));
+  if(getCookie(req,BLOCK_COOKIE))headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
   return new Response(JSON.stringify({error:"CAMPUS_RESTRICTED"}),{status:403,headers});
  }
  const headers=new Headers(head);
