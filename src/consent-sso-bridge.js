@@ -20,9 +20,15 @@ const okayOrigin=(request)=>request.headers.get("Origin")===ORIGIN&&
   request.headers.get("Sec-Fetch-Site")==="same-origin");
 export async function handleConsentSsoBridge(request,env,url){
  if(url.hostname!==HOST||!url.pathname.startsWith(PATH))return null;
- if(url.pathname!==PATH&&url.pathname!==PATH+"/clear")return null;
- if(request.method!=="POST")return output(405,{error:"METHOD_NOT_ALLOWED"});
+ if(url.pathname!==PATH&&url.pathname!==PATH+"/clear"&&
+    url.pathname!==PATH+"/status")return null;
  if(env?.CONSENT_SSO_BRIDGE_ENABLED!=="true")return output(503,{error:"SSO_BRIDGE_DISABLED"});
+ if(url.pathname===PATH+"/status"){
+  if(request.method!=="GET")return output(405,{error:"METHOD_NOT_ALLOWED"});
+  const identity=await signedSSO(request,env,HOST);
+  return output(200,{authenticated:!!identity},{"Vary":"Cookie"});
+ }
+ if(request.method!=="POST")return output(405,{error:"METHOD_NOT_ALLOWED"});
  if(!okayOrigin(request))return output(403,{error:"ORIGIN_NOT_ALLOWED"});
  if(url.pathname===PATH+"/clear"){
   return output(200,{cleared:true},{"Set-Cookie":cookie("",0)});
