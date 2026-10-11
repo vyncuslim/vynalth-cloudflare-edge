@@ -7,6 +7,7 @@ This deliberately parses TOML rather than grepping for route strings:
 from pathlib import Path
 import sys
 import tomllib
+import json
 
 ROOTS = (
     "vynalthai.com",
@@ -53,13 +54,29 @@ def check(path: Path) -> None:
     )
     for flag in (
         "CONSENT_CMP_ENABLED",
-        "GPS_GATE_ENABLED",
         "SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED",
         "JINGXIN_PRIVATE_MEDIA_ENABLED",
     ):
         assert config["vars"].get(flag) == "false", (
             f"Safety switch must remain disabled in this routing-only change: {flag}"
         )
+    assert config["vars"].get("GPS_GATE_ENABLED") == "true", "GPS must be explicitly enabled"
+    assert config["vars"].get("GPS_POLYGON_MODE") == "enforce", "Polygon enforce is required"
+    assert config["vars"].get("GPS_POLYGON_ENFORCEMENT_APPROVED") == "true", "Release authorization required"
+    assert config["vars"].get("GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED") == "true", "OSM release authorization required"
+    assert config["vars"].get("GPS_BOUNDARY_BUFFER_METERS") == "30", "30 m safeguard required"
+    assert config["vars"].get("GPS_CONFIG_ERROR_ACTION") == "bypass", "Retain config outage recovery"
+    geodata = json.loads(config["vars"].get("GPS_CAMPUS_POLYGONS_JSON", "null"))
+    assert geodata.get("type") == "FeatureCollection", "Expected GeoJSON FeatureCollection"
+    shapes = geodata.get("features", [])
+    assert len(shapes) == 2, "Exactly two schools must be declared"
+    assert {x["properties"]["campus_id"] for x in shapes} == {
+        "powiis-balik-pulau", "powiis-tanjung-bungah"
+    }, "Unexpected school IDs"
+    assert all(x["properties"].get("boundary_classification") == "OSM_MAPPED"
+               and x["properties"].get("official_boundary_verified") is False for x in shapes), (
+        "OSM is research/candidate data and cannot be labelled certified"
+    )
     services = config.get("services") or []
     assert any(s.get("binding") == "SCHOOL_POLICY"
                and s.get("service") == "website-block-by-school-powiis"

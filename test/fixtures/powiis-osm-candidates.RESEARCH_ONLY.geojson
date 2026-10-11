@@ -1,0 +1,134 @@
+{
+  "type": "FeatureCollection",
+  "name": "POWIIS OSM candidates -- RESEARCH ONLY -- NEVER production hard block",
+  "attribution": "© OpenStreetMap contributors (ODbL 1.0), www.openstreetmap.org/copyright",
+  "evidence_date": "2026-10-11",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "campus_id": "powiis-balik-pulau",
+        "campus_name": "POWIIS Balik Pulau",
+        "boundary_classification": "OSM_MAPPED",
+        "official_boundary_verified": false,
+        "source_url": "https://www.openstreetmap.org/way/808258869",
+        "source_object_last_modified": "2020-05-26",
+        "note": "Candidate community mapping; NOT JUPEM/PA certified."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              100.2204351,
+              5.3687259
+            ],
+            [
+              100.2205244,
+              5.3687227
+            ],
+            [
+              100.2211082,
+              5.3678177
+            ],
+            [
+              100.2194495,
+              5.3666808
+            ],
+            [
+              100.2193347,
+              5.3667189
+            ],
+            [
+              100.2187861,
+              5.3675954
+            ],
+            [
+              100.2188084,
+              5.3676716
+            ],
+            [
+              100.2204351,
+              5.3687259
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "campus_id": "powiis-tanjung-bungah",
+        "campus_name": "POWIIS Tanjung Bungah",
+        "boundary_classification": "OSM_MAPPED",
+        "official_boundary_verified": false,
+        "source_url": "https://www.openstreetmap.org/way/790940312",
+        "source_object_last_modified": "2021-10-25",
+        "note": "Candidate community mapping; NOT JUPEM/PA certified."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              100.2848077,
+              5.4619151
+            ],
+            [
+              100.2847908,
+              5.4616936
+            ],
+            [
+              100.2847531,
+              5.4612593
+            ],
+            [
+              100.2846966,
+              5.4605266
+            ],
+            [
+              100.284625,
+              5.4602657
+            ],
+            [
+              100.2845571,
+              5.4602357
+            ],
+            [
+              100.2836147,
+              5.4605362
+            ],
+            [
+              100.2835818,
+              5.4606236
+            ],
+            [
+              100.2836987,
+              5.4618124
+            ],
+            [
+              100.2839033,
+              5.4617889
+            ],
+            [
+              100.2841882,
+              5.4617563
+            ],
+            [
+              100.2842197,
+              5.462029
+            ],
+            [
+              100.2847521,
+              5.4619757
+            ],
+            [
+              100.2848077,
+              5.4619151
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}
