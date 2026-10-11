@@ -4,10 +4,10 @@
  * Requires an authenticated, host-bound, signed SSO assertion from the EXISTING
  * identity backend; this Worker never manufactures identity assertions.
  */
-export const CONSENT_DOMAINS=Object.freeze(["vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si"]);
+export const CONSENT_DOMAINS=Object.freeze(["vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si","sleepsomno.com","powiismunc.com","vitamindai.online"]);
 export const TRUSTED_STATUSES=new Set(["trust","contact","status"]);
 export const CONSENT_VERSION="2026-10-v1";
-export const SHARED_NOTICE_VERSION="vynalth-four-domains-v1";
+export const SHARED_NOTICE_VERSION="vynalth-seven-domains-v1";
 const API="/__vynalth/consent";
 const SID_COOKIE="__Secure-vynalth-consent";
 const CSRF_COOKIE="__Secure-vynalth-consent-csrf";
@@ -267,7 +267,7 @@ async function current(env,root,identity,anonId){
  const local=await readKV(kv,prefKey(localRoot,"site",root));
  if(!identity)return {userId:null,scope:"site",value:local,choices:local?.choices||defaults()};
  const shared=await readKV(kv,prefKey(localRoot,"shared",root));
- // A shared grant only applies if the user affirmed the four-domain scope.
+ // A shared grant only applies if the user affirmed the seven-domain scope.
  // A newer site-specific refusal overrides older affirmative shared grants.
  const allowedShared=shared&&shared.sharedScope===true&&shared.noticeVersion===SHARED_NOTICE_VERSION;
  const newerLocal=local&&allowedShared&&Date.parse(local.updatedAt)>=Date.parse(shared.updatedAt);
@@ -298,7 +298,7 @@ async function jsonBody(request){
  }catch{return null;}
 }
 function documentPage(root){
- return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Vynalth Consent</title><style>body{font-family:system-ui;background:#080b12;color:#e8f1ff;max-width:650px;margin:5vh auto;padding:30px;line-height:1.7}fieldset{border:1px solid #526075;padding:20px}button{padding:12px;margin:8px 8px 8px 0;border-radius:8px;cursor:pointer}p{color:#b4c5db}a{color:#accfff}</style><h1>Vynalth Universal Cookie Consent</h1><p>中文：必要 Cookie 始终启用。分析、个性化及营销均可单独选择，拒绝或撤回不会阻止基本使用。</p><p lang="ms">Kuki penting sentiasa aktif. Analitik, pemperibadian dan pemasaran adalah pilihan.</p><p lang="en">Essential cookies are required; analytics, personalization and marketing are optional.</p><p>跨站范围：vynalthai.com、vyncuslim.com、vynalthai.si、vyncuslim.si。仅在你明确允许跨站共享且已登录同一 Vynalth SSO 时，同步肯定同意。</p><p>Cross-site sharing is optional. No fingerprinting or third-party cookies are used.</p><p>统一登录来源为 <strong>vynalthai.com</strong>。其他网站通过主站验证和短期授权码建立各自的第一方会话。</p><p><a href="/__vynalth/consent/link">🔗 连接 vynalthai.com 账号 / Link Vynalth AI SSO</a></p><fieldset><legend>Consent choices</legend><label><input type="checkbox" checked disabled> Essential / 必要</label><div><label><input id="analytics" type="checkbox"> Analytics / 分析</label></div><div><label><input id="personalization" type="checkbox"> Personalization / 个性化</label></div><div><label><input id="marketing" type="checkbox"> Marketing / 营销</label></div><hr><label><input id="share" type="checkbox"> I explicitly agree to apply these choices across all 4 Vynalth domains (logged-in SSO only).</label></fieldset><button id="save">Save preferences</button><button id="deny">Reject optional</button><button id="withdraw">Withdraw consent</button><p id="status" role="status" aria-live="polite"></p><p><a href="https://vynalthai.com/en/legal/privacy">Privacy policy</a></p><script src="/__vynalth/consent/client.js" defer></script></html>',{
+ return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Vynalth Consent</title><style>body{font-family:system-ui;background:#080b12;color:#e8f1ff;max-width:650px;margin:5vh auto;padding:30px;line-height:1.7}fieldset{border:1px solid #526075;padding:20px}button{padding:12px;margin:8px 8px 8px 0;border-radius:8px;cursor:pointer}p{color:#b4c5db}a{color:#accfff}</style><h1>Vynalth Universal Cookie Consent</h1><p>中文：必要 Cookie 始终启用。分析、个性化及营销均可单独选择，拒绝或撤回不会阻止基本使用。</p><p lang="ms">Kuki penting sentiasa aktif. Analitik, pemperibadian dan pemasaran adalah pilihan.</p><p lang="en">Essential cookies are required; analytics, personalization and marketing are optional.</p><p>跨站范围：vynalthai.com、vyncuslim.com、vynalthai.si、vyncuslim.si、sleepsomno.com、powiismunc.com、vitamindai.online，以及各站子域名。访客可分别选择和拒绝，无需登录。跨域保存到已登录账号是额外可选功能，只有明确勾选共享并经验证后才同步。</p><p>Cross-site sharing is optional. No fingerprinting or third-party cookies are used. Guest preferences remain first-party per domain unless explicitly linked.</p><p>统一登录来源为 <strong>vynalthai.com</strong>。其他网站通过主站验证和短期授权码建立各自的第一方会话。</p><p><a href="/__vynalth/consent/link">🔗 连接 vynalthai.com 账号 / Link Vynalth AI SSO</a></p><fieldset><legend>Consent choices</legend><label><input type="checkbox" checked disabled> Essential / 必要</label><div><label><input id="analytics" type="checkbox"> Analytics / 分析</label></div><div><label><input id="personalization" type="checkbox"> Personalization / 个性化</label></div><div><label><input id="marketing" type="checkbox"> Marketing / 营销</label></div><hr><label><input id="share" type="checkbox"> I explicitly agree to share these choices across all 7 Vynalth domains when signed in (SSO optional; local choices do not require login).</label></fieldset><button id="save">Save preferences</button><button id="deny">Reject optional</button><button id="withdraw">Withdraw consent</button><p id="status" role="status" aria-live="polite"></p><p><a href="https://vynalthai.com/en/legal/privacy">Privacy policy</a></p><script src="/__vynalth/consent/client.js" defer></script></html>',{
   headers:{...RESP,"Content-Type":"text/html; charset=utf-8",
   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"}
  });
