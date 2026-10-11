@@ -136,8 +136,14 @@ export default {
     // self-reported GPS verdict alone must never bypass independent School
     // IP restrictions. Canonical server-signed trust/contact/status identities
     // remain exempt from this feature-specific school blocking.
-    const photoResource = rootDomain === "vyncuslim.com" &&
-      incomingUrl.pathname.startsWith("/media/jingxin/");
+    const photoPath=incomingUrl.pathname;
+    const photoResource = rootDomain === "vyncuslim.com" && (
+      photoPath.startsWith("/media/jingxin/")||
+      photoPath==="/assets/jingxin-memory.jpg"||
+      photoPath==="/assets/jingxin-memory-hq.avif"||
+      photoPath==="/assets/mce-kuala-lumpur-real.webp"||
+      photoPath.startsWith("/assets/.jingxin-hq/")
+    ||photoPath.startsWith("/assets/.jingxin-hq2/"));
     if (photoResource && env?.JINGXIN_PRIVATE_MEDIA_ENABLED === "true" &&
         !(await shieldAccountExempt(request,env,rootDomain))) {
       const schoolDenial = await checkSchoolPolicy(request,env,rootDomain);
