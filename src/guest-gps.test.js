@@ -385,7 +385,7 @@ test("explicit re-verification is accessible after a previous inside verdict",as
  assert.equal(dest.pathname,"/__shield/gps/recheck");
  const content=await invoke(new Request(dest.toString()));
  assert.equal(content.status,403);
- assert.match(await content.text(),/getCurrentPosition|Location required/);
+ assert.match(await content.text(),/需要精确位置权限|位置验证/);
 });
 
 test("CSRF-linked handoff cannot be injected into a different visitor session",async()=>{
@@ -512,7 +512,7 @@ test("proximity cookie cannot unlock private photo data",async()=>{
 
 
 test("new GPS UI matches Vynalth AI site branding and offers browser permission controls",async()=>{
- const resp=await invoke(req("/","GET",{Accept:"text/html"}));
+ const resp=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}));
  const html=await resp.text();
  assert.match(html,/Vynalth AI/);
  assert.doesNotMatch(html,/VYNALTH SHIELD/i);
