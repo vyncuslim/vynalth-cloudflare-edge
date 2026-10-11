@@ -196,13 +196,16 @@ async function authorizeAtHub(request,env,url,root){
    target,state,exp:now+CODE_SECONDS,issuer:HUB_ROOT
   }),{expirationTtl:CODE_SECONDS});
  }catch{return output(503,{error:"SSO_TICKET_STORAGE_UNAVAILABLE"});}
- const redirect=new URL("https://"+target+API+"/callback");
+ // The apex may be owned by another Worker (notably vv on
+ // vyncuslim.com). Use our explicit proxied consent subdomain so
+ // the existing edge Worker can issue a first-party Domain=<root> SSO Cookie.
+ const redirect=new URL("https://consent."+target+API+"/callback");
  redirect.searchParams.set("code",code);
  redirect.searchParams.set("state",state);
  return safeRedirect(redirect.toString());
 }
 async function completeLink(request,env,url,root){
- if(request.method!=="GET"||root===HUB_ROOT)return output(404,{error:"NOT_FOUND"});
+ if(request.method!=="GET"||root===HUB_ROOT||url.hostname!=="consent."+root)return output(404,{error:"NOT_FOUND"});
  if(!isSet(env.CONSENT_SSO_SIGNING_SECRET,32))return output(503,{error:"SSO_SIGNING_NOT_CONFIGURED"});
  const state=url.searchParams.get("state");
  const saved=cookieValue(request,LINK_COOKIE);
