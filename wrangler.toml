@@ -28,6 +28,8 @@ routes = [
 # Enable only after production SSO issuer adds signed, provider-verified email claims.
 SCHOOL_EMAIL_GATE_ENABLED = "false"
 CONSENT_CMP_ENABLED = "false"
+# The canonical auth assertion binding is separate from CMP and OFF until reviewed.
+CONSENT_SSO_BRIDGE_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Keep BOTH GPS and Cookie Consent disabled in production until integration review.
 GPS_GATE_ENABLED = "false"
