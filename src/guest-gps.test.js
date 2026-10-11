@@ -483,10 +483,13 @@ test("operator-approved uncertified OSM polygons use temporary near-border permi
  assert.equal(near.status,200);
  assert.equal((await near.json()).nearBoundary,true);
  // No location consent means no signed status, hence HTML and APIs are denied.
- assert.equal((await invoke(req("/","GET",{Accept:"text/html"}),env)).status,403);
+ const sibling=await invoke(req("/","GET",{Accept:"text/html"}),env);
+ assert.equal(sibling.status,302);
+ assert.match(sibling.headers.get("Location"),/^https:\/\/vynalthai\.com\/__shield\/gps\/bridge/);
  const api=await invoke(req("/api/protected","GET",{Accept:"application/json"}),env);
  assert.equal(api.status,403);
- const noConsentPage=await invoke(req("/", "GET", {Accept:"text/html"}),env);
+ const noConsentPage=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}),env);
+ assert.equal(noConsentPage.status,403);
  assert.match(await noConsentPage.text(),/重新尝试|允许位置/);
 });
 
