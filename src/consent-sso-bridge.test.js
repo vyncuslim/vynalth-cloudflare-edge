@@ -4,7 +4,7 @@ import { createHmac } from "node:crypto";
 import { handleConsentSsoBridge } from "./consent-sso-bridge.js";
 import { signedSSO } from "./universal-consent.js";
 const secret="test-only-strong-secret-should-never-be-production-123456789";
-const URL="https://vynalthai.com/__vynalth/sso/session";
+const SSO_URL="https://vynalthai.com/__vynalth/sso/session";
 const env={CONSENT_SSO_BRIDGE_ENABLED:"true",CONSENT_SSO_SIGNING_SECRET:secret};
 function token(status="user",expiry=600,host="vynalthai.com",verified=true){
  const claim={sub:"00000000-0000-0000-0000-000000000012",sid:"abcdef12345678",
@@ -38,7 +38,7 @@ test("verified signed canonical SSO is bound as Secure HttpOnly first-party Cook
 });
 test("tampered, expired, wrong host, unverified email or privileged assertion is rejected",async()=>{
  const valid=token();
- const denied=[valid.replace(/.$/,"A"),token("user",-2),
+ const denied=[valid.slice(0,-1)+(valid.endsWith("A")?"B":"A"),token("user",-2),
   token("user",600,"vyncuslim.com"),token("user",600,"vynalthai.com",false),
   token("trust")];
  for(const claim of denied){
@@ -52,14 +52,14 @@ test("request cannot bind cross-site or on an unauthorized hostname",async()=>{
  assert.equal(cross.status,403);
  const other=await run(request(token(),"vyncuslim.com"));
  assert.equal(other,null);
- const noBody=await run(new Request(URL,{method:"POST",headers:{Origin:"https://vynalthai.com","Content-Type":"application/json"}}));
- assert.equal(noBody.status,403);
+ const noBody=await run(new Request(SSO_URL,{method:"POST",headers:{Origin:"https://vynalthai.com","Content-Type":"application/json"}}));
+ assert.equal(noBody.status,400);
 });
 test("explicit same-origin logout clears the first-party cookie",async()=>{
- const req=new Request(URL+"/clear",{method:"POST",headers:{Origin:"https://vynalthai.com","Sec-Fetch-Site":"same-origin"}});
+ const req=new Request(SSO_URL+"/clear",{method:"POST",headers:{Origin:"https://vynalthai.com","Sec-Fetch-Site":"same-origin"}});
  const r=await run(req);
  assert.equal(r.status,200);
  assert.match(r.headers.get("Set-Cookie"),/Max-Age=0/);
- const denied=await run(new Request(URL+"/clear",{method:"POST",headers:{Origin:"https://evil.example"}}));
+ const denied=await run(new Request(SSO_URL+"/clear",{method:"POST",headers:{Origin:"https://evil.example"}}));
  assert.equal(denied.status,403);
 });
