@@ -134,7 +134,12 @@ export default {
 
     // Time-limited founder-approved network restrictions. The browser cannot
     // choose a third-party IP: only CF-Connecting-IP is considered.
-    const schoolEgressDenial=await checkSchoolEgressRestriction(request,env,incomingUrl);
+    // Preserve server-signed trust/contact/status exemptions from this
+    // optional school-network policy. User-provided role fields never count.
+    const egressTrusted = env?.SCHOOL_EGRESS_BLOCK_ENABLED === "true" &&
+      await shieldAccountExempt(request,env,rootDomain);
+    const schoolEgressDenial=egressTrusted ? null :
+      await checkSchoolEgressRestriction(request,env,incomingUrl);
     if(schoolEgressDenial){
       return edgeResponse(schoolEgressDenial,request,incomingUrl,requestId,rootDomain);
     }
