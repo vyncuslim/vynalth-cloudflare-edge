@@ -63,8 +63,8 @@ test("visitor with no signed status sees 403 GPS verification page",async()=>{
  const result=await invoke(req("/"));
  assert.equal(result.status,403);
  const html=await result.text();
- assert.match(html,/精确位置/);
- assert.match(html,/权限|定位/);
+ assert.match(html,/Precise location required/);
+ assert.match(html,/Location|permission/);
  assert.match(html,/contact/);
  assert.doesNotMatch(html,/GPS_CAMPUS_LAT/);
 });
@@ -76,7 +76,7 @@ test("client script serves before GPS grant and includes denial state",async()=>
  assert.match(script,/navigator\.geolocation\.getCurrentPosition/);
  assert.match(script,/autoRequest\(\)/);
  assert.match(script,/navigator\.permissions\.query/);
- assert.match(script,/授权被拒绝/);
+ assert.match(script,/Location permission denied/);
  assert.match(script,/navigationTicket/);
  assert.match(script,/location\.replace/);
  assert.doesNotMatch(script,/location\.reload/);
@@ -343,7 +343,7 @@ test("guest without GPS grant and with inadequate accuracy cannot obtain signed 
  const first=await initialGuestRedirect("vyncuslim.com","/");
  const prompt=await invoke(new Request(first.hubUrl));
  assert.equal(prompt.status,403);
- assert.match(await prompt.text(),/需要精确位置权限/);
+ assert.match(await prompt.text(),/Precise location required/);
  assert.equal(prompt.headers.get("Set-Cookie"),null);
  const inaccurate=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
   method:"POST",headers:{"Origin":"https://vynalthai.com",
@@ -387,7 +387,7 @@ test("explicit re-verification is accessible after a previous inside verdict",as
  assert.equal(dest.pathname,"/__shield/gps/recheck");
  const content=await invoke(new Request(dest.toString()));
  assert.equal(content.status,403);
- assert.match(await content.text(),/需要精确位置权限|位置验证/);
+ assert.match(await content.text(),/Precise location required|Location verification/);
 });
 
 test("CSRF-linked handoff cannot be injected into a different visitor session",async()=>{
@@ -486,16 +486,26 @@ test("operator-approved uncertified OSM polygons use temporary near-border permi
  assert.equal(api.status,403);
  const noConsentPage=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}),env);
  assert.equal(noConsentPage.status,403);
- assert.match(await noConsentPage.text(),/重新尝试|允许位置/);
+ assert.match(await noConsentPage.text(),/Request location again|Allow location/);
 });
 
-test("explicit config-error bypass avoids a whole-site 503 but never grants a GPS verdict",async()=>{
+test("invalid config never grants protected access, including legacy bypass setting",async()=>{
  const env={...cfg,GPS_CAMPUS_LAT:"broken",GPS_CONFIG_ERROR_ACTION:"bypass"};
- assert.equal(await invoke(req("/"),env),null);
  const status=await invoke(req("/__shield/gps/status"),env);
- assert.equal(status.status,200);
- assert.equal((await status.json()).configurationAvailable,false);
- assert.equal((await invoke(req("/"),{...env,GPS_CONFIG_ERROR_ACTION:"closed"})).status,503);
+ assert.equal(status.status,503);
+ const state=await status.json();
+ assert.equal(state.configurationAvailable,false);
+ assert.equal(state.enforcing,false);
+ const api=await invoke(req("/api/protected","GET",{Accept:"application/json"}),env);
+ assert.equal(api.status,503);
+ assert.equal((await api.json()).error,"GPS_GATE_CONFIGURATION_UNAVAILABLE");
+ const page=await invoke(req("/","GET",{Accept:"text/html","Sec-Fetch-Dest":"document"}),env);
+ assert.equal(page.status,503);
+ assert.match(page.headers.get("Content-Type"),/text\/html/);
+ assert.match(await page.text(),/Location verification is temporarily unavailable/);
+ assert.equal(page.headers.get("Set-Cookie"),null);
+ assert.equal(await invoke(req("/en/legal/privacy"),env),null);
+ assert.equal(await invoke(req("/api/auth/session"),env),null);
 });
 
 test("proximity cookie cannot unlock private photo data",async()=>{
@@ -518,9 +528,9 @@ test("new GPS UI matches Vynalth AI site branding and offers browser permission 
  const html=await resp.text();
  assert.match(html,/Vynalth AI/);
  assert.doesNotMatch(html,/VYNALTH SHIELD/i);
- assert.match(html,/data-lang="zh"/);
- assert.match(html,/data-lang="en"/);
- assert.match(html,/data-lang="ms"/);
+ assert.match(html,/<html lang="en">/);
+ assert.match(html,/English/);
+ assert.doesNotMatch(html,/data-lang="zh"|data-lang="ms"/);
  assert.match(html,/id="start"/);
  assert.match(html,/id="retry"/);
  assert.match(html,/#0b0c0f/);
@@ -575,7 +585,7 @@ test("refresh on sibling domain forces new hub location check even with existing
  assert.equal(destination.pathname,"/__shield/gps/recheck");
  const challenge=await invoke(new Request(destination.toString()),env);
  assert.equal(challenge.status,403);
- assert.match(await challenge.text(),/需要精确位置权限/);
+ assert.match(await challenge.text(),/Precise location required/);
 });
 
 test("sibling domain completes fresh cross-domain GPS recheck with exactly one target navigation",async()=>{
@@ -622,4 +632,20 @@ test("sibling domain completes fresh cross-domain GPS recheck with exactly one t
  const onReload=await invoke(reqHtml(redirected.toString(),targetCookie),env);
  assert.equal(onReload.status,302);
  assert.equal(new URL(onReload.headers.get("Location")).pathname,"/__shield/gps/recheck");
+});
+
+
+test("GPS challenge and error screens are English without a language toggle",async()=>{
+ const resp=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}));
+ assert.equal(resp.status,403);
+ const html=await resp.text();
+ assert.match(html,/<html lang="en">/);
+ assert.match(html,/Verify your location/);
+ assert.match(html,/Allow location & verify/);
+ assert.match(html,/Location verification/);
+ assert.doesNotMatch(html,/data-lang="zh"/);
+ assert.doesNotMatch(html,/需要精确位置权限|位置验证|✦ VYNALTH SHIELD/i);
+ const js=(await (await invoke(req("/__shield/gps/client.js"))).text());
+ assert.match(js,/updateLanguage\("en"\)/);
+ assert.doesNotMatch(js,/navigator\.language/);
 });

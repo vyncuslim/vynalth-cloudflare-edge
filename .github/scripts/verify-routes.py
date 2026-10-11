@@ -65,7 +65,7 @@ def check(path: Path) -> None:
     assert config["vars"].get("GPS_POLYGON_ENFORCEMENT_APPROVED") == "true", "Release authorization required"
     assert config["vars"].get("GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED") == "true", "OSM release authorization required"
     assert config["vars"].get("GPS_BOUNDARY_BUFFER_METERS") == "30", "30 m safeguard required"
-    assert config["vars"].get("GPS_CONFIG_ERROR_ACTION") == "bypass", "Retain config outage recovery"
+    assert config["vars"].get("GPS_CONFIG_ERROR_ACTION") == "closed", "GPS must never bypass access on config failure"
     geodata = json.loads(config["vars"].get("GPS_CAMPUS_POLYGONS_JSON", "null"))
     assert geodata.get("type") == "FeatureCollection", "Expected GeoJSON FeatureCollection"
     shapes = geodata.get("features", [])
