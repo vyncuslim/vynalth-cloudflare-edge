@@ -528,9 +528,9 @@ test("new GPS UI matches Vynalth AI site branding and offers browser permission 
  const html=await resp.text();
  assert.match(html,/Vynalth AI/);
  assert.doesNotMatch(html,/VYNALTH SHIELD/i);
- assert.match(html,/data-lang="zh"/);
- assert.match(html,/data-lang="en"/);
- assert.match(html,/data-lang="ms"/);
+ assert.match(html,/<html lang="en">/);
+ assert.match(html,/English/);
+ assert.doesNotMatch(html,/data-lang="zh"|data-lang="ms"/);
  assert.match(html,/id="start"/);
  assert.match(html,/id="retry"/);
  assert.match(html,/#0b0c0f/);
