@@ -293,8 +293,8 @@ function disclaimerPage(){
 function blockedPage(){
  const visible=GEO_HTML.replace('<section id="prompt">','<section id="prompt" hidden>')
   .replace('<section id="blocked" hidden>','<section id="blocked">')
-  .replace('<p class="warning error" id="reason">Location permission unavailable</p>',
-    '<p class="warning error" id="reason">此连接最近报告的位置在校园限制区域内。访问暂时受限制。你可以重试定位。</p>');
+  .replace('<p class="notice-error" id="reason" role="alert">Location permission unavailable</p>',
+    '<p class="notice-error" id="reason" role="alert">此前的位置验证结果属于限制区域。可以重新定位，但在通过前无法继续访问受保护的内容。</p>');
  return new Response(visible,{status:403,headers:{...head,"Content-Type":"text/html; charset=utf-8",
    "X-Frame-Options":"DENY",
    "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}});
