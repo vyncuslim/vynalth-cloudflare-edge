@@ -25,7 +25,7 @@ const equal=async(s,msg,mac)=>typeof mac==="string"&&/^[A-Za-z0-9_-]{43}$/.test(
 const secret=env=>typeof env?.SCHOOL_EGRESS_SIGNING_SECRET==="string"&&
  env.SCHOOL_EGRESS_SIGNING_SECRET.length>=32?env.SCHOOL_EGRESS_SIGNING_SECRET:null;
 const kv=env=>env?.SCHOOL_EGRESS_KV&&
- ["get","put"].every(k=>typeof env.SCHOOL_EGRESS_KV[k]==="function")?env.SCHOOL_EGRESS_KV:null;
+ ["get","put","delete"].every(k=>typeof env.SCHOOL_EGRESS_KV[k]==="function")?env.SCHOOL_EGRESS_KV:null;
 const originOK=r=>r.headers.get("Origin")==="https://"+HOST&&
  (!r.headers.get("Sec-Fetch-Site")||r.headers.get("Sec-Fetch-Site")==="same-origin");
 const observedIp=r=>{
@@ -44,12 +44,13 @@ const within=(at,now)=>{
  if(!Number.isSafeInteger(at))return false;
  return at>=now-MAX_PROOF_AGE&&at<=now+15;
 };
-const isPolicyException=path=>path===PATH||path===PATH+"/block"||
+const isPolicyException=path=>path===PATH||path===PATH+"/block"||path===PATH+"/clear"||
  path.startsWith("/.well-known/")||path.startsWith("/assets/")||
  path.startsWith("/api/auth/")||path.startsWith("/auth/")||
- path==="/api/admin/school-egress/authorize"||
+ path==="/api/admin/school-egress/authorize"||path==="/api/admin/school-egress/revoke"||
  path==="/en/legal/privacy"||path==="/robots.txt"||
- /^\/(?:en|cn|ms)?\/?(?:network-egress|auth\/)(?:\/|$)/.test(path);
+ path==="/network-egress"||
+ /^\\/(?:en|cn|ms)\\/(?:network-egress|auth)(?:\\/|$)/.test(path);
 
 export async function checkSchoolEgressRestriction(request,env,url){
  if(env?.SCHOOL_EGRESS_BLOCK_ENABLED!=="true"||isPolicyException(url.pathname))return null;
@@ -67,7 +68,7 @@ export async function checkSchoolEgressRestriction(request,env,url){
 }
 
 export async function handleEgressIpCheck(request,env,url){
- if(url.hostname!==HOST||![PATH,PATH+"/block"].includes(url.pathname))return null;
+ if(url.hostname!==HOST||![PATH,PATH+"/block",PATH+"/clear"].includes(url.pathname))return null;
  if(url.pathname===PATH){
   if(request.method!=="GET")return reply(405,{error:"METHOD_NOT_ALLOWED"});
   const fetchSite=request.headers.get("Sec-Fetch-Site");
@@ -84,6 +85,21 @@ export async function handleEgressIpCheck(request,env,url){
  }
  if(request.method!=="POST")return reply(405,{error:"METHOD_NOT_ALLOWED"});
  if(!originOK(request))return reply(403,{error:"ORIGIN_NOT_ALLOWED"});
+ if(url.pathname===PATH+"/clear"){
+  const s=secret(env),store=kv(env);
+  if(!s||!store)return reply(503,{error:"NETWORK_RESTRICTION_NOT_CONFIGURED"});
+  let payload;
+  try{
+   const raw=await request.text();if(raw.length>500)return reply(413,{error:"REQUEST_TOO_LARGE"});
+   payload=JSON.parse(raw);
+  }catch{return reply(400,{error:"INVALID_JSON"});}
+  const at=payload?.at,now=Math.floor(Date.now()/1000);
+  if(!Number.isSafeInteger(at)||at<now-60||at>now+10||
+     !await equal(s,"egress-v1|revoke|"+at,payload?.authorization))
+   return reply(403,{error:"OWNER_APPROVAL_REQUIRED"});
+  try{await store.delete(KEY);}catch{return reply(503,{error:"RESTRICTION_STORAGE_UNAVAILABLE"});}
+  return reply(200,{active:false,cleared:true});
+ }
  if(env?.SCHOOL_EGRESS_BLOCK_ENABLED!=="true")return reply(503,{error:"NETWORK_RESTRICTION_DISABLED"});
  const s=secret(env),store=kv(env);
  if(!s||!store)return reply(503,{error:"NETWORK_RESTRICTION_NOT_CONFIGURED"});
