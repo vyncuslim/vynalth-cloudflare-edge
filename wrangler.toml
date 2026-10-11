@@ -26,6 +26,8 @@ routes = [
 
 [vars]
 CONSENT_CMP_ENABLED = "false"
+# Owner-approved temporary network restriction; OFF until full safety review.
+SCHOOL_EGRESS_BLOCK_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Keep BOTH GPS and Cookie Consent disabled in production until integration review.
 GPS_GATE_ENABLED = "false"
@@ -36,6 +38,13 @@ JINGXIN_PRIVATE_MEDIA_ENABLED = "false"
 
 # The existing edge Worker owns HTTP routes. The policy Worker has no routes:
 # it is called privately, so the origin and security/tracing logic is preserved.
+# Reuse the existing production vynalth-consent-prod KV namespace in a dedicated
+# binding; a "school-egress:" prefixed key is independent of Consent records.
+# No new namespace and no existing Consent key is modified.
+[[kv_namespaces]]
+binding = "SCHOOL_EGRESS_KV"
+id = "f687e465ac0441d7a6ca18aaa9ed91f8"
+
 [[services]]
 binding = "SCHOOL_POLICY"
 service = "website-block-by-school-powiis"
