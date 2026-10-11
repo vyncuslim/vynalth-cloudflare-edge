@@ -46,12 +46,16 @@ function config(env){
   polygons=parseCampusPolygons(env?.GPS_CAMPUS_POLYGONS_JSON);
   if(!polygons)return null;
  }
- // Community-mapped OSM boundaries can be evaluated in shadow mode only.
- // The metadata and flag are safety interlocks, not substitutes for an
- // independently authenticated cadastral survey and human approval.
+ // Candidate OSM polygons are not certified. Approximate enforcement requires
+ // explicit separate operator consent and will never claim survey authority.
+ const provisional=env?.GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED==="true";
  if(polygonMode==="enforce"&&(
     env?.GPS_POLYGON_ENFORCEMENT_APPROVED!=="true"||
-    polygons.some(c=>!c.officialBoundaryVerified)))return null;
+    polygons.some(c=>!c.officialBoundaryVerified&&! (
+      provisional&&c.boundaryClassification==="OSM_MAPPED"&&
+      ["powiis-balik-pulau","powiis-tanjung-bungah"].includes(c.id)))))return null;
+ const bufferMeters=polygonMode==="enforce"?Number(env?.GPS_BOUNDARY_BUFFER_METERS??30):0;
+ if(!Number.isFinite(bufferMeters)||bufferMeters<0||bufferMeters>100)return null;
  let campuses=[];
  if(polygonMode!=="enforce"){
   // Legacy circle policy is still authoritative while shadow evaluates.
@@ -72,7 +76,7 @@ function config(env){
       Math.abs(c.lat)>90||Math.abs(c.lon)>180||c.radius<50||c.radius>1000)||
      new Set(campuses.map(c=>c.id)).size!==campuses.length)return null;
  }
- return {s,a:typeof a==="string"&&a.length>=32?a:null,campuses,polygons,polygonMode};
+ return {s,a:typeof a==="string"&&a.length>=32?a:null,campuses,polygons,polygonMode,bufferMeters};
 }
 async function exempt(req,cfg,host){
  // Only the trusted application's server can mint a valid signed status cookie.
@@ -87,22 +91,25 @@ async function exempt(req,cfg,host){
  if(ttl<=now||ttl>now+3600)return false;
  return valid(cfg.a,[exp,status,nonce,host].join("|"),tag);
 }
-async function permitted(req,cfg,host){
- const value=getCookie(req,SESSION_COOKIE);if(!value||value.length>320)return false;
- const parts=value.split(".");if(parts.length!==3)return false;
+async function sessionVerdict(req,cfg,host){
+ const value=getCookie(req,SESSION_COOKIE);if(!value||value.length>320)return null;
+ const parts=value.split(".");if(parts.length!==3)return null;
  const [exp,nonce,tag]=parts;
- if(!/^\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return false;
+ if(!/^\d{10,12}$/.test(exp)||!/^[a-zA-Z0-9_-]{22}$/.test(nonce))return null;
  const now=Math.floor(Date.now()/1000),time=Number(exp);
- if(time<=now||time>now+SESSION_TTL)return false;
- return valid(cfg.s,[exp,nonce,host,"outside"].join("|"),tag);
+ if(time<=now||time>now+SESSION_TTL)return null;
+ if(await valid(cfg.s,[exp,nonce,host,"outside"].join("|"),tag))return "outside";
+ if(time<=now+300&&await valid(cfg.s,[exp,nonce,host,"nearby"].join("|"),tag))return "nearby";
+ return null;
 }
+async function permitted(req,cfg,host){return (await sessionVerdict(req,cfg,host))!==null;}
 
 function policyCookie(name,value,age=SESSION_TTL){
  return name+"="+value+"; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age="+age;
 }
 async function verdictToken(cfg,host,verdict){
- if(verdict!=="inside"&&verdict!=="outside")throw Error("Invalid verdict");
- const expiry=Math.floor(Date.now()/1000)+SESSION_TTL;
+ if(!["inside","outside","nearby"].includes(verdict))throw Error("Invalid verdict");
+ const expiry=Math.floor(Date.now()/1000)+(verdict==="nearby"?300:SESSION_TTL);
  const nonceBytes=new Uint8Array(16);crypto.getRandomValues(nonceBytes);
  const nonce=b64(nonceBytes);
  const sig=await sign(cfg.s,[expiry,nonce,host,verdict].join("|"));
@@ -146,7 +153,7 @@ async function validateHandoff(cfg,target,path,state,ticket){
  const parts=ticket.split(".");
  if(parts.length!==4)return null;
  const [expires,verdict,nonce,tag]=parts;
- if(verdict!=="inside"&&verdict!=="outside")return null;
+ if(!["inside","outside","nearby"].includes(verdict))return null;
  if(!/^\d{10,12}$/.test(expires)||!/^[A-Za-z0-9_-]{22}$/.test(nonce))return null;
  const expiry=Number(expires),now=Math.floor(Date.now()/1000);
  if(expiry<=now||expiry>now+60)return null;
@@ -182,7 +189,7 @@ async function bridge(request,url,cfg){
    return reply(400,{error:"INVALID_BRIDGE_DESTINATION"});
  let verdict=null;
  if(await hasBlockVerdict(request,cfg,url.hostname))verdict="inside";
- else if(await permitted(request,cfg,url.hostname))verdict="outside";
+ else verdict=await sessionVerdict(request,cfg,url.hostname);
  if(!verdict)return page(); // First-party hub asks for browser GPS; NO login needed.
  const ticket=await handoffToken(cfg,target,path,state,verdict);
  const destination=new URL("https://"+target+"/__shield/gps/import");
@@ -204,7 +211,7 @@ async function importHandoff(request,url,cfg){
  const value=await verdictToken(cfg,url.hostname,verdict);
  const headers=new Headers(head);
  headers.set("Location",path);
- headers.append("Set-Cookie",policyCookie(name,value));
+ headers.append("Set-Cookie",policyCookie(name,value,verdict==="nearby"?300:SESSION_TTL));
  headers.append("Set-Cookie",policyCookie(old,"",0));
  headers.append("Set-Cookie",policyCookie(HANDOFF_STATE_COOKIE,"",0));
  return new Response(null,{status:302,headers});
@@ -230,7 +237,7 @@ async function verify(req,url,cfg){
  // response field or analytics carries exact GPS coordinates or shadow verdict.
  let verdict;
  if(cfg.polygonMode==="enforce"){
-  verdict=decideCampusPolygons(cfg.polygons,lat,lon,accuracy);
+  verdict=decideCampusPolygons(cfg.polygons,lat,lon,accuracy,cfg.bufferMeters);
   if(verdict==="INVALID")return reply(503,{error:"GPS_POLYGON_CONFIGURATION_UNAVAILABLE"});
  }else{
   if(cfg.polygonMode==="shadow")void decideCampusPolygons(cfg.polygons,lat,lon,accuracy);
@@ -240,7 +247,15 @@ async function verify(req,url,cfg){
   verdict=circles.some(c=>Math.abs(c.distance-c.radius)<=accuracy)?"UNCERTAIN":
    circles.some(c=>c.distance+accuracy<c.radius)?"INSIDE":"OUTSIDE";
  }
- if(verdict==="UNCERTAIN")return reply(403,{error:"LOCATION_UNCERTAIN"});
+ if(verdict==="UNCERTAIN"){
+  // A GPS location near an approximate border does not prove INSIDE.
+  if(cfg.polygonMode!=="enforce")return reply(403,{error:"LOCATION_UNCERTAIN"});
+  const headers=new Headers(head);
+  headers.set("Content-Type","application/json; charset=utf-8");
+  headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,await verdictToken(cfg,url.hostname,"nearby"),300));
+  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  return new Response(JSON.stringify({verified:false,nearBoundary:true,expiresInSeconds:300}),{status:200,headers});
+ }
  if(verdict==="INSIDE"){
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
@@ -291,9 +306,16 @@ export async function guestGpsGate(request,env,url){
  const cfg=config(env);
  // An explicitly enabled GPS gate must never quietly become permissive
  // because a signing key or geofence config was missing or malformed.
- if(!cfg&&!skip(url.pathname))return reply(503,{
-   error:"GPS_GATE_CONFIGURATION_UNAVAILABLE",blocked:true
- });
+ if(!cfg&&!skip(url.pathname)){
+  // Owner-opted recovery: no OUTSIDE verdict and no cookies are minted;
+  // only the config outage can suspend GPS checks, not permission refusal.
+  if(env?.GPS_CONFIG_ERROR_ACTION==="bypass"){
+   console.error("GPS_GATE_CONFIGURATION_UNAVAILABLE: operator-approved bypass");
+   if(url.pathname==="/__shield/gps/status")return reply(200,{enabled:false,configurationAvailable:false,recoveryMode:"bypass"});
+   return null;
+  }
+  return reply(503,{error:"GPS_GATE_CONFIGURATION_UNAVAILABLE",blocked:true});
+ }
  if(!cfg)return null;
  if(url.pathname==="/__shield/gps/recheck"){
   if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
