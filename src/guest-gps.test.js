@@ -139,12 +139,12 @@ test("both POWIIS campuses are separate provisional GPS test circles",async()=>{
  assert.equal((await overlap.json()).error,"LOCATION_UNCERTAIN");
 });
 
-test("invalid or incomplete provisional geofences cannot activate a block",async()=>{
+test("invalid provisional geofences do not silently disable an enabled gate",async()=>{
  for(const value of ["{oops", "[]",JSON.stringify([{id:"tanjung-bungah",lat:5.46113,lon:100.28420,radius:180},
  {id:"balik-pulau",lat:5.36770,lon:100.21995}]),
  JSON.stringify([{id:"tanjung-bungah",lat:5.46113,lon:100.28420,radius:180},
  {id:"tanjung-bungah",lat:5.36770,lon:100.21995,radius:180}])]){
-  assert.equal(await invoke(req("/"),{...cfg,GPS_CAMPUS_GEOFENCES_JSON:value}),null);
+  assert.equal((await invoke(req("/"),{...cfg,GPS_CAMPUS_GEOFENCES_JSON:value})).status,503);
  }
 });
 
