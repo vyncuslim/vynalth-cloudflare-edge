@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { Script } from "node:vm";
 import { readFileSync } from "node:fs";
-import { guestGpsGate } from "./guest-gps.js";
+import { guestGpsGate,gpsOutsideOrLegacyExempt } from "./guest-gps.js";
 
 const cryptoApi=globalThis.crypto || webcrypto;
 if(!globalThis.crypto)globalThis.crypto=cryptoApi;
@@ -500,4 +500,18 @@ test("explicit config-error bypass avoids a whole-site 503 but never grants a GP
  assert.equal(status.status,200);
  assert.equal((await status.json()).configurationAvailable,false);
  assert.equal((await invoke(req("/"),{...env,GPS_CONFIG_ERROR_ACTION:"closed"})).status,503);
+});
+
+test("proximity cookie cannot unlock private photo data",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+   GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED:"true",GPS_BOUNDARY_BUFFER_METERS:"30",
+   GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ const near=await verifyCoords(5.3687259,100.2204351,5,env);
+ assert.equal(near.status,200);
+ const nearCookie=near.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const rq=req("/private/picture.webp","GET",{Cookie:nearCookie});
+ assert.equal(await gpsOutsideOrLegacyExempt(rq,env,"vyncuslim.com"),false);
+ const outside=await verifyCoords(5.40,100.25,5,env);
+ const outsideCookie=outside.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ assert.equal(await gpsOutsideOrLegacyExempt(req("/private/picture.webp","GET",{Cookie:outsideCookie}),env,"vyncuslim.com"),true);
 });
