@@ -53,7 +53,8 @@ async function initialGuestRedirect(host,path="/about"){
 
 test("GPS guest gate stays OFF without explicit configuration",async()=>{
  assert.equal(await invoke(req(),{...cfg,GPS_GATE_ENABLED:"false"}),null);
- assert.equal(await invoke(req(),{...cfg,GPS_CAMPUS_LAT:"invalid"}),null);
+ const invalid=await invoke(req(),{...cfg,GPS_CAMPUS_LAT:"invalid"});
+ assert.equal(invalid.status,503);
  assert.equal(await invoke(req(),{...cfg,GPS_ACCOUNT_STATUS_SECRET:undefined}),null);
 });
 test("visitor with no signed status sees 403 GPS verification page",async()=>{
