@@ -79,7 +79,7 @@ test("signed trusted status unlocks only recognized first-party private R2 paths
 });
 test("forged, ordinary and wrong-host SSO cannot read photos",async()=>{
  const env=makeEnv();
- for(const cookie of ["",signedUser("normal"),signedUser("trust","vynalthai.com"),signedUser().replace(/.$/,x=>x==="A"?"B":"A")]){
+ for(const cookie of ["",signedUser("normal"),signedUser("trust","vynalthai.com"),signedUser().replace(/\.([A-Za-z0-9_-])/,(_,ch)=>"."+ (ch==="A"?"B":"A"))]){
   const res=await invoke(photo(undefined,cookie),env);
   assert.equal(res.status,403);
  }
