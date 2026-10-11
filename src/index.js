@@ -159,7 +159,7 @@ export default {
     const canonicallyExempt = env?.GPS_GATE_ENABLED === "true" &&
       !gpsEndpoint && await shieldAccountExempt(request,env,rootDomain);
     if (!canonicallyExempt) {
-      const gpsDecision = await guestGpsGate(request,env,incomingUrl);
+      const gpsDecision = await guestGpsGate(request,env,incomingUrl,ctx,requestId);
       if (gpsDecision) {
         return edgeResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
       }
