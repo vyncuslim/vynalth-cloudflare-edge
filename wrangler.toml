@@ -25,6 +25,8 @@ routes = [
 ]
 
 [vars]
+# Enable only after production SSO issuer adds signed, provider-verified email claims.
+SCHOOL_EMAIL_GATE_ENABLED = "false"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Keep BOTH GPS and Cookie Consent disabled in production until integration review.
