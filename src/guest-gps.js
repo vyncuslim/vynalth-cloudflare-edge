@@ -218,8 +218,7 @@ function redirect(to,headers={}){
 function beginHandoff(url,recheck=false){
  if(!allowedTarget(url.hostname))return reply(400,{error:"INVALID_HANDOFF_TARGET"});
  const bytes=new Uint8Array(24);crypto.getRandomValues(bytes);
- const state=b64(bytes),clean=cleanVisitPath(url);
- const path=clean&&clean.length<=300?clean:"/";
+ const state=b64(bytes),path=safeRelativePath(url.pathname)?url.pathname:"/";
  const dest=new URL("https://"+GPS_BRIDGE_HUB+"/__shield/gps/"+(recheck?"recheck":"bridge"));
  dest.searchParams.set("host",url.hostname);
  dest.searchParams.set("return",path);
@@ -413,7 +412,7 @@ export async function guestGpsGate(request,env,url){
   if(request.method!=="GET"||!allowedTarget(url.hostname))return reply(404,{error:"NOT_FOUND"});
   const returnPath=url.searchParams.get("return");
   if(!safeRelativePath(returnPath))return reply(400,{error:"INVALID_RETURN_PATH"});
-  const next=new URL(returnPath,"https://"+url.hostname);
+  const next=new URL(url.toString());next.pathname=returnPath;
   return beginHandoff(next,url.searchParams.get("recheck")==="1");
  }
  if(url.pathname==="/__shield/gps/bridge")return bridge(request,url,cfg);
