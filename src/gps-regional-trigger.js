@@ -72,7 +72,12 @@ export async function gpsRegionalDecision(req,env,url){
   try{const raw=await req.text();if(raw.length>256)throw Error("oversize");data=JSON.parse(raw);}
   catch{return {response:json(400,{error:"INVALID_BODY"})}};
   const tz=typeof data?.timezone==="string"&&data.timezone.length<64?data.timezone:"";
-  const verdict=tz&&!MALAYSIA_TIMEZONES.has(tz)?"foreign":"required";
+  // Reject nonsense or opaque strings: an unresolvable timezone must not
+  // create a signed foreign access decision.
+  let recognized=false;
+  try{if(tz){new Intl.DateTimeFormat("en",{timeZone:tz}).format(0);recognized=true;}}
+  catch{/* Unknown timezone: require GPS instead of granting access. */}
+  const verdict=recognized&&!MALAYSIA_TIMEZONES.has(tz)?"foreign":"required";
   const expiry=String(Math.floor(Date.now()/1000)+TTL),nonce=random();
   const signature=await hmac(env.GPS_GATE_SESSION_SECRET,
    [expiry,verdict,nonce,source.host,source.country,source.ip].join("|"));
