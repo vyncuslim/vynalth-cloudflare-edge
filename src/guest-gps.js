@@ -7,6 +7,7 @@ const SESSION_COOKIE="__Host-vynalth-geo";
 const STATUS_COOKIE="__Host-vynalth-status";
 const BLOCK_COOKIE="__Host-vynalth-geo-block";
 const HANDOFF_STATE_COOKIE="__Host-vynalth-geo-handoff";
+const FRESH_BRIDGE_COOKIE="__Host-vynalth-gps-fresh";
 const GPS_BRIDGE_HUB="vynalthai.com";
 const GPS_BRIDGE_ROOTS=Object.freeze([
  "vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si",
@@ -186,6 +187,32 @@ async function consumeVisitProof(req,env,cfg,url){
   return false;
  }
 }
+async function mintFreshBridge(cfg,host){
+ const expiry=Math.floor(Date.now()/1000)+NAV_PROOF_TTL;
+ const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+ const nonce=b64(bytes);
+ return expiry+"."+nonce+"."+await sign(cfg.s,[expiry,nonce,host,"gps-fresh"].join("|"));
+}
+async function consumeFreshBridge(req,env,cfg,host){
+ const kv=env?.CONSENT_KV,raw=getCookie(req,FRESH_BRIDGE_COOKIE);
+ if(typeof kv?.get!=="function"||typeof kv?.put!=="function"||!raw||raw.length>200)
+  return false;
+ const [expiry,nonce,sig,...extra]=raw.split(".");
+ if(extra.length||!/^\d{10,12}$/.test(expiry||"")||
+   !/^[A-Za-z0-9_-]{22}$/.test(nonce||""))return false;
+ const end=Number(expiry),now=Math.floor(Date.now()/1000);
+ if(end<=now||end>now+NAV_PROOF_TTL||
+    !(await valid(cfg.s,[expiry,nonce,host,"gps-fresh"].join("|"),sig)))return false;
+ const key="gps:bridge:used:"+nonce;
+ try{
+  if(await kv.get(key))return false;
+  await kv.put(key,"1",{expirationTtl:NAV_PROOF_USED_TTL});
+  return true;
+ }catch(err){
+  console.error("GPS cross-domain freshness storage unavailable",String(err));
+  return false;
+ }
+}
 function appendVisitProof(path,proof){
  const next=new URL("https://"+GPS_BRIDGE_HUB+path);
  next.searchParams.delete(NAV_PROOF_PARAM);
@@ -232,13 +259,16 @@ function beginHandoff(url,recheck=false){
 // Browsers cannot read other registrable domain's cookies. Instead perform
 // an explicit top-level redirect through the first-party Vynalth AI hub,
 // transfer only a signed short-lived verdict, and set the target's own cookie.
-async function bridge(request,url,cfg){
+async function bridge(request,url,cfg,env){
  if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
    return reply(404,{error:"NOT_FOUND"});
  const target=url.searchParams.get("host");
  const path=url.searchParams.get("return"),state=url.searchParams.get("state");
  if(!allowedTarget(target)||!safeRelativePath(path)||!validState(state))
    return reply(400,{error:"INVALID_BRIDGE_DESTINATION"});
+ if(env?.GPS_RECHECK_EVERY_DOCUMENT==="true"&&
+    !(await consumeFreshBridge(request,env,cfg,url.hostname)))
+   return reply(403,{error:"FRESH_GPS_REQUIRED"});
  let verdict=null;
  if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
  verdict=await sessionVerdict(request,cfg,url.hostname);
@@ -328,6 +358,8 @@ async function verify(req,url,cfg,env){
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
   headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,await verdictToken(cfg,url.hostname,"nearby"),300));
+  if(recheckDocument&&url.hostname===GPS_BRIDGE_HUB)
+   headers.append("Set-Cookie",policyCookie(FRESH_BRIDGE_COOKIE,await mintFreshBridge(cfg,url.hostname),NAV_PROOF_TTL));
   headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
   const proof=recheckDocument?await visitProof(cfg,url.hostname,targetPath):null;
   return new Response(JSON.stringify({verified:false,nearBoundary:true,expiresInSeconds:300,
@@ -346,6 +378,8 @@ async function verify(req,url,cfg,env){
  const headers=new Headers(head);
  headers.set("Content-Type","application/json; charset=utf-8");
  headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,await verdictToken(cfg,url.hostname,"outside")));
+ if(recheckDocument&&url.hostname===GPS_BRIDGE_HUB)
+  headers.append("Set-Cookie",policyCookie(FRESH_BRIDGE_COOKIE,await mintFreshBridge(cfg,url.hostname),NAV_PROOF_TTL));
  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
  const proof=recheckDocument?await visitProof(cfg,url.hostname,targetPath):null;
  return new Response(JSON.stringify({verified:true,expiresInSeconds:SESSION_TTL,
@@ -413,9 +447,9 @@ export async function guestGpsGate(request,env,url){
   const returnPath=url.searchParams.get("return");
   if(!safeRelativePath(returnPath))return reply(400,{error:"INVALID_RETURN_PATH"});
   const next=new URL(url.toString());next.pathname=returnPath;
-  return beginHandoff(next,url.searchParams.get("recheck")==="1");
+  return beginHandoff(next,env?.GPS_RECHECK_EVERY_DOCUMENT==="true"||url.searchParams.get("recheck")==="1");
  }
- if(url.pathname==="/__shield/gps/bridge")return bridge(request,url,cfg);
+ if(url.pathname==="/__shield/gps/bridge")return bridge(request,url,cfg,env);
  if(url.pathname==="/__shield/gps/import")return importHandoff(request,url,cfg,env);
  if(url.pathname==="/__shield/gps/client.js"&&request.method==="GET")return script();
  if(url.pathname==="/__shield/gps/verify")return verify(request,url,cfg,env);
