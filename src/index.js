@@ -1,6 +1,7 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
+import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -121,6 +122,14 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Temporary, self-expiring owner-requested network restriction. The
+    // verified trust/contact/status identity exemption is unconditional for
+    // this feature. This runs before GPS and origin proxying.
+    const temporaryDenial = temporaryIpBlockResponse(request,incomingUrl);
+    if (temporaryDenial && !(await shieldAccountExempt(request,env,rootDomain))) {
+      return edgeResponse(temporaryDenial,request,incomingUrl,requestId,rootDomain);
     }
 
     // Keep School IP Policy enforcement for protected photo bytes. A guest's
