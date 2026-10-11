@@ -133,7 +133,8 @@ export async function gpsOutsideOrLegacyExempt(request,env,host){
  if(!cfg)return false;
  if(await exempt(request,cfg,host))return true;
  if(await hasBlockVerdict(request,cfg,host))return false;
- return permitted(request,cfg,host);
+ // Nearby access is for ordinary pages only; do not extend it to private media.
+ return (await sessionVerdict(request,cfg,host))==="outside";
 }
 function safeRelativePath(path){
  return typeof path==="string"&&path.length<=300&&path.startsWith("/")&&
