@@ -73,15 +73,15 @@ async function status(e,domain,cookie=""){
  assert.equal(r.status,200);
  return r.json();
 }
-test("the four registrable domains and their subdomains share only their own root",()=>{
- assert.deepEqual(CONSENT_DOMAINS,["vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si"]);
+test("all seven registrable domains and their subdomains share only their own root",()=>{
+ assert.deepEqual(CONSENT_DOMAINS,["vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si","sleepsomno.com","powiismunc.com","vitamindai.online"]);
  for(const root of CONSENT_DOMAINS){
   assert.equal(consentRoot(root),root);
   assert.equal(consentRoot("www."+root),root);
   assert.equal(consentRoot("api.admin."+root),root);
  }
  assert.equal(consentRoot("vyncuslim.com.attacker.invalid"),null);
- assert.equal(consentRoot("vitamindai.online"),null);
+ assert.equal(consentRoot("vitamindai.online"),"vitamindai.online");
 });
 
 test("CMP endpoints never handle normal web traffic and configuration defaults OFF",async()=>{
@@ -150,7 +150,7 @@ test("unsigned or forged SSO status never grants trust/contact/status exemption"
  }
 });
 
-test("authenticated and explicitly informed shared consent syncs across all 4 domains",async()=>{
+test("authenticated and explicitly informed shared consent syncs across all 7 domains",async()=>{
  const e=env(),start="vynalthai.com";
  const s=await begin(e,start,issuer(start));
  const save=await update(e,start,s,body(approved,true));
@@ -288,7 +288,7 @@ async function linkFromPrimarySSO(e,target,role="status",email){
  return {firstPartyCookie,started,hub,completed,callback,stateCookie};
 }
 
-test("vynalthai.com is canonical source for four root-domain linked SSO sessions",async()=>{
+test("vynalthai.com is canonical source for seven root-domain linked SSO sessions",async()=>{
  const e=env(),out={};
  for(const root of CONSENT_DOMAINS.slice(1)){
   const linked=await linkFromPrimarySSO(e,root,"contact");
@@ -301,7 +301,7 @@ test("vynalthai.com is canonical source for four root-domain linked SSO sessions
   assert.equal(session.status,"contact",root);
   out[root]=linked.firstPartyCookie;
  }
- assert.equal(Object.keys(out).length,3);
+ assert.equal(Object.keys(out).length,6);
 });
 
 test("verified school email claim survives all first-party domain links",async()=>{
@@ -343,9 +343,9 @@ test("anonymous hub visitor is never silently linked to other registrable domain
    .filter(x=>x.includes("sso-link:")).length,0);
 });
 
-test("hubs reject destinations outside four-domain whitelist",async()=>{
+test("hubs reject destinations outside seven-domain whitelist",async()=>{
  const e=env();
- for(const domain of ["attacker.invalid","powiismunc.com","vitamindai.online"]){
+ for(const domain of ["attacker.invalid","powiismunc.com.attacker.invalid","fakevitamindai.online","localhost"]){
   const r=await call(e,"vynalthai.com",policy+"/authorize?client="+
     encodeURIComponent(domain)+"&state=forged","GET",undefined,
     issuer("vynalthai.com"));
