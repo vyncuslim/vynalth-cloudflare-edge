@@ -460,7 +460,41 @@ test("approved synthetic polygon mode has INSIDE/OUTSIDE/UNCERTAIN outcomes with
  assert.equal(outside.status,200);
  assert.equal((await outside.json()).verified,true);
  const edge=await verifyCoords(5.3687259,100.2204351,3,env);
- assert.equal(edge.status,403);
- assert.equal((await edge.json()).error,"LOCATION_UNCERTAIN");
- assert.equal(edge.headers.get("Set-Cookie"),null);
+ assert.equal(edge.status,200);
+ const near=await edge.json();
+ assert.equal(near.nearBoundary,true);
+ assert.equal(near.verified,false);
+ const nearCookie=edge.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-geo="));
+ assert.match(nearCookie,/Max-Age=300/);
+ assert.equal(await invoke(req("/","GET",{Cookie:nearCookie.split(";")[0]}),env),null);
+});
+
+
+test("operator-approved uncertified OSM polygons use temporary near-border permissions",async()=>{
+ const env={...cfg,GPS_POLYGON_MODE:"enforce",GPS_POLYGON_ENFORCEMENT_APPROVED:"true",
+   GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED:"true",GPS_BOUNDARY_BUFFER_METERS:"30",
+   GPS_CAMPUS_POLYGONS_JSON:researchOSM};
+ const inside=await verifyCoords(5.367711,100.219932,5,env);
+ assert.equal(inside.status,403);
+ assert.equal((await inside.json()).error,"CAMPUS_RESTRICTED");
+ const outside=await verifyCoords(5.4,100.25,5,env);
+ assert.equal(outside.status,200);
+ const near=await verifyCoords(5.3687259,100.2204351,5,env);
+ assert.equal(near.status,200);
+ assert.equal((await near.json()).nearBoundary,true);
+ // No location consent means no signed status, hence HTML and APIs are denied.
+ assert.equal((await invoke(req("/","GET",{Accept:"text/html"}),env)).status,403);
+ const api=await invoke(req("/api/protected","GET",{Accept:"application/json"}),env);
+ assert.equal(api.status,403);
+ const noConsentPage=await invoke(req("/", "GET", {Accept:"text/html"}),env);
+ assert.match(await noConsentPage.text(),/重新尝试|允许位置/);
+});
+
+test("explicit config-error bypass avoids a whole-site 503 but never grants a GPS verdict",async()=>{
+ const env={...cfg,GPS_CAMPUS_LAT:"broken",GPS_CONFIG_ERROR_ACTION:"bypass"};
+ assert.equal(await invoke(req("/"),env),null);
+ const status=await invoke(req("/__shield/gps/status"),env);
+ assert.equal(status.status,200);
+ assert.equal((await status.json()).configurationAvailable,false);
+ assert.equal((await invoke(req("/"),{...env,GPS_CONFIG_ERROR_ACTION:"closed"})).status,503);
 });
