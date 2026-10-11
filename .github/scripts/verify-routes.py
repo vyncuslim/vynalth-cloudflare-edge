@@ -17,10 +17,17 @@ ROOTS = (
     "vynalthai.si",
     "vyncuslim.si",
 )
+# Operator-specified eight route patterns. Only vynalthai.com apex was
+# requested; do not silently claim or replace other six apex routes.
 EXPECTED = {
-    (pattern, zone)
-    for zone in ROOTS
-    for pattern in (f"{zone}/*", f"*.{zone}/*")
+    ("*.sleepsomno.com/*", "sleepsomno.com"),
+    ("*.vyncuslim.com/*", "vyncuslim.com"),
+    ("*.vynalthai.com/*", "vynalthai.com"),
+    ("*.vynalthai.si/*", "vynalthai.si"),
+    ("*.powiismunc.com/*", "powiismunc.com"),
+    ("*.vyncuslim.si/*", "vyncuslim.si"),
+    ("vynalthai.com/*", "vynalthai.com"),
+    ("*.vitamindai.online/*", "vitamindai.online"),
 }
 
 def check(path: Path) -> None:
@@ -38,7 +45,7 @@ def check(path: Path) -> None:
         assert isinstance(r.get("zone_name"), str), f"Zone name missing: {r!r}"
         seen.append((r["pattern"], r["zone_name"]))
     assert len(seen) == len(set(seen)), "Duplicate Cloudflare routes"
-    assert len(seen) == 14, f"Expected 14 routes, found {len(seen)}"
+    assert len(seen) == 8, f"Expected 8 routes, found {len(seen)}"
     missing = EXPECTED - set(seen)
     unexpected = set(seen) - EXPECTED
     assert not missing and not unexpected, (
@@ -57,9 +64,9 @@ def check(path: Path) -> None:
     assert any(s.get("binding") == "SCHOOL_POLICY"
                and s.get("service") == "website-block-by-school-powiis"
                for s in services), "School policy service binding must remain unchanged"
-    print("PASS: 14 top-level routes cover all seven apex zones and their subdomains")
-    for zone in ROOTS:
-        print(f"  {zone}/*   *.{zone}/*")
+    print("PASS: 8 exact top-level routes across seven Cloudflare zones")
+    for pattern, zone in sorted(EXPECTED):
+        print(f"  {pattern}  zone={zone}")
 
 if __name__ == "__main__":
     try:
