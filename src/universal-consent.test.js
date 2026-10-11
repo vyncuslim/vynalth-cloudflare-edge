@@ -276,9 +276,9 @@ async function linkFromPrimarySSO(e,target,role="status",email){
    "GET",undefined,issuer("vynalthai.com",role,"user_12345678",email));
  assert.equal(hub.status,302);
  const callback=new URL(hub.headers.get("Location"));
- assert.equal(callback.hostname,target);
+ assert.equal(callback.hostname,"consent."+target);
  assert.equal(callback.pathname,policy+"/callback");
- const completed=await call(e,target,callback.pathname+callback.search,
+ const completed=await call(e,callback.hostname,callback.pathname+callback.search,
    "GET",undefined,stateCookie);
  assert.equal(completed.status,302);
  assert.equal(completed.headers.get("Location"),policy);
@@ -416,11 +416,11 @@ test("verified school email claim survives all first-party domain links",async()
 test("link callback cannot consume arbitrary or already consumed KV tickets",async()=>{
  const e=env(),target="vyncuslim.com";
  const linked=await linkFromPrimarySSO(e,target);
- const again=await call(e,target,linked.callback.pathname+linked.callback.search,
+ const again=await call(e,linked.callback.hostname,linked.callback.pathname+linked.callback.search,
   "GET",undefined,linked.stateCookie);
  assert.equal(again.status,403);
  assert.equal((await again.json()).error,"SSO_CODE_EXPIRED_OR_USED");
- const tampered=await call(e,target,linked.callback.pathname+linked.callback.search,
+ const tampered=await call(e,linked.callback.hostname,linked.callback.pathname+linked.callback.search,
   "GET",undefined,"__Secure-vynalth-consent-link=forged");
  assert.equal(tampered.status,403);
 });
