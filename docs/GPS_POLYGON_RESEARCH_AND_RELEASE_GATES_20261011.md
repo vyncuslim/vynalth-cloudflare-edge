@@ -44,3 +44,17 @@ Shadow mode parses and evaluates polygon distance/accuracy but **does not send t
 ## Local test
 
 `npm test` (uses Node built-in test runner). Test modules: `src/gps-polygons.test.js` and `src/guest-gps.test.js`, plus existing Consent/Edge suite.
+
+## Operator-requested GPS proximity policy (review addition)
+
+As of October 11, 2026, the operator accepts a **30 m engineering buffer** beyond browser-reported GPS accuracy around provisional mapped perimeters. This buffer is NOT official survey uncertainty and can miss unrecorded school parcels, overlap roads, or be evaded by spoofed GPS.
+
+For polygon enforcement, distances to external and internal polygon-ring segments within `accuracy + GPS_BOUNDARY_BUFFER_METERS` become `UNCERTAIN`. An uncertain **valid and volunteered** GPS location is **not** declared OUTSIDE; instead the browser receives a distinct short-lived HMAC-signed `nearby` access token (300 seconds), bound to that first-party hostname. This avoids mistakenly treating nearby road users as confirmed INSIDE. The `nearby` verdict is preserved across signed cross-domain handoff rather than upgraded to `outside`. Clearly INSIDE still returns 403 and a temporary blocked Cookie; clearly OUTSIDE receives 15-minute permission.
+
+If a visitor **does not grant GPS permission**, no signed permission is created and normal protected HTML/assets/APIs remain behind the GPS 403 verification/error page. The page supports retry. Independently authenticated trust/contact/status, auth recovery, status, contact and privacy/legal resources remain accessible under the existing explicit exceptions. Browser GPS can still be spoofed and should not be considered identification.
+
+Additional opt-in approval `GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED=true` allows ONLY two named POWIIS polygons with `boundary_classification=OSM_MAPPED` in addition to `GPS_POLYGON_ENFORCEMENT_APPROVED=true`; this **does not change `official_boundary_verified=false`**. All release approvals default OFF. A signed `GPS_GATE_SESSION_SECRET`, valid `GPS_CAMPUS_POLYGONS_JSON`, `GPS_GATE_ENABLED=true`, and `GPS_POLYGON_MODE=enforce` are required before the gate can function. Configure these secrets only in authorized Cloudflare environments.
+
+`GPS_CONFIG_ERROR_ACTION=bypass` is an EXPLICIT availability-oriented recovery policy: invalid GPS config stops returning a site-wide 503, emits a config error, and allows origin traffic without issuing any geofence verdict or claiming OUTSIDE. Unlike a valid denied-location check, this bypass means **GPS access controls are temporarily OFF**. It must be monitored using `/__shield/gps/status` and Cloudflare alarms. Remove the bypass value for strict 503 fail-closed. Other WAF/auth policies remain independent. A site operator must decide the availability/security tradeoff and confirm a fast rollback path.
+
+**Not a production activation**: this PR stays Draft; `GPS_GATE_ENABLED=false`, `GPS_POLYGON_MODE=off`, and both approval flags false. Cloudflare production secrets/config, route ownership, end-to-end privacy audit, real browser permission-denied tests and authorization must be verified separately before merge/deploy.
