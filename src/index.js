@@ -1,3 +1,6 @@
+import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
+import { guestGpsGate } from "./guest-gps.js";
+import { handleJingxinMedia } from "./jingxin-media.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -72,7 +75,12 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
 
 // A Cloudflare Service Binding makes policy decisions without overwriting any
 // route, Host header, existing Shield rules, redirects or application handler.
-async function checkSchoolPolicy(request, env) {
+async function checkSchoolPolicy(request, env, rootDomain) {
+  // Authenticate SSO status on the server. These three statuses are
+  // exempt from this School IP policy only; Cloudflare WAF, abuse and
+  // mandatory security controls still apply independently.
+  if (env?.SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED === "true" &&
+      await shieldAccountExempt(request, env, rootDomain)) return null;
   if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
 
   // The upstream CF-Connecting-IP is authoritative for this edge request.
@@ -115,10 +123,52 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
-    // Preserve domain validation/ACME checks; apply the policy to all other
-    // requests while leaving existing public site behavior untouched in observe.
+    // Keep School IP Policy enforcement for protected photo bytes. A guest's
+    // self-reported GPS verdict alone must never bypass independent School
+    // IP restrictions. Canonical server-signed trust/contact/status identities
+    // remain exempt from this feature-specific school blocking.
+    const photoResource = rootDomain === "vyncuslim.com" &&
+      incomingUrl.pathname.startsWith("/media/jingxin/");
+    if (photoResource && env?.JINGXIN_PRIVATE_MEDIA_ENABLED === "true" &&
+        !(await shieldAccountExempt(request,env,rootDomain))) {
+      const schoolDenial = await checkSchoolPolicy(request,env,rootDomain);
+      if (schoolDenial) {
+        return edgeResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
+      }
+    }
+    // Private Jingxin media is handled entirely at the edge before generic
+    // origin proxying. A denied/failed R2 request never falls through
+    // to potentially public static photo assets.
+    const photoDecision = await handleJingxinMedia(request,env,incomingUrl,rootDomain);
+    if (photoDecision) {
+      return edgeResponse(photoDecision,request,incomingUrl,requestId,rootDomain);
+    }
+
+    // Dedicated consent endpoints are first-party and must work without GPS
+    // consent and without bypassing the existing host routing/security model.
+    const consentDecision = await handleUniversalConsent(request, env, incomingUrl, rootDomain);
+    if (consentDecision) {
+      return edgeResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
+    }
+
+    // GPS and Cookie Consent are independent modules in ONE existing Worker.
+    // Signed canonical SSO trust/contact/status is exempt from this GPS
+    // challenge, but does not bypass unrelated WAF or mandatory auth.
+    // Public GPS documentation/endpoints remain available to every visitor.
+    const gpsEndpoint = incomingUrl.pathname.startsWith("/__shield/gps/");
+    const canonicallyExempt = env?.GPS_GATE_ENABLED === "true" &&
+      !gpsEndpoint && await shieldAccountExempt(request,env,rootDomain);
+    if (!canonicallyExempt) {
+      const gpsDecision = await guestGpsGate(request,env,incomingUrl);
+      if (gpsDecision) {
+        return edgeResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
+      }
+    }
+
+    // Preserve domain validation/ACME checks; apply the school IP policy to
+    // remaining requests without changing upstream Cloudflare WAF behavior.
     if (!isValidationPath(incomingUrl.pathname)) {
-      const denial = await checkSchoolPolicy(request, env);
+      const denial = await checkSchoolPolicy(request, env, rootDomain);
       if (denial) {
         return edgeResponse(denial, request, incomingUrl, requestId, rootDomain);
       }

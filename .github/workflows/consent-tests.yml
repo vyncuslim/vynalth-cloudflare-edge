@@ -1,0 +1,45 @@
+name: Unified Consent and GPS Gate Regression Tests
+on:
+  push:
+    branches:
+      - review/universal-consent-kv-20261011
+      - review/integrate-consent-gps-20261011
+    paths:
+      - "src/universal-consent.js"
+      - "src/guest-gps.js"
+      - "src/guest-gps.test.js"
+      - "src/jingxin-media.js"
+      - "src/jingxin-media.test.js"
+      - "test/edge.test.js"
+      - "src/universal-consent.test.js"
+      - "src/index.js"
+      - ".github/workflows/consent-tests.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/universal-consent.js"
+      - "src/universal-consent.test.js"
+      - "src/index.js"
+      - ".github/workflows/consent-tests.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  consent-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax checks
+        run: |
+          node --check src/guest-gps.js
+          node --check src/guest-gps.test.js
+          node --check src/jingxin-media.js
+          node --check src/jingxin-media.test.js
+          node --check src/universal-consent.js
+          node --check src/universal-consent.test.js
+          node --check src/index.js
+      - name: Run all Worker regression tests
+        run: npm test
