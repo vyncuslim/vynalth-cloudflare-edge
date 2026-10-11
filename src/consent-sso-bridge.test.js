@@ -87,3 +87,20 @@ test("SSO status probe verifies HttpOnly cookie without enabling Consent or leak
  const disabled=await run(new Request(SSO_URL+"/status"),{...env,CONSENT_SSO_BRIDGE_ENABLED:"false"});
  assert.equal(disabled.status,503);
 });
+
+test("emergency rollback disables new SSO binding but still allows first-party cookie clearing",async()=>{
+ const off={...env,CONSENT_SSO_BRIDGE_ENABLED:"false"};
+ const rejected=await run(request(token()),off);
+ assert.equal(rejected.status,503);
+ const clear=new Request(SSO_URL+"/clear",{method:"POST",headers:{
+  Origin:"https://vynalthai.com","Sec-Fetch-Site":"same-origin"
+ }});
+ const result=await run(clear,off);
+ assert.equal(result.status,200);
+ assert.deepEqual(await result.json(),{cleared:true});
+ assert.match(result.headers.get("Set-Cookie"),/__Secure-vynalth-sso=;.*Max-Age=0/);
+ const forbidden=await run(new Request(SSO_URL+"/clear",{method:"POST",headers:{
+  Origin:"https://evil.example","Sec-Fetch-Site":"cross-site"
+ }}),off);
+ assert.equal(forbidden.status,403);
+});
