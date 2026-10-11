@@ -5,53 +5,126 @@ Keep this PR out of `main` until all deployment blockers are resolved.
 Do not disclose school students' email addresses, GPS coordinates, or
 private photos in logs, analytics, client-visible errors or cookies.
 
-## 1. Universal Cookie Consent (four registrable roots)
+## 1. Universal Cookie Consent — all seven domains (one Edge Worker)
 
-Managed consent roots: `vynalthai.com`, `vyncuslim.com`,
-`vynalthai.si`, `vyncuslim.si`, and their subdomains.
+**No R2 and no Supabase required.** The ONE existing
+`vynalth-cloudflare-edge` Worker handles the seven registrable roots
+and their subdomains:
 
-Create a **real** Cloudflare Workers KV namespace, e.g.:
+- `vynalthai.com`
+- `vyncuslim.com`
+- `vynalthai.si`
+- `vyncuslim.si`
+- `sleepsomno.com`
+- `powiismunc.com`
+- `vitamindai.online`
 
-```sh
-npx wrangler kv namespace create CONSENT_KV
-```
+Each root receives a **different first-party Cookie** with `Domain=<root>`,
+`Secure`, `HttpOnly`, `SameSite=Lax`; sibling subdomains under the same
+root can receive it. Browser standards do NOT permit one Cookie whose
+Domain spans seven unrelated roots.
 
-After creation, copy the actual returned namespace ID into the EXISTING
-Worker's Wrangler config (do **not** invent an ID):
+The Worker uses a single `CONSENT_KV` namespace. This stores
+the consent categories, revision, timestamps and withdrawal history;
+the actual browser Cookies are not stored literally in KV.
+
+### What requires SSO?
+
+**Local first-party Cookie Consent works for guests WITHOUT SSO.**
+Guests can reject, grant, withdraw and manage choices at each domain.
+Essential cookies continue to work even after optional rejection.
+
+**Optional account-linked synchronization:** the canonical
+`vynalthai.com` Auth backend can issue verified, host-specific signed
+SSO assertions. After a separate explicit seven-domain sharing
+acknowledgment, all seven roots can read one pseudonymous account
+choice from Workers KV when the visitor signs in. The
+`CONSENT_SSO_SIGNING_SECRET` is required only for this account-linked
+feature; never create sessions from unverified browser claims.
+
+**Explicit SSO-free guest synchronization:** guests who save their
+choices on `https://vynalthai.com/__vynalth/consent` may click
+the separate **Sync saved guest choices across all 7** button.
+After a same-origin POST with a CSRF token and explicit notice, an
+opaque, 180-second KV ticket carries a SNAPSHOT through six sequential
+first-party redirects:
+`consent.vyncuslim.com`,
+`consent.vynalthai.si`,
+`consent.vyncuslim.si`,
+`consent.sleepsomno.com`,
+`consent.powiismunc.com`,
+`consent.vitamindai.online`.
+Each target sets its OWN root-scoped Cookie and locally persists the
+three optional categories. No SSO, third-party Cookies or persistent
+shared guest identifier is needed. This is NOT automatic ongoing
+background synchronization: after guest changes or withdrawals,
+repeat the explicit synchronization. Do not promise instant global
+revocation or strict one-time use from eventually consistent Workers KV.
+
+**IMPORTANT ROUTE/DNS PREREQUISITE:** every `consent.<root>` host
+MUST have Cloudflare-proxied DNS and match the existing
+`*.root/*` `vynalth-cloudflare-edge` Worker route, and
+`vynalthai.com/*` must reach the same Worker.
+`vyncuslim.com/*` apex belongs to the separate `vv` Worker in its
+own repo; do not take over its route or break photo ASSETS.
+The Consent endpoint at `consent.vyncuslim.com` sets a
+`Domain=vyncuslim.com` first-party Cookie for the root and siblings.
+Actual route ownership, DNS, host authority and settings MUST be tested.
+
+### Real bindings and secrets, on the existing Edge Worker
+
+Create a real Cloudflare KV namespace; bind it as `CONSENT_KV`
+(the returned namespace ID must be copied into `wrangler.toml`):
 
 ```toml
 [[kv_namespaces]]
 binding = "CONSENT_KV"
-id = "<ACTUAL_KV_NAMESPACE_ID>"
+id = "<REAL_ACCOUNT_KV_NAMESPACE_ID>"
 ```
 
-Set different 32+ character high-entropy Cloudflare Worker secrets; do
-not paste them into git, PR text, Vercel public variables or logs:
+Add **unique independent high-entropy secrets**, not committed to Git:
 
 ```sh
 npx wrangler secret put CONSENT_COOKIE_SECRET
 npx wrangler secret put CONSENT_SSO_SIGNING_SECRET
+npx wrangler secret put GPS_GATE_SESSION_SECRET
+# Optional ONLY when the separate trusted-account GPS status
+# issuer exists and you need account exemptions:
+npx wrangler secret put GPS_ACCOUNT_STATUS_SECRET
 ```
 
-The canonical `vynalthai.com` Auth backend, after verifying the actual
-login, must issue the short-lived HMAC SSO Cookie for the current root.
-Each root receives only its own first-party Cookie. The Worker does not
-have access to a login database and cannot mint an identity by itself.
-For a four-domain handoff, the canonical SSO issuer and target must
-agree on the `CONSENT_SSO_SIGNING_SECRET`; rollout must consider
-rotation, logout, invalidated sessions and replay-safe SSO tickets
-(Cloudflare KV `delete` alone is not transactionally single-use).
+`CONSENT_COOKIE_SECRET` protects first-party anonymous Cookie
+identifiers, CSRF/link state and guest transfer signing state.
+`GPS_GATE_SESSION_SECRET` signs 15-minute host-specific location
+allow/block outcomes. A GPS API key or Google Maps key is NOT required:
+the browser uses its standard Geolocation API and explicit permission.
+`GPS_ACCOUNT_STATUS_SECRET` verifies an OPTIONAL trusted status
+Cookie and is not needed for normal guest GPS verification.
 
-Require explicit purpose-specific opt-in, no analytics/ads before consent,
-and effective withdrawal. The 365-day event retention needs legal and
-minors/privacy review. Use separate staging/prod namespaces.
+Each secret should be generated as a different random 32-byte
+(or stronger) value; never copy secret values into GitHub,
+logs, public env variables, screenshots or chat.
 
-**Only when the KV binding, real issuer and browser tests pass** should
-`CONSENT_CMP_ENABLED` be set true. All other feature flags stay false.
+**Always separately validate** verified school email restrictions,
+cross-domain SSO, CSRF rejection, wrong-host replay, opt-in choices,
+denial/withdrawal, first-party top-level redirects and
+Safari/Firefox/Chrome cookie restrictions before enabling Consent.
+Only set `CONSENT_CMP_ENABLED=true` after real KV, DNS, SSO
+(if account-linking is enabled) and browser acceptance tests pass.
+Keep `GPS_GATE_ENABLED=false` until the school boundaries are
+verified, regardless of whether Consent is ready.
+
+Workers KV is eventually consistent (up to 60 seconds or longer
+after cached reads); it is not transactional. If immediate global
+withdrawal is legally required, add a serializing Durable Object
+or authoritative revocation coordinator rather than pretending
+KV can enforce it. Review 365-day event retention and minors/privacy
+requirements before production.
 
 Cloudflare docs:
-- https://developers.cloudflare.com/kv/concepts/kv-namespaces/
-- https://developers.cloudflare.com/kv/get-started/
+- https://developers.cloudflare.com/kv/concepts/kv-bindings/
+- https://developers.cloudflare.com/kv/concepts/how-kv-works/
+- https://developers.cloudflare.com/workers/configuration/secrets/
 
 ## 2. POWIIS school account sign-in gate
 
@@ -127,7 +200,10 @@ A 180 m test circle is an engineering **estimate**, not a certified
 school perimeter and could encompass residents, streets and visitors
 off campus. Do not use it to deny production customers.
 Use isolated staging secrets with explicit, voluntary browser
-Geolocation permission. No precise GPS in cookies, KV or analytics.
+Geolocation permission. In the staged code, guest GPS only requires
+`GPS_GATE_SESSION_SECRET`; the separate account status key is optional.
+An enabled but malformed GPS configuration returns 503 instead of
+silently passing the request. No precise GPS in cookies, KV or analytics.
 
 Production requires verified complete polygons, point-in-polygon with
 accuracy uncertainty buffer, privacy/minors impact review, an alternate
@@ -173,8 +249,10 @@ unencrypted image material.
 
 1. Back up source, run `npm test`, `node --check`, route parser,
    `npx wrangler deploy --dry-run` and verify CI green.
-2. Provision consent KV and signing secrets; test live canonical
-   SSO on a staging hostname without changing production.
+2. Provision one consent KV namespace and signing secret on existing Edge;
+   configure all six `consent.<root>` hosts with proxied DNS; test
+   anonymous guest first-party handoff on staging. Test optional
+   canonical account SSO separately without changing production.
 3. Complete **Auth backend** school-email login denial and
    account/API-level enforcement, then enable the school gate behind
    a reviewed rollout on correctly routed hosts.
