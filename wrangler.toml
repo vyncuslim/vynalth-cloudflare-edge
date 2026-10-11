@@ -9,22 +9,19 @@ workers_dev = true
 # 3) the four-zone consent flow and core app routes pass review.
 # Deploy routes belong at the TOML root. Do not put them inside [vars];
 # that would define env.vars.routes instead of Worker routing rules.
-# Seven Cloudflare zones: each apex and all proxied subdomains.
+# Exact eight requested routes across seven zones; apex is only vynalthai.com.
+# Other six apex hostnames are intentionally not added to avoid conflicting
+# with other existing Workers or route ownership. Existing routes on other
+# Workers are NOT managed by this config.
 routes = [
-  { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
-  { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" },
-  { pattern = "vyncuslim.com/*", zone_name = "vyncuslim.com" },
-  { pattern = "*.vyncuslim.com/*", zone_name = "vyncuslim.com" },
-  { pattern = "sleepsomno.com/*", zone_name = "sleepsomno.com" },
   { pattern = "*.sleepsomno.com/*", zone_name = "sleepsomno.com" },
-  { pattern = "powiismunc.com/*", zone_name = "powiismunc.com" },
-  { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" },
-  { pattern = "vitamindai.online/*", zone_name = "vitamindai.online" },
-  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" },
-  { pattern = "vynalthai.si/*", zone_name = "vynalthai.si" },
+  { pattern = "*.vyncuslim.com/*", zone_name = "vyncuslim.com" },
+  { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" },
   { pattern = "*.vynalthai.si/*", zone_name = "vynalthai.si" },
-  { pattern = "vyncuslim.si/*", zone_name = "vyncuslim.si" },
-  { pattern = "*.vyncuslim.si/*", zone_name = "vyncuslim.si" }
+  { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" },
+  { pattern = "*.vyncuslim.si/*", zone_name = "vyncuslim.si" },
+  { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
+  { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" }
 ]
 
 [vars]
