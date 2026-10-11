@@ -33,9 +33,10 @@ function env(){return {
  CONSENT_CMP_ENABLED:"true",CONSENT_KV:fakeKV(),
  CONSENT_COOKIE_SECRET:secretA,CONSENT_SSO_SIGNING_SECRET:secretB
 }}
-function issuer(host,status="normal",sub="user_12345678"){
+function issuer(host,status="normal",sub="user_12345678",email,verified=true){
  const claims={sub,host,status,sid:"session_12345678",
-  exp:Math.floor(Date.now()/1000)+600};
+  exp:Math.floor(Date.now()/1000)+600,
+  ...(email?{email,email_verified:verified}:{})};
  const payload=Buffer.from(JSON.stringify(claims)).toString("base64url");
  const tag=createHmac("sha256",secretB).update(payload).digest("base64url");
  return "__Secure-vynalth-sso="+payload+"."+tag;
@@ -262,7 +263,7 @@ test("consent page is navigable and contains all controls",async()=>{
 });
 
 
-async function linkFromPrimarySSO(e,target,role="status"){
+async function linkFromPrimarySSO(e,target,role="status",email){
  // The target uses a first-party top-level navigation to vynalthai.com.
  const started=await call(e,target,policy+"/link");
  assert.equal(started.status,302);
@@ -272,7 +273,7 @@ async function linkFromPrimarySSO(e,target,role="status"){
  assert.equal(authorize.hostname,"vynalthai.com");
  assert.equal(authorize.pathname,policy+"/authorize");
  const hub=await call(e,"vynalthai.com",authorize.pathname+authorize.search,
-   "GET",undefined,issuer("vynalthai.com",role));
+   "GET",undefined,issuer("vynalthai.com",role,"user_12345678",email));
  assert.equal(hub.status,302);
  const callback=new URL(hub.headers.get("Location"));
  assert.equal(callback.hostname,target);
@@ -301,6 +302,23 @@ test("vynalthai.com is canonical source for four root-domain linked SSO sessions
   out[root]=linked.firstPartyCookie;
  }
  assert.equal(Object.keys(out).length,3);
+});
+
+test("verified school email claim survives all first-party domain links",async()=>{
+ const e=env();
+ for(const site of CONSENT_DOMAINS.slice(1)){
+  const linked=await linkFromPrimarySSO(e,site,"trust",
+   "student@student.powiis.edu.my");
+  const req=new Request("https://"+site+"/c",{
+   headers:{Cookie:linked.firstPartyCookie}});
+  const identity=await signedSSO(req,e,site);
+  assert.equal(identity.email,"student@student.powiis.edu.my");
+  assert.equal(identity.email_verified,true);
+  const raw=linked.firstPartyCookie.split("=")[1].split(".")[0];
+  const data=JSON.parse(Buffer.from(raw,"base64url").toString("utf8"));
+  assert.equal(data.email_verified,true);
+  assert.equal(data.email,"student@student.powiis.edu.my");
+ }
 });
 
 test("link callback cannot consume arbitrary or already consumed KV tickets",async()=>{
