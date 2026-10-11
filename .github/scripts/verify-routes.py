@@ -7,6 +7,7 @@ This deliberately parses TOML rather than grepping for route strings:
 from pathlib import Path
 import sys
 import tomllib
+import json
 
 ROOTS = (
     "vynalthai.com",
@@ -53,13 +54,32 @@ def check(path: Path) -> None:
     )
     for flag in (
         "CONSENT_CMP_ENABLED",
-        "GPS_GATE_ENABLED",
         "SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED",
         "JINGXIN_PRIVATE_MEDIA_ENABLED",
         "SCHOOL_EMAIL_GATE_ENABLED",
     ):
         assert config["vars"].get(flag) == "false", (
             f"Safety switch must remain disabled in this routing-only change: {flag}"
+        )
+    gps_enabled = config["vars"].get("GPS_GATE_ENABLED")
+    assert gps_enabled in ("true", "false"), "GPS gate must be explicitly configured"
+    if gps_enabled == "true":
+        assert config["vars"].get("GPS_POLYGON_MODE") == "enforce", "Enabled GPS requires polygon enforcement"
+        assert config["vars"].get("GPS_POLYGON_ENFORCEMENT_APPROVED") == "true", "GPS missing operator approval"
+        assert config["vars"].get("GPS_OSM_APPROXIMATE_ENFORCEMENT_APPROVED") == "true", "Provisional OSM approval missing"
+        assert config["vars"].get("GPS_BOUNDARY_BUFFER_METERS") == "30", "Expected 30 metre safety buffer"
+        assert config["vars"].get("GPS_CONFIG_ERROR_ACTION") == "bypass", "Prevent all-site outage during config failures"
+        polygon_data = json.loads(config["vars"].get("GPS_CAMPUS_POLYGONS_JSON", "null"))
+        assert polygon_data.get("type") == "FeatureCollection", "Expected GeoJSON FeatureCollection"
+        features = polygon_data.get("features") or []
+        ids = {f.get("properties", {}).get("campus_id") for f in features}
+        assert ids == {"powiis-balik-pulau", "powiis-tanjung-bungah"}, "Only named campus candidates approved"
+        assert len(features) == 2, "Expected exactly two campuses"
+        assert all(f.get("properties", {}).get("official_boundary_verified") is False for f in features), (
+            "Do not falsely certify OSM mapped candidate boundaries"
+        )
+        assert all(f.get("properties", {}).get("boundary_classification") == "OSM_MAPPED" for f in features), (
+            "Must retain source classification"
         )
     services = config.get("services") or []
     assert any(s.get("binding") == "SCHOOL_POLICY"
