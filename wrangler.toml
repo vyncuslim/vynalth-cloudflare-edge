@@ -40,12 +40,13 @@ GPS_TELEGRAM_ALERTS_ENABLED = "true"
 # Re-evaluate GPS on each protected HTML document reload/navigation. Previous
 # 15-minute cookies can serve assets/APIs but cannot bypass document checks.
 GPS_RECHECK_EVERY_DOCUMENT = "true"
-# Staged 10-minute owner-only GPS access portal. Keep OFF until both secure
-# Cloudflare Secrets VYNALTH_TEMP_ACCESS_CODE and
-# VYNALTH_TEMP_ACCESS_SIGNING_SECRET have been added to this Worker.
+# 10-minute owner GPS access portal enabled by the site operator.
+# Cloudflare Worker Secrets VYNALTH_TEMP_ACCESS_CODE and
+# VYNALTH_TEMP_ACCESS_SIGNING_SECRET and the CONSENT_KV binding are required.
+# If they are missing, the portal returns 503 (fail closed).
 # This does NOT grant application-admin privileges or bypass independent WAF,
 # temporary IP restrictions or School IP policy.
-VYNALTH_TEMP_ACCESS_ENABLED = "false"
+VYNALTH_TEMP_ACCESS_ENABLED = "true"
 # Operator-approved approximate polygon assessment, NOT a certified survey.
 GPS_POLYGON_MODE = "enforce"
 GPS_POLYGON_ENFORCEMENT_APPROVED = "true"
