@@ -6,7 +6,7 @@ GitHub repository `vyncuslim/vynalth-cloudflare-edge` currently reports **`priva
 
 This revision fulfills a code-based setup **without Cloudflare Worker Secrets**:
 
-- Code verification uses a public **PBKDF2-HMAC-SHA256 180,000-iteration** salted one-way verifier. The entered owner code never appears as plaintext in source, page HTML, logs, or a runtime environment variable.
+- Code verification uses a public **PBKDF2-HMAC-SHA256 25,000-iteration** salted one-way verifier. Cloudflare production Workers reject PBKDF2 work factors above 100,000 and may have tight CPU budgets; the previous 180,000 iterations caused HTTP 503 in production even though Node.js tests passed. The owner code never appears as plaintext in source, page HTML, logs or a runtime environment variable. This is a limited GPS-only pass, not an account authentication system; require strong online rate limiting and rotate exposed codes.
 - The verified browser receives a **random 256-bit opaque session token** in a first-party `__Host-vynalth-owner-pass` Cookie with `Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=600`. The token itself does not contain reusable signing keys.
 - `CONSENT_KV` stores **only SHA-256(token)-indexed, server-side** session records with 600-second expiry and a SHA-256 fingerprint binding the token to Cloudflare's originating IP, User-Agent, and hostname. The same stored expiry is checked server-side. Invalid/expired/moved sessions are rejected even when the client sends a forged Cookie.
 - `CONSENT_KV` separately stores SHA-256(IP)-indexed failed login counters, with 5 incorrect attempts / 15-minute TTL. Set an independent Cloudflare WAF/rate limiting rule to help prevent distributed brute force.
@@ -32,3 +32,16 @@ This revision fulfills a code-based setup **without Cloudflare Worker Secrets**:
 - Do not submit the plaintext code, session token or KV values to frontend JavaScript, GitHub, logs or chat.
 - To revoke all outstanding sessions immediately: disable `VYNALTH_TEMP_ACCESS_ENABLED` and deploy. To revoke an individual session: delete its hashed KV session key.
 - On misconfiguration, KV exception, invalid host, bad Origin, bad CSRF or missing client-IP authority, **fail closed**.
+
+## HTTP 503 troubleshooting
+
+The worker returns `Temporary access is unavailable` when storage or credential derivation raises an exception. The response header `X-Vynalth-Owner-Error` identifies only a fixed, non-sensitive stage; `kv-read`, `code-verification`, `kv-failure-counter` or `kv-session-write`. If these appear after the production PBKDF2 correction:
+
+- `kv-read`: inspect the live `CONSENT_KV` binding, free-plan KV read quota and permissions.
+- `code-verification`: inspect Workers runtime algorithm support and PBKDF2 production iteration ceiling; ensure both optional verifier override variables are either absent or correctly paired with the currently configured iteration count.
+- `kv-failure-counter`: inspect KV writes quota and per-key rate limiting (one write per second, per key); slow down retries and add a WAF rate limit.
+- `kv-session-write`: inspect KV write quota and binding; never bypass session persistence or emit a Cookie when the write has failed.
+
+The Worker never logs the access code, full IP, session token, or raw exceptions. Failure to clear the attempt counter after a successfully written session is now best-effort and does not erase the valid 10-minute pass.
+
+**Deployment:** GitHub Actions workflow success does not prove activation if its `Deploy Worker` step is skipped. In Cloudflare Dashboard confirm the main-branch build version is **Active**, not merely built/previewed.
