@@ -47,11 +47,13 @@ async function login(environment,accessCode=code,opts={}){
  const token=csrf.split("=")[1];
  assert.match(token,/^[a-f0-9]{40}$/);
  const body=new URLSearchParams({csrf:token,code:accessCode}).toString();
- const request=req(undefined,"POST",{
+ const postHeaders={
   Cookie:csrf,Origin:"https://vynalthai.com",
   "Content-Type":"application/x-www-form-urlencoded",
   ...opts.headers
- },body);
+ };
+ if(opts.omitOrigin)delete postHeaders.Origin;
+ const request=req(undefined,"POST",postHeaders,body);
  return edge.fetch(request,environment,{});
 }
 test("code login has anti-CSRF form and sets 10-minute host-only HttpOnly pass",async()=>{
@@ -168,4 +170,54 @@ test("an owner GPS pass does not bypass independent School IP policy",async()=>{
  const after=await edge.fetch(req("https://vynalthai.com/","GET",{Cookie:pass}),e,{});
  assert.equal(after.status,403);
  assert.equal(after.headers.get("X-School-Policy"),"blocked");
+});
+
+test("same-origin browser POST with no Origin but correct Fetch Metadata may log in",async()=>{
+ const e=env();
+ const result=await login(e,code,{omitOrigin:true,headers:{
+  "Sec-Fetch-Site":"same-origin"
+ }});
+ assert.equal(result.status,303);
+ assert.ok(result.headers.getSetCookie().some(x=>x.startsWith("__Host-vynalth-owner-pass=")));
+});
+test("privacy-aware same-origin Referer is an alternate valid CSRF origin signal",async()=>{
+ const e=env();
+ const result=await login(e,code,{omitOrigin:true,headers:{
+  Referer:"https://vynalthai.com/admin/121@121.1234.vynucslim"
+ }});
+ assert.equal(result.status,303);
+});
+test("reject cross-site, explicit invalid Origin and absent authoritative origin indicators",async()=>{
+ const e=env();
+ for(const headers of [
+  {Origin:"https://evil.example","Sec-Fetch-Site":"same-origin"},
+  {Origin:"null","Sec-Fetch-Site":"same-origin"},
+  {Origin:"","Sec-Fetch-Site":"cross-site",Referer:"https://vynalthai.com/admin/121@121.1234.vynucslim"},
+  {Origin:"",Referer:"https://evil.example/"},
+  {Origin:""}
+ ]){
+  const result=await login(e,code,{headers});
+  assert.equal(result.status,403);
+  assert.equal(result.headers.get("X-Vynalth-Owner-Error"),"origin");
+  assert.equal(result.headers.getSetCookie().some(x=>x.startsWith("__Host-vynalth-owner-pass=")),false);
+ }
+});
+test("bad CSRF returns a fresh no-store form instead of an unexplained Forbidden",async()=>{
+ const e=env();
+ const result=await edge.fetch(req(undefined,"POST",{
+  Origin:"https://vynalthai.com",
+  "Content-Type":"application/x-www-form-urlencoded"
+ },"csrf=not-valid&code="+encodeURIComponent(code)),e,{});
+ assert.equal(result.status,403);
+ assert.equal(result.headers.get("X-Vynalth-Owner-Error"),"csrf");
+ assert.match(result.headers.get("Content-Type"),/text\/html/);
+ assert.match(await result.text(),/Temporary website access/);
+ assert.ok(result.headers.getSetCookie().some(x=>x.startsWith("__Host-vynalth-owner-csrf=")));
+});
+test("form uses same-origin referrer policy while retaining secure cookie",async()=>{
+ const e=env();
+ const result=await edge.fetch(req(),e,{});
+ assert.equal(result.status,200);
+ assert.equal(result.headers.get("Referrer-Policy"),"same-origin");
+ assert.match(await result.text(),/meta name="referrer" content="same-origin"/);
 });
