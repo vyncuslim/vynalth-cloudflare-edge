@@ -104,13 +104,21 @@ async function readAttempts(kv,key){
  const value=Number(raw);
  return Number.isSafeInteger(value)&&value>=0?value:MAX_ATTEMPTS;
 }
-async function compareCode(value){
+async function compareCode(value,env){
  if(typeof value!=="string"||value.length>128)return false;
+ // Optional non-secret code-verifier rotation. Both values must be supplied
+ // and correctly formatted, or the code check fails closed.
+ const hasOverride=env?.VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX!==undefined||
+   env?.VYNALTH_TEMP_ACCESS_CODE_SALT_HEX!==undefined;
+ const salt=hasOverride?env?.VYNALTH_TEMP_ACCESS_CODE_SALT_HEX:CODE_SALT_HEX;
+ const expectedHex=hasOverride?env?.VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX:CODE_VERIFIER_HEX;
+ if(typeof salt!=="string"||!/^[a-f0-9]{48}$/.test(salt)||
+    typeof expectedHex!=="string"||!/^[a-f0-9]{64}$/.test(expectedHex))return false;
  const key=await crypto.subtle.importKey("raw",ENC.encode(value),"PBKDF2",false,["deriveBits"]);
  const result=new Uint8Array(await crypto.subtle.deriveBits({
-  name:"PBKDF2",salt:fromHex(CODE_SALT_HEX),iterations:CODE_ITERATIONS,hash:"SHA-256"
+  name:"PBKDF2",salt:fromHex(salt),iterations:CODE_ITERATIONS,hash:"SHA-256"
  },key,256));
- const expected=fromHex(CODE_VERIFIER_HEX);
+ const expected=fromHex(expectedHex);
  let diff=0;
  for(let i=0;i<32;i++)diff|=result[i]^expected[i];
  return diff===0;
@@ -162,7 +170,7 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   const failed=await readAttempts(env.CONSENT_KV,attempts);
   if(failed>=MAX_ATTEMPTS)
    return response("Too many attempts. Try again later.",429,{"Retry-After":"900"});
-  if(!await compareCode(params.get("code"))){
+  if(!await compareCode(params.get("code"),env)){
    await env.CONSENT_KV.put(attempts,String(failed+1),{expirationTtl:ATTEMPT_TTL});
    return formResponse(randomHex(20),true,403);
   }
