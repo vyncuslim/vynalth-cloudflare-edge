@@ -438,7 +438,14 @@ function script(){return new Response(GEO_CLIENT,{status:200,headers:{...head,"C
 function jingxinPublicPage(path){
  return path==="/jingxin"||path==="/jingxin/"||path==="/jingxin.html";
 }
-function skip(path){return jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
+// Vite emits immutable, content-fingerprinted CSS/JS/font files. They are
+// public build artifacts, not authorization-bearing pages or private data.
+// Protect all documents, APIs and media even if names look like hashes.
+function publicBuildAsset(request,path){
+ return (request.method==="GET"||request.method==="HEAD")&&
+  /^\\/assets\\/[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9_-]{8,}\\.(?:css|js|mjs|woff|woff2|ttf|otf)$/.test(path);
+}
+function skip(path,request){return publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
 export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
@@ -452,7 +459,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  const cfg=config(env);
  // An explicitly enabled GPS gate must never quietly become permissive
  // because a signing key or geofence config was missing or malformed.
- if(!cfg&&!skip(url.pathname)){
+ if(!cfg&&!skip(url.pathname,request)){
   // Do not allow origin traffic when the GPS signing secret or boundary
   // configuration is invalid. All optional legal/recovery routes remain open.
   console.error("GPS_GATE_CONFIGURATION_UNAVAILABLE: protected access denied");
@@ -499,7 +506,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
    policyRevision:GPS_POLICY_REVISION,
    verified:await permitted(request,cfg,url.hostname),
    exempt:await exempt(request,cfg,url.hostname)});
- if(skip(url.pathname))return null;
+ if(skip(url.pathname,request))return null;
  // Existing trusted server-verified account states bypass this GPS policy.
  if(await exempt(request,cfg,url.hostname))return null;
  if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
