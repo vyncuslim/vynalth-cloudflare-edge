@@ -47,11 +47,13 @@ async function login(environment,accessCode=code,opts={}){
  const token=csrf.split("=")[1];
  assert.match(token,/^[a-f0-9]{40}$/);
  const body=new URLSearchParams({csrf:token,code:accessCode}).toString();
- const request=req(undefined,"POST",{
+ const postHeaders={
   Cookie:csrf,Origin:"https://vynalthai.com",
   "Content-Type":"application/x-www-form-urlencoded",
   ...opts.headers
- },body);
+ };
+ if(opts.omitOrigin)delete postHeaders.Origin;
+ const request=req(undefined,"POST",postHeaders,body);
  return edge.fetch(request,environment,{});
 }
 test("code login has anti-CSRF form and sets 10-minute host-only HttpOnly pass",async()=>{
@@ -172,16 +174,16 @@ test("an owner GPS pass does not bypass independent School IP policy",async()=>{
 
 test("same-origin browser POST with no Origin but correct Fetch Metadata may log in",async()=>{
  const e=env();
- const result=await login(e,code,{headers:{
-  Origin:"", "Sec-Fetch-Site":"same-origin"
+ const result=await login(e,code,{omitOrigin:true,headers:{
+  "Sec-Fetch-Site":"same-origin"
  }});
  assert.equal(result.status,303);
  assert.ok(result.headers.getSetCookie().some(x=>x.startsWith("__Host-vynalth-owner-pass=")));
 });
 test("privacy-aware same-origin Referer is an alternate valid CSRF origin signal",async()=>{
  const e=env();
- const result=await login(e,code,{headers:{
-  Origin:"",Referer:"https://vynalthai.com/admin/121@121.1234.vynucslim"
+ const result=await login(e,code,{omitOrigin:true,headers:{
+  Referer:"https://vynalthai.com/admin/121@121.1234.vynucslim"
  }});
  assert.equal(result.status,303);
 });
