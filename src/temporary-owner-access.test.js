@@ -276,7 +276,7 @@ test("wrong access code produces normal 403, not the PBKDF2 503 error",async()=>
  const e=env();
  const result=await login(e,"a-normal-invalid-code");
  assert.equal(result.status,403);
- assert.equal(result.headers.get("X-Vynalth-Owner-Error"),null);
+ assert.equal(result.headers.get("X-Vynalth-Owner-Error"),"code");
 });
 
 test("temporary owner login safely returns to a deep chat conversation",async()=>{
@@ -338,4 +338,49 @@ test("chat API POST obeys same ten-minute owner cookie without relaxing GPS enfo
   assert.equal((await approved.json()).reply,"SVG generated");
   assert.equal(count,1);
  }finally{globalThis.fetch=original}
+});
+
+test("owner form accurately distinguishes bad code from expired CSRF",async()=>{
+ const e=env();
+ const wrong=await login(e,"definitely-not-the-correct-code");
+ assert.equal(wrong.status,403);
+ assert.equal(wrong.headers.get("X-Vynalth-Owner-Error"),"code");
+ assert.equal(wrong.headers.get("X-Vynalth-Owner-Verifier-Mode"),"configured");
+ const wrongBody=await wrong.text();
+ assert.match(wrongBody,/Access code not accepted/);
+ assert.doesNotMatch(wrongBody,/verification form expired/);
+
+ const csrfFailure=await edge.fetch(req(undefined,"POST",{
+  Origin:"https://vynalthai.com",
+  "Content-Type":"application/x-www-form-urlencoded"
+ },"csrf=bad&code=bad"),e,{});
+ assert.equal(csrfFailure.status,403);
+ assert.equal(csrfFailure.headers.get("X-Vynalth-Owner-Error"),"csrf");
+ assert.match(await csrfFailure.text(),/verification form expired/i);
+});
+test("pasted code may contain outer whitespace but cannot change case or middle letters",async()=>{
+ const e=env();
+ const padded=await login(e,"  "+code+" \\n");
+ assert.equal(padded.status,303);
+ const changed=await login(e,code.toUpperCase());
+ assert.equal(changed.status,403);
+ assert.equal(changed.headers.get("X-Vynalth-Owner-Error"),"code");
+});
+test("GET owner form advertises only source type, no verifier or secret",async()=>{
+ const builtIn=await edge.fetch(req(),env({
+  VYNALTH_TEMP_ACCESS_CODE_SALT_HEX:undefined,
+  VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX:undefined,
+ }),{});
+ assert.equal(builtIn.status,200);
+ assert.equal(builtIn.headers.get("X-Vynalth-Owner-Verifier-Mode"),"built-in");
+ const configured=await edge.fetch(req(),env(),{});
+ assert.equal(configured.headers.get("X-Vynalth-Owner-Verifier-Mode"),"configured");
+ const incomplete=await edge.fetch(req(),env({
+  VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX:undefined,
+ }),{});
+ assert.equal(incomplete.headers.get("X-Vynalth-Owner-Verifier-Mode"),"incomplete");
+ for(const result of [builtIn,configured,incomplete]){
+  const body=await result.text();
+  assert.doesNotMatch(body,/[a-f0-9]{64}/i);
+ }
 });
