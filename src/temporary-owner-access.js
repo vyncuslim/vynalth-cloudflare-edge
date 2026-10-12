@@ -18,9 +18,13 @@ const ENC=new TextEncoder();
 // Public, salted one-way code verifier. Never commit the entered code.
 // A public code verifier still permits offline guessing; rotate codes if
 // disclosed, and apply a Cloudflare WAF rate limit to this endpoint.
-const CODE_SALT_HEX="a1d2d778e2adfc91e66b813b6230406e651c4db1a91d06fa";
-const CODE_VERIFIER_HEX="5f72bdc4c45eb62ba47b41f180abde5d5027354328159b017d64e36e9bf0566f";
-const CODE_ITERATIONS=180000;
+const CODE_SALT_HEX="2995eb9e615196f4df1949cbf91f71dd1b04191bb4143488";
+const CODE_VERIFIER_HEX="85e95aa49d1fdcae3a8d85fc2dc842421c2b32bccd44cbfc859d95cd318c0938";
+// Cloudflare's production Workers runtime rejects PBKDF2 iterations > 100,000.
+// 25,000 is intentionally below that runtime cap and leaves CPU headroom on
+// low-tier Workers. This is GPS-only temporary access, not admin authentication.
+// Keep the public verifier resistant to online guessing with WAF rate limiting.
+export const OWNER_CODE_ITERATIONS=25000;
 const HEAD={
  "Cache-Control":"private, no-store, max-age=0",
  "Vary":"Cookie",
@@ -136,7 +140,7 @@ async function compareCode(value,env){
     typeof expectedHex!=="string"||!/^[a-f0-9]{64}$/.test(expectedHex))return false;
  const key=await crypto.subtle.importKey("raw",ENC.encode(value),"PBKDF2",false,["deriveBits"]);
  const result=new Uint8Array(await crypto.subtle.deriveBits({
-  name:"PBKDF2",salt:fromHex(salt),iterations:CODE_ITERATIONS,hash:"SHA-256"
+  name:"PBKDF2",salt:fromHex(salt),iterations:OWNER_CODE_ITERATIONS,hash:"SHA-256"
  },key,256));
  const expected=fromHex(expectedHex);
  let diff=0;
@@ -186,22 +190,29 @@ export async function handleTemporaryOwnerAccess(req,env,url){
  }catch{return response("Invalid request",400)}
  if(!csrf||!/^[a-f0-9]{40}$/.test(csrf)||params.get("csrf")!==csrf)
   return formResponse(randomHex(20),true,403,"csrf");
+ let stage="kv-read";
  try{
   const attempts=await attemptKey(ip);
   const failed=await readAttempts(env.CONSENT_KV,attempts);
   if(failed>=MAX_ATTEMPTS)
    return response("Too many attempts. Try again later.",429,{"Retry-After":"900"});
+  stage="code-verification";
   if(!await compareCode(params.get("code"),env)){
+   stage="kv-failure-counter";
    await env.CONSENT_KV.put(attempts,String(failed+1),{expirationTtl:ATTEMPT_TTL});
    return formResponse(randomHex(20),true,403);
   }
   const token="v2."+base64(randomBytes(32));
   const exp=Math.floor(Date.now()/1000)+OWNER_ACCESS_TTL;
   const fingerprint=await shaHex(sessionFingerprint(req,ip));
+  stage="kv-session-write";
   await env.CONSENT_KV.put(await sessionKey(token),JSON.stringify({exp,fingerprint}),{
    expirationTtl:OWNER_ACCESS_TTL
   });
-  await env.CONSENT_KV.delete(attempts);
+  // Session persistence succeeded. Failure to clear the attempt counter
+  // must not turn a valid login into a 503 after already minting a token.
+  try{await env.CONSENT_KV.delete(attempts)}
+  catch{console.warn("temp-owner-access-attempt-cleanup-failed")}
   const headers=new Headers({
    ...HEAD,"Location":"https://"+HOST+"/",
    "Set-Cookie":cookie(PASS,token,OWNER_ACCESS_TTL)
@@ -209,7 +220,11 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   headers.append("Set-Cookie",cookie(CSRF,"",0));
   return new Response(null,{status:303,headers});
  }catch{
-  console.error("temp-owner-access-storage-unavailable");
-  return response("Temporary access is unavailable",503);
+  // Error categories are fixed strings; never log submitted codes, tokens,
+  // incoming IPs, user agents, or raw KV exceptions.
+  console.error("temp-owner-access-failed",stage);
+  return response("Temporary access is unavailable",503,{
+   "X-Vynalth-Owner-Error":stage
+  });
  }
 }
