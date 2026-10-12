@@ -6,23 +6,25 @@ import {handleTemporaryOwnerAccess,hasTemporaryOwnerPass,OWNER_PORTAL,OWNER_ACCE
  from "./temporary-owner-access.js";
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const code="unit-test-only-vynalth-owner-code";
-const signingSecret="unit-test-only-owner-cookie-signing-secret-for-workers-2026";
+const verifierSalt="00112233445566778899aabbccddeeff0011223344556677";
+const verifierHex="6ad4de0f2a82f48a5f4ecd31e8688b875a254f0f5639fe5179714dca5dacb6e0";
 const ip="203.0.113.123";
 const ua="Vynalth UnitTest Browser";
 function kv(){
  const state=new Map();
  return {
   async get(key){return state.get(key)||null},
-  async put(key,value,opts){assert.equal(opts.expirationTtl,900);state.set(key,value)},
+  async put(key,value,opts){assert.ok([600,900].includes(opts.expirationTtl));state.set(key,value)},
   async delete(key){state.delete(key)},
-  size(){return state.size}
+  size(){return state.size},
+  entries(){return [...state.entries()]}
  };
 }
 function env(extra={}){
  return {
   VYNALTH_TEMP_ACCESS_ENABLED:"true",
-  VYNALTH_TEMP_ACCESS_CODE:code,
-  VYNALTH_TEMP_ACCESS_SIGNING_SECRET:signingSecret,
+  VYNALTH_TEMP_ACCESS_CODE_SALT_HEX:verifierSalt,
+  VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX:verifierHex,
   CONSENT_KV:kv(),
   GPS_GATE_ENABLED:"true",
   GPS_GATE_SESSION_SECRET:"unit-test-guest-gps-secret-string-0123456789012345",
@@ -67,7 +69,8 @@ test("code login has anti-CSRF form and sets 10-minute host-only HttpOnly pass",
  assert.doesNotMatch(pass,/Domain=/);
  assert.equal(OWNER_ACCESS_TTL,600);
  assert.ok(all.find(x=>x.startsWith("__Host-vynalth-owner-csrf=")&&x.includes("Max-Age=0")));
- assert.equal(e.CONSENT_KV.size(),0);
+ assert.equal(e.CONSENT_KV.size(),1);
+ assert.match(e.CONSENT_KV.entries()[0][0],/^temp-owner-pass:v2:/);
 });
 test("valid temporary owner cookie bypasses GPS challenge but not application auth",async()=>{
  const e=env();
@@ -93,7 +96,7 @@ test("pass binds to original IP, user agent and exact vynalthai.com host",async(
  for(const h of [
   {"CF-Connecting-IP":"198.51.100.1",Cookie:pass},
   {"User-Agent":"Different device",Cookie:pass},
-  {Cookie:pass.replace(/.$/,"A")}
+  {Cookie:pass.slice(0,-1)+(pass.endsWith("A")?"B":"A")}
  ]){
   const request=req(url.toString(),"GET",h);
   assert.equal(await hasTemporaryOwnerPass(request,e,url),false);
@@ -106,7 +109,8 @@ test("cookie is rejected after exactly 600 seconds",async()=>{
  const pass=success.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
  const url=new URL("https://vynalthai.com/");
  const request=req(url.toString(),"GET",{Cookie:pass});
- const actualNow=Date.now,exp=Number(pass.split("=")[1].split(".")[0]);
+ const actualNow=Date.now;
+ const exp=JSON.parse(e.CONSENT_KV.entries().find(([k])=>k.startsWith("temp-owner-pass:"))[1]).exp;
  try{
   Date.now=()=>exp*1000;
   assert.equal(await hasTemporaryOwnerPass(request,e,url),false);
@@ -124,7 +128,7 @@ test("wrong codes lock out after five tries and do not grant access",async()=>{
  assert.equal(sixth.headers.get("Retry-After"),"900");
  assert.equal(e.CONSENT_KV.size(),1);
 });
-test("CSRF, wrong origin, unconfigured secret and missing KV fail closed",async()=>{
+test("CSRF, wrong origin, missing KV and verifier override safety",async()=>{
  const e=env();
  const wrongOrigin=await login(e,code,{headers:{Origin:"https://evil.example"}});
  assert.equal(wrongOrigin.status,403);
@@ -133,8 +137,16 @@ test("CSRF, wrong origin, unconfigured secret and missing KV fail closed",async(
   "Content-Type":"application/x-www-form-urlencoded"
  },"csrf=123&code="+code),e,{});
  assert.equal(noCookie.status,403);
- const missing=await edge.fetch(req(),env({VYNALTH_TEMP_ACCESS_CODE:undefined}),{});
- assert.equal(missing.status,503);
+ // No Cloudflare Worker Secrets are required for this KV-only design.
+ const withoutSecrets=await edge.fetch(req(),env({
+  VYNALTH_TEMP_ACCESS_CODE:undefined,
+  VYNALTH_TEMP_ACCESS_SIGNING_SECRET:undefined
+ }),{});
+ assert.equal(withoutSecrets.status,200);
+ // A partial verifier override is never accepted for authentication.
+ const invalidEnv=env({VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX:undefined});
+ const invalid=await login(invalidEnv);
+ assert.equal(invalid.status,403);
  const noStorage=await edge.fetch(req(),env({CONSENT_KV:undefined}),{});
  assert.equal(noStorage.status,503);
  const disabled=await edge.fetch(req(),env({VYNALTH_TEMP_ACCESS_ENABLED:"false"}),{});
