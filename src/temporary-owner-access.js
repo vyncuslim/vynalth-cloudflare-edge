@@ -68,7 +68,7 @@ function formHtml(csrf,error=false){
  const message=error?'<p role="alert" class="error">The code was not accepted, or the request is temporarily unavailable.</p>':"";
  return '<!doctype html><html lang="en"><head><meta charset="utf-8">'+
   '<meta name="viewport" content="width=device-width,initial-scale=1">'+
-  '<meta name="referrer" content="no-referrer"><title>Temporary access · Vynalth AI</title>'+
+  '<meta name="referrer" content="same-origin"><title>Temporary access · Vynalth AI</title>'+
   '<style>:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#080d16;color:#eaf1fb}'+
   'body{min-height:100vh;display:grid;place-items:center;margin:0;padding:20px}'+
   'main{width:min(100%,420px);border:1px solid #334363;border-radius:16px;background:#101a2a;padding:30px}'+
@@ -85,12 +85,32 @@ function formHtml(csrf,error=false){
   '<button type="submit">Verify and continue</button></form>'+
   '<p><a href="/contact" style="color:#a4caff">Contact support</a></p></main></body></html>';
 }
-function formResponse(csrf,error=false,status=200){
+function formResponse(csrf,error=false,status=200,reason=null){
  return response(formHtml(csrf,error),status,{
   "Content-Type":"text/html; charset=utf-8",
+  "Referrer-Policy":"same-origin",
+  ...(reason?{"X-Vynalth-Owner-Error":reason}:{}),
   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "Set-Cookie":cookie(CSRF,csrf,300)
  });
+}
+// Some privacy-focused browsers omit Origin on a legitimate same-origin
+// form POST. Preserve CSRF/host protections while accepting authoritative
+// same-origin Fetch Metadata or same-origin Referer as safe fallbacks.
+// A present but mismatched Origin is ALWAYS rejected.
+function isSameOriginForm(req){
+ const expected="https://"+HOST;
+ const origin=req.headers.get("Origin");
+ const site=req.headers.get("Sec-Fetch-Site");
+ if(site==="cross-site"||site==="same-site")return false;
+ if(origin!==null)return origin===expected;
+ if(site==="same-origin")return true;
+ const referer=req.headers.get("Referer");
+ if(!referer)return false;
+ try{
+  const value=new URL(referer);
+  return value.origin===expected&&value.protocol==="https:";
+ }catch{return false}
 }
 async function attemptKey(ip){
  return "temp-owner-tries:v2:"+await shaHex(CODE_SALT_HEX+"|"+ip);
@@ -150,12 +170,13 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   return response("Temporary access KV binding is not configured",503);
  if(req.method==="GET")return formResponse(randomHex(20));
  if(req.method!=="POST")return response("Method Not Allowed",405,{"Allow":"GET, POST"});
- if(req.headers.get("Origin")!=="https://"+HOST||req.headers.get("Sec-Fetch-Site")==="cross-site")
-  return response("Forbidden",403);
+ if(!isSameOriginForm(req))
+  return response("Forbidden",403,{"X-Vynalth-Owner-Error":"origin"});
  if((req.headers.get("Content-Type")||"").split(";")[0]!=="application/x-www-form-urlencoded")
   return response("Unsupported Media Type",415);
  if(Number(req.headers.get("Content-Length")||0)>512)return response("Payload Too Large",413);
- const ip=clientIp(req);if(!ip)return response("Forbidden",403);
+ const ip=clientIp(req);
+ if(!ip)return response("Forbidden",403,{"X-Vynalth-Owner-Error":"client-ip"});
  const csrf=getCookie(req,CSRF);
  let params;
  try{
@@ -164,7 +185,7 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   params=new URLSearchParams(body);
  }catch{return response("Invalid request",400)}
  if(!csrf||!/^[a-f0-9]{40}$/.test(csrf)||params.get("csrf")!==csrf)
-  return response("Forbidden",403);
+  return formResponse(randomHex(20),true,403,"csrf");
  try{
   const attempts=await attemptKey(ip);
   const failed=await readAttempts(env.CONSENT_KV,attempts);
