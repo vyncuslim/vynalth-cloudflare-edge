@@ -41,12 +41,17 @@ function req(url="https://vynalthai.com"+OWNER_PORTAL,method="GET",headers={},bo
  });
 }
 async function login(environment,accessCode=code,opts={}){
- const form=await edge.fetch(req(),environment,{});
+ const formUrl=opts.returnPath===undefined?undefined:
+  "https://vynalthai.com"+OWNER_PORTAL+"?return="+encodeURIComponent(opts.returnPath);
+ const form=await edge.fetch(req(formUrl),environment,{});
  assert.equal(form.status,200);
  const csrf=form.headers.get("Set-Cookie").split(";")[0];
  const token=csrf.split("=")[1];
  assert.match(token,/^[a-f0-9]{40}$/);
- const body=new URLSearchParams({csrf:token,code:accessCode}).toString();
+ const body=new URLSearchParams({
+  csrf:token,code:accessCode,
+  ...(opts.returnPath===undefined?{}:{return:opts.returnPath})
+ }).toString();
  const postHeaders={
   Cookie:csrf,Origin:"https://vynalthai.com",
   "Content-Type":"application/x-www-form-urlencoded",
@@ -272,4 +277,65 @@ test("wrong access code produces normal 403, not the PBKDF2 503 error",async()=>
  const result=await login(e,"a-normal-invalid-code");
  assert.equal(result.status,403);
  assert.equal(result.headers.get("X-Vynalth-Owner-Error"),null);
+});
+
+test("temporary owner login safely returns to a deep chat conversation",async()=>{
+ const e=env();
+ for(const path of ["/c","/c/12345678-abcd-4321-abcd-123456789abc","/en/c","/cn/c/abc_123","/ms/c"]){
+  const response=await login(e,code,{returnPath:path});
+  assert.equal(response.status,303,path);
+  assert.equal(response.headers.get("Location"),"https://vynalthai.com"+path);
+  assert.match(response.headers.getSetCookie().join(";"),/__Host-vynalth-owner-pass=/);
+ }
+});
+test("return redirects reject external, encoded, reserved and non-chat paths",async()=>{
+ const e=env();
+ for(const path of [
+  "//evil.example","https://evil.example/c","/api/ai/chat","/__shield/gps/status",
+  "/admin/121@121.1234.vynucslim","/c?token=secret","/c#secret",
+  "/c/%2f%2fevil.example","/c/../../../admin","/c/abc?open_redirect=1"
+ ]){
+  const result=await login(e,code,{returnPath:path});
+  assert.equal(result.status,303,path);
+  assert.equal(result.headers.get("Location"),"https://vynalthai.com/",path);
+ }
+});
+test("return path is preserved after invalid access-code retry without leaking it externally",async()=>{
+ const e=env();
+ const form=await edge.fetch(req(
+  "https://vynalthai.com"+OWNER_PORTAL+"?return=%2Fc%2Fabc123"
+ ),e,{});
+ assert.equal(form.status,200);
+ assert.match(await form.text(),/name="return" value="\/c\/abc123"/);
+ assert.equal(form.headers.get("Referrer-Policy"),"same-origin");
+});
+
+test("chat API POST obeys same ten-minute owner cookie without relaxing GPS enforcement",async()=>{
+ const e=env();
+ const url="https://vynalthai.com/api/ai/chat";
+ const headers={"Accept":"application/json","Content-Type":"application/json",
+  "Origin":"https://vynalthai.com"};
+ const payload=JSON.stringify({message:"请画SVG流程图"});
+ const denied=await edge.fetch(req(url,"POST",headers,payload),e,{});
+ assert.equal(denied.status,403);
+ assert.equal((await denied.json()).error,"PRECISE_GPS_REQUIRED");
+
+ const granted=await login(e,code,{returnPath:"/c"});
+ assert.equal(granted.status,303);
+ assert.equal(granted.headers.get("Location"),"https://vynalthai.com/c");
+ const cookie=granted.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
+ let count=0;const original=globalThis.fetch;
+ globalThis.fetch=async request=>{
+  count++;
+  assert.equal(new URL(request.url).pathname,"/api/ai/chat");
+  return new Response(JSON.stringify({reply:"SVG generated"}),{
+   status:200,headers:{"Content-Type":"application/json"}
+  });
+ };
+ try{
+  const approved=await edge.fetch(req(url,"POST",{...headers,Cookie:cookie},payload),e,{});
+  assert.equal(approved.status,200);
+  assert.equal((await approved.json()).reply,"SVG generated");
+  assert.equal(count,1);
+ }finally{globalThis.fetch=original}
 });

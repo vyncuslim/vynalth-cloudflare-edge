@@ -68,7 +68,16 @@ function cookie(name,value,age){
 function response(body,status=200,headers={}){
  return new Response(body,{status,headers:{...HEAD,...headers}});
 }
-function formHtml(csrf,error=false){
+// Keep return navigation on the chat surface; never accept arbitrary URLs,
+// protocol-relative URLs, control characters, or reserved security endpoints.
+function safeReturnPath(value){
+ if(value===null||value==="")return "/";
+ if(typeof value!=="string"||value.length>220||
+    !value.startsWith("/")||value.startsWith("//")||
+    /[\\?#%\u0000-\u001f]/.test(value))return "/";
+ return /^\/(?:en\/|cn\/|ms\/)?c(?:\/[A-Za-z0-9_-]{1,160})?\/?$/.test(value)?value:"/";
+}
+function formHtml(csrf,error=false,returnPath="/"){
  const message=error?'<p role="alert" class="error">The code was not accepted, or the request is temporarily unavailable.</p>':"";
  return '<!doctype html><html lang="en"><head><meta charset="utf-8">'+
   '<meta name="viewport" content="width=device-width,initial-scale=1">'+
@@ -84,13 +93,14 @@ function formHtml(csrf,error=false){
   'This does not sign you in to an administrator account or override other security rules.</p>'+message+
   '<form action="'+OWNER_PORTAL+'" method="POST" autocomplete="off">'+
   '<input type="hidden" name="csrf" value="'+csrf+'">'+
+  '<input type="hidden" name="return" value="'+returnPath+'">'+
   '<label for="code">Access code</label><input id="code" name="code" type="password" required '+
   'maxlength="128" autocomplete="off" spellcheck="false">'+
   '<button type="submit">Verify and continue</button></form>'+
   '<p><a href="/contact" style="color:#a4caff">Contact support</a></p></main></body></html>';
 }
-function formResponse(csrf,error=false,status=200,reason=null){
- return response(formHtml(csrf,error),status,{
+function formResponse(csrf,error=false,status=200,reason=null,returnPath="/"){
+ return response(formHtml(csrf,error,returnPath),status,{
   "Content-Type":"text/html; charset=utf-8",
   "Referrer-Policy":"same-origin",
   ...(reason?{"X-Vynalth-Owner-Error":reason}:{}),
@@ -172,7 +182,8 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   return response("Not Found",404);
  if(!active(env))
   return response("Temporary access KV binding is not configured",503);
- if(req.method==="GET")return formResponse(randomHex(20));
+ if(req.method==="GET")return formResponse(randomHex(20),false,200,null,
+  safeReturnPath(url.searchParams.get("return")));
  if(req.method!=="POST")return response("Method Not Allowed",405,{"Allow":"GET, POST"});
  if(!isSameOriginForm(req))
   return response("Forbidden",403,{"X-Vynalth-Owner-Error":"origin"});
@@ -188,8 +199,9 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   if(body.length>512)throw Error("long");
   params=new URLSearchParams(body);
  }catch{return response("Invalid request",400)}
+ const returnPath=safeReturnPath(params.get("return"));
  if(!csrf||!/^[a-f0-9]{40}$/.test(csrf)||params.get("csrf")!==csrf)
-  return formResponse(randomHex(20),true,403,"csrf");
+  return formResponse(randomHex(20),true,403,"csrf",returnPath);
  let stage="kv-read";
  try{
   const attempts=await attemptKey(ip);
@@ -200,7 +212,7 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   if(!await compareCode(params.get("code"),env)){
    stage="kv-failure-counter";
    await env.CONSENT_KV.put(attempts,String(failed+1),{expirationTtl:ATTEMPT_TTL});
-   return formResponse(randomHex(20),true,403);
+   return formResponse(randomHex(20),true,403,null,returnPath);
   }
   const token="v2."+base64(randomBytes(32));
   const exp=Math.floor(Date.now()/1000)+OWNER_ACCESS_TTL;
@@ -214,7 +226,7 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   try{await env.CONSENT_KV.delete(attempts)}
   catch{console.warn("temp-owner-access-attempt-cleanup-failed")}
   const headers=new Headers({
-   ...HEAD,"Location":"https://"+HOST+"/",
+   ...HEAD,"Location":"https://"+HOST+returnPath,
    "Set-Cookie":cookie(PASS,token,OWNER_ACCESS_TTL)
   });
   headers.append("Set-Cookie",cookie(CSRF,"",0));
