@@ -360,7 +360,7 @@ test("owner form accurately distinguishes bad code from expired CSRF",async()=>{
 });
 test("pasted code may contain outer whitespace but cannot change case or middle letters",async()=>{
  const e=env();
- const padded=await login(e,"  "+code+" \\n");
+ const padded=await login(e,"  "+code+" \n");
  assert.equal(padded.status,303);
  const changed=await login(e,code.toUpperCase());
  assert.equal(changed.status,403);
