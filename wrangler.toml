@@ -9,17 +9,19 @@ workers_dev = true
 # 3) the four-zone consent flow and core app routes pass review.
 # Deploy routes belong at the TOML root. Do not put them inside [vars];
 # that would define env.vars.routes instead of Worker routing rules.
-# Exact eight requested routes across seven zones; apex is only vynalthai.com.
-# Other six apex hostnames are intentionally not added to avoid conflicting
-# with other existing Workers or route ownership. Existing routes on other
-# Workers are NOT managed by this config.
+# GPS routes across seven zones. Apex vyncuslim.com remains owned by vv.
+# Only the vyncuslim.si and vynalthai.si apex routes are added to close
+# the validated no-GPS gap; retain all existing subdomain routes.
+# Confirm live route ownership before publishing to avoid replacing another Worker.
 routes = [
   { pattern = "*.sleepsomno.com/*", zone_name = "sleepsomno.com" },
   { pattern = "*.vyncuslim.com/*", zone_name = "vyncuslim.com" },
   { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" },
   { pattern = "*.vynalthai.si/*", zone_name = "vynalthai.si" },
+  { pattern = "vynalthai.si/*", zone_name = "vynalthai.si" },
   { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" },
   { pattern = "*.vyncuslim.si/*", zone_name = "vyncuslim.si" },
+  { pattern = "vyncuslim.si/*", zone_name = "vyncuslim.si" },
   { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
   { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" }
 ]
