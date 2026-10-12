@@ -2,6 +2,7 @@ import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent
 import { guestGpsGate } from "./guest-gps.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
+import { verifyGpsServiceCall } from "./gps-service-policy.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -122,6 +123,36 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Authenticated Service Binding calls from vv are a policy check only.
+    // They NEVER run origin fetch, R2 handling, redirects or the vv Worker.
+    // A missing/invalid signature cannot unlock any protected content.
+    const internalGps = await verifyGpsServiceCall(request,env,incomingUrl);
+    if (internalGps) {
+      if (!internalGps.authenticated) {
+        return edgeResponse(new Response("Forbidden",{status:403,
+          headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"invalid-service-auth"}}),
+          request,incomingUrl,requestId,rootDomain);
+      }
+      const forwarded = internalGps.request;
+      const temporary = temporaryIpBlockResponse(forwarded,incomingUrl);
+      if (temporary && !(await shieldAccountExempt(forwarded,env,rootDomain)))
+        return edgeResponse(temporary,forwarded,incomingUrl,requestId,rootDomain);
+      if (env?.GPS_GATE_ENABLED!=="true")
+        return edgeResponse(new Response("GPS policy is not enabled",{status:503,
+          headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"not-ready"}}),
+          forwarded,incomingUrl,requestId,rootDomain);
+      const protectedEndpoint=incomingUrl.pathname.startsWith("/__shield/gps/");
+      const trusted=!protectedEndpoint&&await shieldAccountExempt(forwarded,env,rootDomain);
+      if (!trusted) {
+        const decision=await guestGpsGate(forwarded,env,incomingUrl,ctx,requestId,
+          internalGps.country);
+        if (decision)return edgeResponse(decision,forwarded,incomingUrl,requestId,rootDomain);
+      }
+      return edgeResponse(new Response(null,{status:204,
+        headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"allow"}}),
+        forwarded,incomingUrl,requestId,rootDomain);
     }
 
     // Temporary, self-expiring owner-requested network restriction. The

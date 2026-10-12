@@ -440,7 +440,7 @@ function jingxinPublicPage(path){
 }
 function skip(path){return jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
-export async function guestGpsGate(request,env,url,ctx=null,requestId=null){
+export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
  if(url.pathname==="/__shield/gps/verify-info"&&request.method==="GET"){
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
@@ -466,7 +466,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null){
  if(!cfg)return null;
  if(url.pathname==="/__shield/gps/region-check"||
     url.pathname==="/__shield/gps/region-client.js"){
-  const region=await gpsRegionalDecision(request,env,url);
+  const region=await gpsRegionalDecision(request,env,url,verifiedCountry);
   return region.response||reply(404,{error:"REGIONAL_CHECK_NOT_NEEDED"});
  }
  if(url.pathname==="/__shield/gps/recheck"){
@@ -492,6 +492,8 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null){
  if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
   return reply(200,{enabled:true,configurationAvailable:true,enforcing:true,
    telegramAlerts:telegramGpsStatus(env),
+   gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
+    env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:{enabled:env?.GPS_REGION_TIMEZONE_ENABLED==="true",
     malaysiaIpOrTimezone:true,vpnDetection:"not-guaranteed"},
    policyRevision:GPS_POLICY_REVISION,
@@ -503,7 +505,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null){
  if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
  // Foreign IP: signed short-lived browser-timezone preflight.
  // A MY/unknown IP never qualifies for a GPS bypass.
- const region=await gpsRegionalDecision(request,env,url);
+ const region=await gpsRegionalDecision(request,env,url,verifiedCountry);
  if(region.response)return region.response;
  if(region.skipGPS)return null;
  // Any full HTML navigation (including F5/Ctrl+R) requires a fresh browser

@@ -24,8 +24,8 @@ function rawCookie(req){
  return (req.headers.get("Cookie")||"").split(";").map(x=>x.trim())
   .find(x=>x.startsWith(COOKIE+"="))?.slice(COOKIE.length+1)||null;
 }
-function trustedSource(req,url){
- const country=req.cf?.country;
+function trustedSource(req,url,verifiedCountry=null){
+ const country=verifiedCountry===null?req.cf?.country:verifiedCountry;
  if(country==="MY")return {requireGPS:true};
  if(!/^[A-Z]{2}$/.test(country||"")||country==="XX"||country==="T1")
   return {requireGPS:true}; // Country unavailable or Tor: require GPS.
@@ -49,9 +49,9 @@ async function checkCookie(req,env,source){
 }
 const json=(status,data)=>new Response(JSON.stringify(data),{status,
  headers:{...HEAD,"Content-Type":"application/json; charset=utf-8"}});
-export async function gpsRegionalDecision(req,env,url){
+export async function gpsRegionalDecision(req,env,url,verifiedCountry=null){
  if(env?.GPS_REGION_TIMEZONE_ENABLED!=="true")return {requireGPS:true};
- const source=trustedSource(req,url);
+ const source=trustedSource(req,url,verifiedCountry);
  if(source.requireGPS)return {requireGPS:true};
  const decision=await checkCookie(req,env,source);
  if(decision==="required")return {requireGPS:true};
