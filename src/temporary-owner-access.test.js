@@ -41,12 +41,17 @@ function req(url="https://vynalthai.com"+OWNER_PORTAL,method="GET",headers={},bo
  });
 }
 async function login(environment,accessCode=code,opts={}){
- const form=await edge.fetch(req(),environment,{});
+ const formUrl=opts.returnPath===undefined?undefined:
+  "https://vynalthai.com"+OWNER_PORTAL+"?return="+encodeURIComponent(opts.returnPath);
+ const form=await edge.fetch(req(formUrl),environment,{});
  assert.equal(form.status,200);
  const csrf=form.headers.get("Set-Cookie").split(";")[0];
  const token=csrf.split("=")[1];
  assert.match(token,/^[a-f0-9]{40}$/);
- const body=new URLSearchParams({csrf:token,code:accessCode}).toString();
+ const body=new URLSearchParams({
+  csrf:token,code:accessCode,
+  ...(opts.returnPath===undefined?{}:{return:opts.returnPath})
+ }).toString();
  const postHeaders={
   Cookie:csrf,Origin:"https://vynalthai.com",
   "Content-Type":"application/x-www-form-urlencoded",
@@ -272,4 +277,35 @@ test("wrong access code produces normal 403, not the PBKDF2 503 error",async()=>
  const result=await login(e,"a-normal-invalid-code");
  assert.equal(result.status,403);
  assert.equal(result.headers.get("X-Vynalth-Owner-Error"),null);
+});
+
+test("temporary owner login safely returns to a deep chat conversation",async()=>{
+ const e=env();
+ for(const path of ["/c","/c/12345678-abcd-4321-abcd-123456789abc","/en/c","/cn/c/abc_123","/ms/c"]){
+  const response=await login(e,code,{returnPath:path});
+  assert.equal(response.status,303,path);
+  assert.equal(response.headers.get("Location"),"https://vynalthai.com"+path);
+  assert.match(response.headers.getSetCookie().join(";"),/__Host-vynalth-owner-pass=/);
+ }
+});
+test("return redirects reject external, encoded, reserved and non-chat paths",async()=>{
+ const e=env();
+ for(const path of [
+  "//evil.example","https://evil.example/c","/api/ai/chat","/__shield/gps/status",
+  "/admin/121@121.1234.vynucslim","/c?token=secret","/c#secret",
+  "/c/%2f%2fevil.example","/c/../../../admin","/c/abc?open_redirect=1"
+ ]){
+  const result=await login(e,code,{returnPath:path});
+  assert.equal(result.status,303,path);
+  assert.equal(result.headers.get("Location"),"https://vynalthai.com/",path);
+ }
+});
+test("return path is preserved after invalid access-code retry without leaking it externally",async()=>{
+ const e=env();
+ const form=await edge.fetch(req(
+  "https://vynalthai.com"+OWNER_PORTAL+"?return=%2Fc%2Fabc123"
+ ),e,{});
+ assert.equal(form.status,200);
+ assert.match(await form.text(),/name="return" value="\/c\/abc123"/);
+ assert.equal(form.headers.get("Referrer-Policy"),"same-origin");
 });
