@@ -208,7 +208,7 @@ test("bad CSRF returns a fresh no-store form instead of an unexplained Forbidden
  },"csrf=not-valid&code="+encodeURIComponent(code)),e,{});
  assert.equal(result.status,403);
  assert.equal(result.headers.get("X-Vynalth-Owner-Error"),"csrf");
- assert.match(result.headers.get("Content-Type"),/text\\/html/);
+ assert.match(result.headers.get("Content-Type"),/text\/html/);
  assert.match(await result.text(),/Temporary website access/);
  assert.ok(result.headers.getSetCookie().some(x=>x.startsWith("__Host-vynalth-owner-csrf=")));
 });
