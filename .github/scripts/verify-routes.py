@@ -18,15 +18,17 @@ ROOTS = (
     "vynalthai.si",
     "vyncuslim.si",
 )
-# Operator-specified eight route patterns. Only vynalthai.com apex was
-# requested; do not silently claim or replace other six apex routes.
+# Exactly ten GPS Worker routes. The two SI apexes are now covered.
+# vyncuslim.com apex/www remain exclusively owned by the vv Worker.
 EXPECTED = {
     ("*.sleepsomno.com/*", "sleepsomno.com"),
     ("*.vyncuslim.com/*", "vyncuslim.com"),
     ("*.vynalthai.com/*", "vynalthai.com"),
     ("*.vynalthai.si/*", "vynalthai.si"),
+    ("vynalthai.si/*", "vynalthai.si"),
     ("*.powiismunc.com/*", "powiismunc.com"),
     ("*.vyncuslim.si/*", "vyncuslim.si"),
+    ("vyncuslim.si/*", "vyncuslim.si"),
     ("vynalthai.com/*", "vynalthai.com"),
     ("*.vitamindai.online/*", "vitamindai.online"),
 }
@@ -46,7 +48,13 @@ def check(path: Path) -> None:
         assert isinstance(r.get("zone_name"), str), f"Zone name missing: {r!r}"
         seen.append((r["pattern"], r["zone_name"]))
     assert len(seen) == len(set(seen)), "Duplicate Cloudflare routes"
-    assert len(seen) == 8, f"Expected 8 routes, found {len(seen)}"
+    assert len(seen) == 10, f"Expected 10 routes, found {len(seen)}"
+    assert ("vyncuslim.com/*", "vyncuslim.com") not in seen, (
+        "vv owns vyncuslim.com apex; GPS Worker must not overwrite vv"
+    )
+    assert ("www.vyncuslim.com/*", "vyncuslim.com") not in seen, (
+        "vv owns www.vyncuslim.com; GPS Worker must not overwrite vv"
+    )
     missing = EXPECTED - set(seen)
     unexpected = set(seen) - EXPECTED
     assert not missing and not unexpected, (
@@ -81,7 +89,7 @@ def check(path: Path) -> None:
     assert any(s.get("binding") == "SCHOOL_POLICY"
                and s.get("service") == "website-block-by-school-powiis"
                for s in services), "School policy service binding must remain unchanged"
-    print("PASS: 8 exact top-level routes across seven Cloudflare zones")
+    print("PASS: 10 exact top-level routes across seven Cloudflare zones")
     for pattern, zone in sorted(EXPECTED):
         print(f"  {pattern}  zone={zone}")
 
