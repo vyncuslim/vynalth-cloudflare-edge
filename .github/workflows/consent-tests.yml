@@ -8,6 +8,8 @@ on:
     paths:
       - "src/universal-consent.js"
       - "src/guest-gps.js"
+      - "src/temporary-owner-access.js"
+      - "src/temporary-owner-access.test.js"
       - "src/gps-service-policy.js"
       - "src/gps-service-policy.test.js"
       - "src/gps-regional-trigger.js"
@@ -32,6 +34,8 @@ on:
       - "src/universal-consent.js"
       - "src/universal-consent.test.js"
       - "src/guest-gps.js"
+      - "src/temporary-owner-access.js"
+      - "src/temporary-owner-access.test.js"
       - "src/gps-service-policy.js"
       - "src/gps-service-policy.test.js"
       - "src/gps-regional-trigger.js"
@@ -58,6 +62,8 @@ jobs:
         run: |
           node --check src/gps-verification-ui.js
           node --check src/guest-gps.js
+          node --check src/temporary-owner-access.js
+          node --check src/temporary-owner-access.test.js
           node --check src/gps-service-policy.js
           node --check src/gps-service-policy.test.js
           node --check src/gps-regional-trigger.js
