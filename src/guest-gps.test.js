@@ -727,3 +727,41 @@ test("actual GPS boundary 403 hands Telegram notification to waitUntil without c
   assert.equal(messages[0].includes("198.51.100.18"),false);
  }finally{globalThis.fetch=priorFetch;}
 });
+
+test("public fingerprinted Vite CSS, JS, fonts are served without GPS cookies",async()=>{
+ const paths=[
+  "/assets/DynamicPage-CqJImg6h.css",
+  "/assets/main-BeRavZsA.js",
+  "/assets/index-AbCd1234.woff2",
+  "/assets/page-12345678.mjs",
+ ];
+ for(const p of paths){
+  for(const method of ["GET","HEAD"]){
+   const response=await invoke(req(p,method,{Accept:p.endsWith(".css")?"text/css":"*/*"}));
+   assert.equal(response,null,`${p} ${method} should pass through to origin`);
+  }
+ }
+ // Public build styles must still load if GPS configuration becomes unavailable.
+ const unavailable={...cfg,GPS_GATE_SESSION_SECRET:"bad"};
+ assert.equal(await invoke(req("/assets/DynamicPage-CqJImg6h.css","GET",{Accept:"text/css"}),unavailable),null);
+});
+test("GPS asset bypass never applies to private photos, APIs, unhashed assets or writes",async()=>{
+ for(const p of [
+  "/assets/jingxin-memory-hq.avif",
+  "/media/jingxin/shared-memory.jpg",
+  "/assets/logo.css",
+  "/assets/DynamicPage-CqJImg6h.css/map",
+  "/assets/DynamicPage-CqJImg6h.css/../admin",
+  "/api/ai/chat",
+  "/assets/DynamicPage-CqJImg6h.html",
+  "/assets/protected-AbCd1234.json"
+ ]){
+  const response=await invoke(req(p,"GET",{Accept:"application/json"}));
+  assert.ok(response&&response.status===403,`${p} must remain gated`);
+ }
+ for(const method of ["POST","PUT","DELETE"]){
+  const response=await invoke(req("/assets/DynamicPage-CqJImg6h.css",method,
+    {"Content-Type":"text/plain",Accept:"application/json"},"test-body"));
+  assert.equal(response.status,403,method);
+ }
+});

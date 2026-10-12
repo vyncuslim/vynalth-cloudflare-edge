@@ -312,3 +312,42 @@ test("server-signed trusted identity remains exempt from temporary network deny"
   assert.equal(count(),1);
  });
 });
+
+test("full edge proxies fingerprinted CSS with correct MIME and no GPS browser challenge",async()=>{
+ const original=globalThis.fetch;let hits=0;
+ globalThis.fetch=async request=>{
+  hits++;
+  assert.equal(new URL(request.url).pathname,"/assets/DynamicPage-CqJImg6h.css");
+  return new Response(".dynamic{color:green}",{
+   status:200,headers:{"Content-Type":"text/css; charset=utf-8",
+    "Cache-Control":"public, max-age=31536000, immutable"}
+  });
+ };
+ try{
+  const env={GPS_GATE_ENABLED:"true",GPS_GATE_SESSION_SECRET:
+   "test-verdict-signing-secret-0000000000000000",
+   GPS_CAMPUS_LAT:"5.3677",GPS_CAMPUS_LON:"100.21995",
+   GPS_CAMPUS_RADIUS_METERS:"180"};
+  const request=new Request("https://vynalthai.com/assets/DynamicPage-CqJImg6h.css",{
+   headers:{"Accept":"text/css","Sec-Fetch-Dest":"style"}});
+  const response=await edge.fetch(request,env,{});
+  assert.equal(response.status,200);
+  assert.match(response.headers.get("Content-Type"),/^text\/css/);
+  assert.equal(await response.text(),".dynamic{color:green}");
+  assert.equal(hits,1);
+  assert.equal(response.headers.get("x-vynalth-edge"),"cloudflare-worker");
+ }finally{globalThis.fetch=original}
+});
+test("full edge still returns GPS 403 for HTML page without location pass",async()=>{
+ const env={GPS_GATE_ENABLED:"true",GPS_GATE_SESSION_SECRET:
+  "test-verdict-signing-secret-0000000000000000",
+  GPS_CAMPUS_LAT:"5.3677",GPS_CAMPUS_LON:"100.21995",
+  GPS_CAMPUS_RADIUS_METERS:"180"};
+ await withOrigin(async hits=>{
+  const r=await edge.fetch(new Request("https://vynalthai.com/en/security",{
+   headers:{"Accept":"text/html","Sec-Fetch-Dest":"document"}}),env,{});
+  assert.equal(r.status,403);
+  assert.match(await r.text(),/Verify your location/);
+  assert.equal(hits(),0);
+ });
+});
