@@ -9,17 +9,21 @@ workers_dev = true
 # 3) the four-zone consent flow and core app routes pass review.
 # Deploy routes belong at the TOML root. Do not put them inside [vars];
 # that would define env.vars.routes instead of Worker routing rules.
-# Exact eight requested routes across seven zones; apex is only vynalthai.com.
-# Other six apex hostnames are intentionally not added to avoid conflicting
-# with other existing Workers or route ownership. Existing routes on other
-# Workers are NOT managed by this config.
+# Eleven route patterns across seven zones. The operator additionally requests
+# these three apex hosts to use the unified GPS Worker: vyncuslim.com,
+# vyncuslim.si and vynalthai.si. Before enabling in production, verify that
+# these exact paths are not owned by any other active Cloudflare Worker.
+# The remaining other apex domains are intentionally untouched.
 routes = [
   { pattern = "*.sleepsomno.com/*", zone_name = "sleepsomno.com" },
   { pattern = "*.vyncuslim.com/*", zone_name = "vyncuslim.com" },
+  { pattern = "vyncuslim.com/*", zone_name = "vyncuslim.com" },
   { pattern = "*.vynalthai.com/*", zone_name = "vynalthai.com" },
   { pattern = "*.vynalthai.si/*", zone_name = "vynalthai.si" },
+  { pattern = "vynalthai.si/*", zone_name = "vynalthai.si" },
   { pattern = "*.powiismunc.com/*", zone_name = "powiismunc.com" },
   { pattern = "*.vyncuslim.si/*", zone_name = "vyncuslim.si" },
+  { pattern = "vyncuslim.si/*", zone_name = "vyncuslim.si" },
   { pattern = "vynalthai.com/*", zone_name = "vynalthai.com" },
   { pattern = "*.vitamindai.online/*", zone_name = "vitamindai.online" }
 ]
