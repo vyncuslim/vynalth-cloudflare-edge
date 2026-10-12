@@ -77,8 +77,10 @@ function safeReturnPath(value){
     /[\\?#%\u0000-\u001f]/.test(value))return "/";
  return /^\/(?:en\/|cn\/|ms\/)?c(?:\/[A-Za-z0-9_-]{1,160})?\/?$/.test(value)?value:"/";
 }
-function formHtml(csrf,error=false,returnPath="/"){
- const message=error?'<p role="alert" class="error">The code was not accepted, or the request is temporarily unavailable.</p>':"";
+function formHtml(csrf,error=false,returnPath="/",reason=null){
+ const message=!error?"":reason==="csrf"
+  ? '<p role="alert" class="error">This verification form expired or could not be confirmed. Please enter your code again in the refreshed form.</p>'
+  : '<p role="alert" class="error">Access code not accepted. Check uppercase letters and remove extra spaces before trying again.</p>';
  return '<!doctype html><html lang="en"><head><meta charset="utf-8">'+
   '<meta name="viewport" content="width=device-width,initial-scale=1">'+
   '<meta name="referrer" content="same-origin"><title>Temporary access · Vynalth AI</title>'+
@@ -99,10 +101,16 @@ function formHtml(csrf,error=false,returnPath="/"){
   '<button type="submit">Verify and continue</button></form>'+
   '<p><a href="/contact" style="color:#a4caff">Contact support</a></p></main></body></html>';
 }
-function formResponse(csrf,error=false,status=200,reason=null,returnPath="/"){
- return response(formHtml(csrf,error,returnPath),status,{
+function codeVerifierMode(env){
+ const hasSalt=env?.VYNALTH_TEMP_ACCESS_CODE_SALT_HEX!==undefined;
+ const hasVerifier=env?.VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX!==undefined;
+ return hasSalt&&hasVerifier?"configured":hasSalt||hasVerifier?"incomplete":"built-in";
+}
+function formResponse(csrf,error=false,status=200,reason=null,returnPath="/",env=null){
+ return response(formHtml(csrf,error,returnPath,reason),status,{
   "Content-Type":"text/html; charset=utf-8",
   "Referrer-Policy":"same-origin",
+  "X-Vynalth-Owner-Verifier-Mode":codeVerifierMode(env),
   ...(reason?{"X-Vynalth-Owner-Error":reason}:{}),
   "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "Set-Cookie":cookie(CSRF,csrf,300)
@@ -148,7 +156,11 @@ async function compareCode(value,env){
  const expectedHex=hasOverride?env?.VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX:CODE_VERIFIER_HEX;
  if(typeof salt!=="string"||!/^[a-f0-9]{48}$/.test(salt)||
     typeof expectedHex!=="string"||!/^[a-f0-9]{64}$/.test(expectedHex))return false;
- const key=await crypto.subtle.importKey("raw",ENC.encode(value),"PBKDF2",false,["deriveBits"]);
+ // A pasted code may include accidental whitespace; normalize only at the
+ // edges, never change case or remove interior characters.
+ const clean=value.trim();
+ if(!clean)return false;
+ const key=await crypto.subtle.importKey("raw",ENC.encode(clean),"PBKDF2",false,["deriveBits"]);
  const result=new Uint8Array(await crypto.subtle.deriveBits({
   name:"PBKDF2",salt:fromHex(salt),iterations:OWNER_CODE_ITERATIONS,hash:"SHA-256"
  },key,256));
@@ -183,7 +195,7 @@ export async function handleTemporaryOwnerAccess(req,env,url){
  if(!active(env))
   return response("Temporary access KV binding is not configured",503);
  if(req.method==="GET")return formResponse(randomHex(20),false,200,null,
-  safeReturnPath(url.searchParams.get("return")));
+  safeReturnPath(url.searchParams.get("return")),env);
  if(req.method!=="POST")return response("Method Not Allowed",405,{"Allow":"GET, POST"});
  if(!isSameOriginForm(req))
   return response("Forbidden",403,{"X-Vynalth-Owner-Error":"origin"});
@@ -201,7 +213,7 @@ export async function handleTemporaryOwnerAccess(req,env,url){
  }catch{return response("Invalid request",400)}
  const returnPath=safeReturnPath(params.get("return"));
  if(!csrf||!/^[a-f0-9]{40}$/.test(csrf)||params.get("csrf")!==csrf)
-  return formResponse(randomHex(20),true,403,"csrf",returnPath);
+  return formResponse(randomHex(20),true,403,"csrf",returnPath,env);
  let stage="kv-read";
  try{
   const attempts=await attemptKey(ip);
@@ -212,7 +224,7 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   if(!await compareCode(params.get("code"),env)){
    stage="kv-failure-counter";
    await env.CONSENT_KV.put(attempts,String(failed+1),{expirationTtl:ATTEMPT_TTL});
-   return formResponse(randomHex(20),true,403,null,returnPath);
+   return formResponse(randomHex(20),true,403,"code",returnPath,env);
   }
   const token="v2."+base64(randomBytes(32));
   const exp=Math.floor(Date.now()/1000)+OWNER_ACCESS_TTL;
