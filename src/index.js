@@ -3,6 +3,7 @@ import { guestGpsGate } from "./guest-gps.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
+import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-owner-access.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -163,6 +164,14 @@ export default {
       return edgeResponse(temporaryDenial,request,incomingUrl,requestId,rootDomain);
     }
 
+    // Owner's 10-minute access portal is served by the Worker before the GPS
+    // challenge, but after existing temporary IP restrictions. It never
+    // creates an application admin/SSO session or bypasses School Policy.
+    const temporaryOwnerPage=await handleTemporaryOwnerAccess(request,env,incomingUrl);
+    if(temporaryOwnerPage){
+      return edgeResponse(temporaryOwnerPage,request,incomingUrl,requestId,rootDomain);
+    }
+
     // Keep School IP Policy enforcement for protected photo bytes. A guest's
     // self-reported GPS verdict alone must never bypass independent School
     // IP restrictions. Canonical server-signed trust/contact/status identities
@@ -198,7 +207,9 @@ export default {
     const gpsEndpoint = incomingUrl.pathname.startsWith("/__shield/gps/");
     const canonicallyExempt = env?.GPS_GATE_ENABLED === "true" &&
       !gpsEndpoint && await shieldAccountExempt(request,env,rootDomain);
-    if (!canonicallyExempt) {
+    const temporaryOwnerExempt = !gpsEndpoint && hostname==="vynalthai.com" &&
+      await hasTemporaryOwnerPass(request,env,incomingUrl);
+    if (!canonicallyExempt && !temporaryOwnerExempt) {
       const gpsDecision = await guestGpsGate(request,env,incomingUrl,ctx,requestId);
       if (gpsDecision) {
         return edgeResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
