@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {webcrypto} from "node:crypto";
 import edge from "./index.js";
-import {handleTemporaryOwnerAccess,hasTemporaryOwnerPass,OWNER_PORTAL,OWNER_ACCESS_TTL}
+import {handleTemporaryOwnerAccess,hasTemporaryOwnerPass,OWNER_PORTAL,OWNER_ACCESS_TTL,OWNER_CODE_ITERATIONS}
  from "./temporary-owner-access.js";
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const code="unit-test-only-vynalth-owner-code";
 const verifierSalt="00112233445566778899aabbccddeeff0011223344556677";
-const verifierHex="6ad4de0f2a82f48a5f4ecd31e8688b875a254f0f5639fe5179714dca5dacb6e0";
+const verifierHex="b7db8c9c8d44f5b7efccf342630321f8045096b42da20be699ef51803709466c";
 const ip="203.0.113.123";
 const ua="Vynalth UnitTest Browser";
 function kv(){
@@ -220,4 +220,56 @@ test("form uses same-origin referrer policy while retaining secure cookie",async
  assert.equal(result.status,200);
  assert.equal(result.headers.get("Referrer-Policy"),"same-origin");
  assert.match(await result.text(),/meta name="referrer" content="same-origin"/);
+});
+
+test("PBKDF2 cost respects Cloudflare production limit and low-CPU Worker budget",()=>{
+ // Production workerd rejects >100k even where Node/wrangler dev accepts it.
+ // The runtime limit is not exercised by normal Node.js integration tests.
+ assert.ok(OWNER_CODE_ITERATIONS>0);
+ assert.ok(OWNER_CODE_ITERATIONS<=100000);
+ assert.ok(OWNER_CODE_ITERATIONS<=30000,"keep headroom for Free Worker CPU cap");
+});
+test("KV read failure returns explicit safe stage without emitting a bypass cookie",async()=>{
+ const e=env({CONSENT_KV:{
+  async get(){throw Error("simulated-quota-or-network-error")},
+  async put(){throw Error("unexpected-write")},
+  async delete(){}
+ }});
+ const result=await login(e);
+ assert.equal(result.status,503);
+ assert.equal(result.headers.get("X-Vynalth-Owner-Error"),"kv-read");
+ assert.equal(result.headers.getSetCookie().some(x=>x.startsWith("__Host-vynalth-owner-pass=")),false);
+});
+test("KV session write failure gives a distinct failure stage and cannot issue owner access",async()=>{
+ const store=kv();
+ const e=env({CONSENT_KV:{
+  ...store,
+  async put(key,value,options){
+   if(key.startsWith("temp-owner-pass:"))throw Error("simulated-kv-write-error");
+   await store.put(key,value,options);
+  }
+ }});
+ const result=await login(e);
+ assert.equal(result.status,503);
+ assert.equal(result.headers.get("X-Vynalth-Owner-Error"),"kv-session-write");
+ assert.equal(result.headers.getSetCookie().some(x=>x.startsWith("__Host-vynalth-owner-pass=")),false);
+});
+test("KV failed-attempt cleanup failure does not cancel a successfully persisted session",async()=>{
+ const store=kv();
+ const e=env({CONSENT_KV:{
+  ...store,
+  async delete(){throw Error("simulated-cleanup-error")}
+ }});
+ const result=await login(e);
+ assert.equal(result.status,303);
+ const pass=result.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-owner-pass="));
+ assert.ok(pass);
+ const r=req("https://vynalthai.com/","GET",{Cookie:pass.split(";")[0]});
+ assert.equal(await hasTemporaryOwnerPass(r,e,new URL(r.url)),true);
+});
+test("wrong access code produces normal 403, not the PBKDF2 503 error",async()=>{
+ const e=env();
+ const result=await login(e,"a-normal-invalid-code");
+ assert.equal(result.status,403);
+ assert.equal(result.headers.get("X-Vynalth-Owner-Error"),null);
 });
