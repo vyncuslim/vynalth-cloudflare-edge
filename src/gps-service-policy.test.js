@@ -25,15 +25,15 @@ async function sign(request,ip="203.0.113.72",country="MY",secret=AUTH){
  headers.set("x-vynalth-gps-service-sig",Buffer.from(output).toString("hex"));
  return new Request(request,{headers});
 }
-test("signed Service Binding call shows GPS page and never calls origin",async()=>{
+test("signed Service Binding call redirects to GPS hub and never calls origin",async()=>{
  const base=new Request("https://vyncuslim.com/",{headers:{Accept:"text/html"}});
  const req=await sign(base);
  const originalFetch=globalThis.fetch;let origins=0;
  globalThis.fetch=async()=>{origins++;throw Error("must not proxy an internal policy request")};
  try{
   const response=await edge.fetch(req,ENV,{});
-  assert.equal(response.status,403);
-  assert.match(await response.text(),/Precise location required/);
+  assert.equal(response.status,302);
+  assert.match(response.headers.get("location"),/^https:\/\/vynalthai\.com\/__shield\/gps\/bridge/);
   assert.equal(origins,0);
   assert.equal(response.headers.get("x-vynalth-edge"),"cloudflare-worker");
  }finally{globalThis.fetch=originalFetch;}
@@ -74,8 +74,8 @@ test("a signed MY source always enters GPS even if the internal edge sees a fore
  const env={...ENV,GPS_REGION_TIMEZONE_ENABLED:"true"};
  const request=new Request("https://vyncuslim.com/",{headers:{Accept:"text/html"}});
  const r=await edge.fetch(await sign(request,"203.0.113.72","MY"),env,{});
- assert.equal(r.status,403);
- assert.match(await r.text(),/Precise location required/);
+ assert.equal(r.status,302);
+ assert.match(r.headers.get("location"),/^https:\/\/vynalthai\.com\/__shield\/gps\/bridge/);
 });
 test("trusted public GPS status is handled by policy-only service without origin access",async()=>{
  const base=new Request("https://vyncuslim.com/__shield/gps/status");
