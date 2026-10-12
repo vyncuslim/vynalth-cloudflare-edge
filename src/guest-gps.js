@@ -443,7 +443,7 @@ function jingxinPublicPage(path){
 // Protect all documents, APIs and media even if names look like hashes.
 function publicBuildAsset(request,path){
  return (request.method==="GET"||request.method==="HEAD")&&
-  /^\\/assets\\/[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9_-]{8,}\\.(?:css|js|mjs|woff|woff2|ttf|otf)$/.test(path);
+  /^\/assets\/[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9_-]{8,}\.(?:css|js|mjs|woff|woff2|ttf|otf)$/.test(path);
 }
 function skip(path,request){return publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
