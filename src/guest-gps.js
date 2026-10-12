@@ -492,6 +492,8 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
   return reply(200,{enabled:true,configurationAvailable:true,enforcing:true,
    telegramAlerts:telegramGpsStatus(env),
+   gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
+    env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:{enabled:env?.GPS_REGION_TIMEZONE_ENABLED==="true",
     malaysiaIpOrTimezone:true,vpnDetection:"not-guaranteed"},
    policyRevision:GPS_POLICY_REVISION,
