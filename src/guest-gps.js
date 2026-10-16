@@ -519,10 +519,15 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  const region=await gpsRegionalDecision(request,env,url,verifiedCountry);
  if(region.response)return region.response;
  if(region.skipGPS)return null;
- // Any full HTML navigation (including F5/Ctrl+R) requires a fresh browser
- // GPS read even when the previous 15-minute outside cookie is still valid.
- // The redirect following verification is granted exactly one signed visit;
- // a refresh of that same URL will return the GPS challenge again.
+ // A genuinely OUTSIDE verdict is backed by a host-bound HMAC cookie that
+ // expires within 15 minutes. Reuse it for HTML documents only when the site
+ // operator explicitly enables fast-pass. IP city/country alone never grants
+ // this exemption; near-boundary, inside, expired and forged cookies do not.
+ // The independent school-IP policy and WAF still run in src/index.js.
+ if(env?.GPS_OUTSIDE_SESSION_FASTPASS==="true"&&
+    await sessionVerdict(request,cfg,url.hostname)==="outside")return null;
+ // Without a verified outside session, full document navigation requires
+ // a fresh browser GPS read. One-visit navigation proofs remain enforced.
  if(env?.GPS_RECHECK_EVERY_DOCUMENT==="true"&&isBrowserDocument(request)){
   if(await consumeVisitProof(request,env,cfg,url))return null;
   if(url.hostname!==GPS_BRIDGE_HUB&&allowedTarget(url.hostname))
