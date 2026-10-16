@@ -1,4 +1,4 @@
-import { parseCampusPolygons, decideCampusPolygons } from "./gps-polygons.js";
+import { parseCampusPolygons, decideCampusPolygons, MAX_GPS_ACCURACY_METERS } from "./gps-polygons.js";
 import { GPS_HTML,GPS_CLIENT } from "./gps-verification-ui.js";
 import { scheduleGpsDenialAlert,telegramGpsStatus } from "./gps-telegram-alert.js";
 import { gpsRegionalDecision } from "./gps-regional-trigger.js";
@@ -30,7 +30,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-inner-boundary-403-v2";
+const GPS_POLICY_REVISION="gps-outside-coarse-accuracy-v3";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -340,7 +340,7 @@ async function verify(req,url,cfg,env,ctx,requestId){
     return cleanVisitPath(new URL(url.origin+requestedPath));
    }catch{return null}})();
  if(recheckDocument&&!targetPath)return reply(400,{error:"INVALID_RETURN_PATH"});
- if([lat,lon,accuracy].some(x=>typeof x!=="number"||!Number.isFinite(x))||Math.abs(lat)>90||Math.abs(lon)>180||accuracy<=0||accuracy>100)return reply(422,{error:"PRECISE_LOCATION_UNAVAILABLE"});
+ if([lat,lon,accuracy].some(x=>typeof x!=="number"||!Number.isFinite(x))||Math.abs(lat)>90||Math.abs(lon)>180||accuracy<=0||accuracy>MAX_GPS_ACCURACY_METERS)return reply(422,{error:"PRECISE_LOCATION_UNAVAILABLE"});
  // Polygon assessment is intentionally side-effect free: no persistence,
  // response field or analytics carries exact GPS coordinates or shadow verdict.
  let verdict;
@@ -373,7 +373,11 @@ async function verify(req,url,cfg,env,ctx,requestId){
  if(verdict==="UNCERTAIN"){
   // A GPS location OUTSIDE the approximate campus border may receive a
   // short 5-minute access token; a point reported INSIDE never may.
-  if(cfg.polygonMode!=="enforce")return reply(403,{error:"LOCATION_UNCERTAIN"});
+  // Coarse fixes (over 100m) may allow access only when the full reported
+  // uncertainty area is outside every campus buffer. The existing 5-minute
+  // near-boundary concession remains limited to genuinely precise readings.
+  if(cfg.polygonMode!=="enforce"||accuracy>100)
+   return reply(403,{error:"LOCATION_UNCERTAIN",blocked:true,retryable:true});
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
   headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,await verdictToken(cfg,url.hostname,"nearby"),300));
