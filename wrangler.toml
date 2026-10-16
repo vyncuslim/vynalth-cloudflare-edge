@@ -37,9 +37,13 @@ GPS_REGION_TIMEZONE_ENABLED = "true"
 # Requires Telegram Bot and Chat ID configured as Worker secrets.
 # Reuses existing TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID if bound.
 GPS_TELEGRAM_ALERTS_ENABLED = "true"
-# Re-evaluate GPS on each protected HTML document reload/navigation. Previous
-# 15-minute cookies can serve assets/APIs but cannot bypass document checks.
+# Fresh GPS is required on first access, after the signed outside cookie
+# expires, and whenever the location is inside or near a campus boundary.
 GPS_RECHECK_EVERY_DOCUMENT = "true"
+# Once an OUTSIDE fix is confirmed, let the visitor navigate and refresh
+# directly for the remaining signed 15-minute cookie lifetime. Do not use
+# IP city/country as evidence of being outside the school.
+GPS_OUTSIDE_SESSION_FASTPASS = "true"
 # 10-minute owner GPS access portal enabled by the site operator.
 # No reusable owner code or Cookie-signing secret is committed to GitHub.
 # The source contains only a salted PBKDF2 code verifier; random login tokens
