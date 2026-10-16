@@ -8,6 +8,9 @@ const RAD=Math.PI/180;
 const MAX_BYTES=65536;
 const MAX_POINTS=4096;
 const EPS=1e-7;
+// Maximum uncertainty accepted for a conservative outside-of-campus decision.
+// Large uncertainties near a campus must be rejected at the HTTP policy layer.
+export const MAX_GPS_ACCURACY_METERS=10000;
 const validId=s=>typeof s==="string"&&/^[a-z0-9-]{2,48}$/.test(s);
 const validPoint=p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite)&&
  Math.abs(p[0])<=180&&Math.abs(p[1])<=90;
@@ -127,7 +130,7 @@ function distanceToSegment(p,a,b){
 export function decideCampusPolygons(campuses,lat,lon,accuracy,bufferMeters=0){
  if(!Array.isArray(campuses)||campuses.length<1||
     ![lat,lon,accuracy].every(Number.isFinite)||Math.abs(lat)>90||
-    Math.abs(lon)>180||accuracy<=0||accuracy>100||
+    Math.abs(lon)>180||accuracy<=0||accuracy>MAX_GPS_ACCURACY_METERS||
     !Number.isFinite(bufferMeters)||bufferMeters<0||bufferMeters>100)return "INVALID";
  let confidentInside=false,nearInside=false,nearOutside=false;
  for(const campus of campuses){
