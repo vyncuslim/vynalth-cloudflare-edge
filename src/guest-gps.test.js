@@ -765,3 +765,67 @@ test("GPS asset bypass never applies to private photos, APIs, unhashed assets or
   assert.equal(response.status,403,method);
  }
 });
+
+test("confirmed outside campus fast-pass skips repeated HTML GPS prompts for 15 minutes",async()=>{
+ const seen=new Map();
+ const kv={get:async key=>seen.get(key)||null,put:async(key,value)=>{seen.set(key,value);}};
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",
+  GPS_OUTSIDE_SESSION_FASTPASS:"true",CONSENT_KV:kv};
+ const hub="https://vynalthai.com";
+ const first=await invoke(new Request(hub+"/dashboard",{
+  headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}
+ }),env);
+ assert.equal(first.status,403,"first document requires browser location");
+ const verified=await invoke(new Request(hub+"/__shield/gps/verify",{
+  method:"POST",headers:{Origin:hub,"Content-Type":"application/json",
+    "Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:25,returnPath:"/dashboard"})
+ }),env);
+ assert.equal(verified.status,200);
+ const signed=verified.headers.getSetCookie()
+  .find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const html=path=>new Request(hub+path,{
+  headers:{Accept:"text/html","Sec-Fetch-Dest":"document",Cookie:signed}});
+ assert.equal(await invoke(html("/dashboard"),env),null,
+  "outside verdict must directly allow first document");
+ assert.equal(await invoke(html("/another-page"),env),null,
+  "outside verdict must allow navigation without fresh location prompts");
+ assert.equal(await invoke(html("/dashboard?refresh=1"),env),null,
+  "outside verdict must allow F5 refresh");
+ assert.equal((await invoke(new Request("https://vyncuslim.com/dashboard",{
+  headers:{Cookie:signed,Accept:"text/html","Sec-Fetch-Dest":"document"}
+ }),env)).status,302,"outside signature remains host-bound");
+ const old=await invoke(html("/dashboard"),{...env,GPS_OUTSIDE_SESSION_FASTPASS:"false"});
+ assert.equal(old.status,403,"disabling fast-pass restores strict per-page GPS");
+});
+
+test("outside fast-pass rejects forged, expired, near-boundary and blocked cookies",async()=>{
+ const env={...cfg,GPS_RECHECK_EVERY_DOCUMENT:"true",
+  GPS_OUTSIDE_SESSION_FASTPASS:"true"};
+ const hub="https://vynalthai.com";
+ const request=cookie=>new Request(hub+"/dashboard",{
+  headers:{Accept:"text/html","Sec-Fetch-Dest":"document",Cookie:cookie}});
+ for(const cookie of [
+  "",
+  "__Host-vynalth-geo=123.fake.signature",
+  "__Host-vynalth-geo=invalid"
+ ]){
+  assert.equal((await invoke(request(cookie),env)).status,403);
+ }
+ const expiry=Math.floor(Date.now()/1000)-5;
+ const nonce=b64(new Uint8Array(16).fill(7));
+ const expired=expiry+"."+nonce+"."+
+  await mac(SESSION_SECRET,[expiry,nonce,"vynalthai.com","outside"].join("|"));
+ assert.equal((await invoke(request("__Host-vynalth-geo="+expired),env)).status,403,
+  "expired outside verdict must be challenged");
+ const nearExpiry=Math.floor(Date.now()/1000)+180;
+ const near=nearExpiry+"."+nonce+"."+
+  await mac(SESSION_SECRET,[nearExpiry,nonce,"vynalthai.com","nearby"].join("|"));
+ assert.equal((await invoke(request("__Host-vynalth-geo="+near),env)).status,403,
+  "nearby verdict must still recheck on every document");
+ const blocked=expiry+450+"."+nonce+"."+
+  await mac(SESSION_SECRET,[String(expiry+450),nonce,"vynalthai.com","inside"].join("|"));
+ const response=await invoke(request("__Host-vynalth-geo="+near+
+  "; __Host-vynalth-geo-block="+blocked),env);
+ assert.equal(response.status,403,"a signed campus block takes priority");
+});
