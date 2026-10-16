@@ -128,7 +128,7 @@ test("boundary uncertainty and insufficient precision are rejected",async()=>{
  const ambiguous=await verifyCoords(5.3688,100.21995,100);
  assert.equal(ambiguous.status,403);
  assert.equal((await ambiguous.json()).error,"LOCATION_UNCERTAIN");
- const poor=await verifyCoords(5.3677,100.21995,600);
+ const poor=await verifyCoords(5.3677,100.21995,10001);
  assert.equal(poor.status,422);
 });
 test("both POWIIS campuses are separate provisional GPS test circles",async()=>{
@@ -348,7 +348,7 @@ test("guest without GPS grant and with inadequate accuracy cannot obtain signed 
  const inaccurate=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
   method:"POST",headers:{"Origin":"https://vynalthai.com",
     "Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
-  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:400})
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:10001})
  }));
  assert.equal(inaccurate.status,422);
  assert.equal(inaccurate.headers.get("Set-Cookie"),null);
@@ -683,12 +683,12 @@ test("GPS status advertises active boundary-side policy revision without coordin
  assert.equal(data.enabled,true);
  assert.equal(data.configurationAvailable,true);
  assert.equal(data.enforcing,true);
- assert.equal(data.policyRevision,"gps-inner-boundary-403-v2");
+ assert.equal(data.policyRevision,"gps-outside-coarse-accuracy-v3");
  assert.equal(JSON.stringify(data).includes("latitude"),false);
  const invalid=await invoke(req("/__shield/gps/status"),{...cfg,GPS_GATE_SESSION_SECRET:undefined});
  assert.equal(invalid.status,503);
  const bad=await invalid.json();
- assert.equal(bad.policyRevision,"gps-inner-boundary-403-v2");
+ assert.equal(bad.policyRevision,"gps-outside-coarse-accuracy-v3");
  assert.equal(bad.configurationAvailable,false);
 });
 
