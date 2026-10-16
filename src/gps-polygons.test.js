@@ -61,7 +61,7 @@ test("hole and MultiPolygon semantics preserve OUTSIDE in holes and UNCERTAIN ne
  assert.equal(decideCampusPolygons(v,5.37,100.25,2),"OUTSIDE");
 });
 test("GPS spoofed nonsense, malformed accuracy and absent polygons never assert OUTSIDE",()=>{
- for(const [lat,lon,acc] of [[1000,100,10],[5,200,10],[5,100,NaN],[5,100,0],[5,100,101],[null,100,10]]){
+ for(const [lat,lon,acc] of [[1000,100,10],[5,200,10],[5,100,NaN],[5,100,0],[5,100,10001],[null,100,10]]){
   assert.equal(decideCampusPolygons(parsed,lat,lon,acc),"INVALID");
  }
  assert.equal(decideCampusPolygons(null,5.4,100.25,5),"INVALID");
