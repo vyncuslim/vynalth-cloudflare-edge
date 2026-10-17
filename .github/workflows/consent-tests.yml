@@ -22,6 +22,8 @@ on:
       - "test/edge.test.js"
       - "src/universal-consent.test.js"
       - "src/index.js"
+      - "src/public-crawler-access.js"
+      - "src/public-crawler-access.test.js"
       - "src/temporary-ip-block.js"
       - ".github/workflows/consent-tests.yml"
   pull_request:
@@ -45,6 +47,8 @@ on:
       - "src/gps-telegram-alert.test.js"
       - "src/gps-verification-ui.js"
       - "src/index.js"
+      - "src/public-crawler-access.js"
+      - "src/public-crawler-access.test.js"
       - "src/temporary-ip-block.js"
       - ".github/workflows/consent-tests.yml"
   workflow_dispatch:
@@ -77,6 +81,8 @@ jobs:
           node --check src/universal-consent.test.js
           node --check src/temporary-ip-block.js
           node --check src/index.js
+          node --check src/public-crawler-access.js
+          node --check src/public-crawler-access.test.js
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

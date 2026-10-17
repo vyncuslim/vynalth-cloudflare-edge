@@ -29,7 +29,9 @@ test("CIDR validation verifies both IPv4 and IPv6 without network trust shortcut
 });
 
 test("only Google source-IP-verified search GET pages are exempt", async () => {
-  for (const path of ["/", "/robots.txt", "/sitemap.xml", "/_next/static/chunk.js"]) {
+  for (const path of ["/", "/robots.txt", "/sitemap.xml", "/games", "/how-it-works", "/try",
+    "/paper", "/paper/cards", "/library", "/study", "/icon.svg", "/zokivo-mark.svg",
+    "/_next/static/chunk.js"]) {
     assert.equal(await isVerifiedGooglePublicCrawler(request(path), ranges), true, path);
   }
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {ua:"Googlebot/2.1"}), ranges), true);

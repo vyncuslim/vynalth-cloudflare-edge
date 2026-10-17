@@ -8,7 +8,9 @@
  * https://developers.google.com/crawling/docs/crawlers-fetchers/verify-google-requests
  */
 const HOST = "zokivo.vynalthai.com";
-const PUBLIC_FILES = new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest"]);
+const PUBLIC_FILES = new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
+  "/icon.svg", "/zokivo-mark.svg", "/games", "/how-it-works", "/try",
+  "/paper", "/paper/cards", "/library", "/study"]);
 const GOOGLE_FEEDS = Object.freeze([
   "https://developers.google.com/static/crawling/ipranges/common-crawlers.json",
   "https://developers.google.com/static/crawling/ipranges/special-crawlers.json",
@@ -80,7 +82,8 @@ async function refreshGooglePrefixes() {
         cachedPrefixes = collections.flat().filter(x => matchesCidr(x.split("/")[0], x));
         refreshAfter = Date.now() + REFRESH_MS;
       } catch {
-        // Never allow unverified traffic on upstream verification failure.
+        // Never reuse stale source-IP evidence if the Google IP feed refresh fails.
+        cachedPrefixes = [];
         refreshAfter = Date.now() + RETRY_MS;
       }
       return cachedPrefixes;
