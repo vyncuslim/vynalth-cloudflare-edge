@@ -1,5 +1,6 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
+import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
@@ -209,7 +210,12 @@ export default {
       !gpsEndpoint && await shieldAccountExempt(request,env,rootDomain);
     const temporaryOwnerExempt = !gpsEndpoint && hostname==="vynalthai.com" &&
       await hasTemporaryOwnerPass(request,env,incomingUrl);
-    if (!canonicallyExempt && !temporaryOwnerExempt) {
+    // Search crawlers cannot grant browser geolocation permission. Let only
+    // source-IP-verified Google crawlers reach ZoKivo public search resources;
+    // private APIs, human GPS checks, and School IP Policy still apply.
+    const verifiedPublicCrawler = !gpsEndpoint &&
+      await isVerifiedGooglePublicCrawler(request);
+    if (!canonicallyExempt && !temporaryOwnerExempt && !verifiedPublicCrawler) {
       const gpsDecision = await guestGpsGate(request,env,incomingUrl,ctx,requestId);
       if (gpsDecision) {
         return edgeResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
