@@ -1,3 +1,31 @@
+## 2026-10-17 CONFIRMED live rule configuration (owner's Cloudflare Edit Rate Limiting Rule view)
+
+The **exact** enforcing rule `5704ae8e4b2a4460b4ad8d31a7353d4b` ("Vynova API edge rate limit") presently has:
+
+- Match expression: `starts_with(http.request.uri.path, "/api/") and not cf.client.bot`
+- Matching host restriction: **NONE** (this is the root cause; every `/api/` under the zone is counted)
+- Counting characteristic: `ip.src` (IP); threshold: **20 requests per 10 seconds**
+- Mitigation: **Block, HTTP 429, for 10 seconds**; enabled and first in order.
+- A shared-IP 100-player room generates more than 20 requests in 10 seconds, so this rule blocks joins, answers and some room reads, regardless of application authorization.
+
+### Lowest-risk manual correction for existing shared rule
+
+**Change only the existing expression** to:
+
+```text
+starts_with(http.request.uri.path, "/api/") and not cf.client.bot and http.host ne "zokivo.vynalthai.com"
+```
+
+This preserves the rule's existing 20/10s IP rate limiting on all OTHER zone hostnames, including `vynova.vynalthai.com`; it removes just the mistaken match for ZoKivo. Do **not** change the shared rule's rate threshold, action, cooldown, or enabled state. The original protection of unrelated sites remains in force. Verify this is the exact rule with the ID above before saving.
+
+**In the same change window**, create a SEPARATE rate-limiting rule targeting `http.host eq "zokivo.vynalthai.com" and starts_with(http.request.uri.path, "/api/rooms/") and not cf.client.bot`. Prefer Cloudflare's `IP with NAT support` counting characteristic (not `ip.src` in the same rule). Choose traffic limits from the measured legitimate request rate, with sufficient shared-IP / cookie-less fallback capacity for 100 devices; a single specific limit cannot be guaranteed without measuring polling frequency. Retain separate, tighter protections on login/session/API endpoints and all Cloudflare WAF + GPS policies. Visitors not accepting `_cfuvid` may share a counter. Cloudflare doc: https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/
+
+**CRITICAL:** The existing `scripts/remediate-zokivo-rate-limit.mjs` automated tool is intentionally **incompatible** with the live shared rule above: its guard only accepts a precisely ZoKivo-scoped match expression. Do not try to force it by bypassing its expression guard. Use the dashboard to split rules safely or develop a separately audited shared-rule migration.
+
+**Status:** These are **instructions/documentation only**, not a deployed production configuration. Verify the actual saved expression and retest official-domain 100-player end-to-end before calling the issue resolved.
+
+---
+
 ## 2026-10-17 CONFIRMED Cloudflare blocking rule
 
 Cloudflare **Security Analytics → Events** export (500 sampled records, 182 matches) directly identifies the policy that blocked the 100-player ZoKivo answer waves:
