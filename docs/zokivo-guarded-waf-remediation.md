@@ -1,3 +1,28 @@
+## 2026-10-17 CONFIRMED Cloudflare blocking rule
+
+Cloudflare **Security Analytics → Events** export (500 sampled records, 182 matches) directly identifies the policy that blocked the 100-player ZoKivo answer waves:
+
+- Rule display name: **Vynova API edge rate limit**
+- Exact `ruleId`: `5704ae8e4b2a4460b4ad8d31a7353d4b`
+- Event `rulesetId`: `56779882b35e4a3eb23af48fd9c38463`
+- Enforcement: `source=ratelimit`, `action=block`
+- Proven 2026-10-17 21:22:13 MYT, `20.171.3.39`, `POST /api/rooms/976802/answer`, Ray `a4bf9c5f9faa4896`.
+- Matches in this partial export: 96 latest QA answers, 60 earlier QA answers, 25 earlier room reads, 1 latest QA join. **These are sampled records, not all requests.**
+
+**CRITICAL:** The event export does **not** contain the rule expression, counting characteristics, period, threshold, or mitigation timeout. The name “Vynova API edge rate limit” does **not** establish that the rule is actually scoped to Vynova, and this export cannot establish which other hosts it could match. Do not run the guarded APPLY action until the exact rule configuration is read.
+
+### Production administrator decision tree
+
+1. Open Cloudflare `vynalthai.com → Security → Security Rules → Rate Limiting rules`; locate the exact Rule ID above. Inspect `expression`, `counting_expression`, `characteristics`, `requests_per_period`, `period`, `mitigation_timeout`, action, rule precedence and whether it is a zone or account-level ruleset.
+2. **If shared or Vynova-intended:** preserve its original intent, narrow its scope with a reviewed hostname constraint so it no longer counts ZoKivo gameplay requests. In the *same maintenance change*, introduce a separately scoped ZoKivo gameplay limit (matching only `http.host eq "zokivo.vynalthai.com"` and `/api/rooms/` endpoints) with NAT-aware visitor characteristics where supported, and apply separate protections for login/host controls. Confirm the final rule order and no gap in protections; this cannot be achieved with the single-rule guard script.
+3. **If the existing rule already matches only ZoKivo gameplay:** use `PREVIEW_ONLY` with its verified rule ID and approved read-only fingerprint. The guard is fail-closed if the expression is broader or more complex than its allowlist, and keeps thresholds unchanged when it changes `ip.src` to `cf.unique_visitor_id`.
+4. Preserve school-location access decisions, original WAF, origin authentication, unauthorized-token rejection, 101st-player application 409 and duplicate-answer application 409.
+5. After **confirmed deployed policy change**, test a fresh disposable room with 100 independent cookies and player tokens (including Cloudflare `_cfuvid`), joining and answering through the **official hostname**. Require 100/100 accepted answers and 100/100 validated settled scoreboards, and independently check negative security cases. **No current production acceptance PASS has been observed.**
+
+Cloudflare reference: https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/
+
+---
+
 # ZoKivo 100-player Cloudflare rate limit — guarded rule-specific remediation
 
 This PR **does not change live Cloudflare settings by itself**. A matched WAF Rate Limiting rule must be located in **Security Events** (not general Traffic Analytics). The tested official-domain error was HTTP 429 prior to the Worker.
