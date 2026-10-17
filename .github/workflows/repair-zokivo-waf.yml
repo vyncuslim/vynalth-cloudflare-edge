@@ -1,0 +1,74 @@
+name: Guarded ZoKivo NAT-aware WAF remediation
+
+on:
+  push:
+    paths:
+      - "scripts/zokivo-waf-guard.mjs"
+      - "scripts/zokivo-waf-guard.test.mjs"
+      - "scripts/remediate-zokivo-rate-limit.mjs"
+      - ".github/workflows/repair-zokivo-waf.yml"
+  pull_request:
+    paths:
+      - "scripts/zokivo-waf-guard.mjs"
+      - "scripts/zokivo-waf-guard.test.mjs"
+      - "scripts/remediate-zokivo-rate-limit.mjs"
+      - ".github/workflows/repair-zokivo-waf.yml"
+  workflow_dispatch:
+    inputs:
+      rate_rule_id:
+        description: "Exact affected zone WAF rate rule ID (32 hex chars)"
+        required: true
+        type: string
+      expected_sha256:
+        description: "Exact full rule fingerprint from earlier read-only review (required for APPLY)"
+        required: false
+        type: string
+      change_mode:
+        description: "Preview is always read-only; Apply requires valid fingerprint + scoped rule"
+        required: true
+        default: PREVIEW_ONLY
+        type: choice
+        options:
+          - PREVIEW_ONLY
+          - APPLY_REVIEWED_ZOKIVO_RULE
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zop-waf-single-rule-remediation
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check script syntax and fail-closed rules
+        run: |
+          node --check scripts/remediate-zokivo-rate-limit.mjs
+          node --test scripts/zokivo-waf-guard.test.mjs
+
+  guarded-edit:
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment: zokivo-waf-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Preview or update exactly one reviewed ZoKivo rule
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_WAF_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_WAF_WRITE_TOKEN }}
+          ZOKIVO_WAF_RULE_ID: ${{ inputs.rate_rule_id }}
+          ZOKIVO_WAF_EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          APPLY_ZOKIVO_WAF_CHANGE: ${{ inputs.change_mode == 'APPLY_REVIEWED_ZOKIVO_RULE' && 'I_APPROVE_ZONE_RATE_RULE_CHANGE' || 'PREVIEW_ONLY' }}
+        run: node scripts/remediate-zokivo-rate-limit.mjs
