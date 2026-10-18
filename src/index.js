@@ -1,6 +1,7 @@
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
 import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
+import { hasPermanentOwnerAccess } from "./permanent-owner-access.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
@@ -89,7 +90,8 @@ async function checkSchoolPolicy(request, env, rootDomain) {
   // the School IP restriction, and only with explicit production opt-in.
   // Do not extend this to other users, hosts, WAF, or application authorization.
   if (rootDomain === "vynalthai.com" &&
-      await hasSchoolPolicyOwnerPass(request,env,new URL(request.url))) return null;
+      (await hasPermanentOwnerAccess(request,env,new URL(request.url)) ||
+       await hasSchoolPolicyOwnerPass(request,env,new URL(request.url)))) return null;
   if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
 
   // The upstream CF-Connecting-IP is authoritative for this edge request.
@@ -151,7 +153,9 @@ export default {
           headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"not-ready"}}),
           forwarded,incomingUrl,requestId,rootDomain);
       const protectedEndpoint=incomingUrl.pathname.startsWith("/__shield/gps/");
-      const trusted=!protectedEndpoint&&await shieldAccountExempt(forwarded,env,rootDomain);
+      const trusted=!protectedEndpoint&&(
+        await shieldAccountExempt(forwarded,env,rootDomain) ||
+        await hasPermanentOwnerAccess(forwarded,env,incomingUrl));
       if (!trusted) {
         const decision=await guestGpsGate(forwarded,env,incomingUrl,ctx,requestId,
           internalGps.country);
@@ -215,12 +219,14 @@ export default {
       !gpsEndpoint && await shieldAccountExempt(request,env,rootDomain);
     const temporaryOwnerExempt = !gpsEndpoint && hostname==="vynalthai.com" &&
       await hasTemporaryOwnerPass(request,env,incomingUrl);
+    const permanentOwnerExempt = !gpsEndpoint &&
+      await hasPermanentOwnerAccess(request,env,incomingUrl);
     // Search crawlers cannot grant browser geolocation permission. Let only
     // source-IP-verified Google crawlers reach ZoKivo public search resources;
     // private APIs, human GPS checks, and School IP Policy still apply.
     const verifiedPublicCrawler = !gpsEndpoint &&
       await isVerifiedGooglePublicCrawler(request);
-    if (!canonicallyExempt && !temporaryOwnerExempt && !verifiedPublicCrawler) {
+    if (!canonicallyExempt && !temporaryOwnerExempt && !permanentOwnerExempt && !verifiedPublicCrawler) {
       const gpsDecision = await guestGpsGate(request,env,incomingUrl,ctx,requestId);
       if (gpsDecision) {
         return edgeResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
