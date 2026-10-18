@@ -1,16 +1,27 @@
 /**
- * Permit ONLY authentic Google crawlers to read ZoKivo public search resources
- * without an interactive GPS challenge. Human/anonymous access rules, school
- * policy, other hosts, and all private/game APIs are unchanged.
+ * Permit ONLY source-IP-verified Google crawlers to fetch public SEO resources
+ * on explicitly listed hosts without an interactive GPS challenge. Ordinary
+ * visitors still face the existing GPS gate; School IP policy, WAF and private
+ * APIs continue to enforce their own independent access restrictions.
  *
  * Google explicitly recommends matching a crawler's source IP to its
  * published IP ranges; a claimed User-Agent or Google ASN alone is NOT proof.
  * https://developers.google.com/crawling/docs/crawlers-fetchers/verify-google-requests
  */
-const HOST = "zokivo.vynalthai.com";
-const PUBLIC_FILES = new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
-  "/icon.svg", "/zokivo-mark.svg", "/games", "/how-it-works", "/try",
-  "/paper", "/paper/cards", "/library", "/study"]);
+// Exact host allowlist. Vyncuslim Global is a separate, public-only static
+// website on the si-domain Vercel project; no internal or API paths are open.
+const PUBLIC_RESOURCES = new Map([
+  ["zokivo.vynalthai.com", {
+    files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
+      "/icon.svg", "/zokivo-mark.svg", "/games", "/how-it-works", "/try",
+      "/paper", "/paper/cards", "/library", "/study"]),
+    prefixes: ["/_next/static/"],
+  }],
+  ["gobal.vyncuslim.si", {
+    files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/vynalth-logo.svg"]),
+    prefixes: ["/assets/"],
+  }],
+]);
 const GOOGLE_FEEDS = Object.freeze([
   "https://developers.google.com/static/crawling/ipranges/common-crawlers.json",
   "https://developers.google.com/static/crawling/ipranges/special-crawlers.json",
@@ -94,9 +105,11 @@ async function refreshGooglePrefixes() {
 
 export async function isVerifiedGooglePublicCrawler(request, prefixLoader = refreshGooglePrefixes) {
   const url = new URL(request.url);
-  if (url.hostname.toLowerCase() !== HOST) return false;
+  const publicResources = PUBLIC_RESOURCES.get(url.hostname.toLowerCase());
+  if (!publicResources) return false;
   if (request.method !== "GET" && request.method !== "HEAD") return false;
-  if (!PUBLIC_FILES.has(url.pathname) && !url.pathname.startsWith("/_next/static/")) return false;
+  if (!publicResources.files.has(url.pathname) &&
+      !publicResources.prefixes.some(prefix => url.pathname.startsWith(prefix))) return false;
 
   // UA check is only a cheap prefilter: real authentication is Google's IP range.
   if (!/\b(?:Googlebot(?:-[A-Za-z]+)?|Google-InspectionTool)\b/i.test(
