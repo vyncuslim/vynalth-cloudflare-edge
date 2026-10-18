@@ -15,10 +15,14 @@ const PUBLIC_RESOURCES = new Map([
   ["vynalthai.com", {
     files: new Set([
       "/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/icon.svg",
-      "/manifest.webmanifest", "/about", "/founder", "/en", "/en/",
+      "/manifest.json", "/about", "/founder", "/product", "/features",
+      "/how-it-works", "/research", "/science", "/docs", "/security",
+      "/developers", "/contact", "/faq", "/status", "/en", "/en/",
       "/en/about", "/en/legal/privacy", "/en/legal/terms",
     ]),
-    prefixes: ["/_next/static/"],
+    // This homepage is a Vite SPA. Crawlers need its production JS/CSS
+    // bundles to render public content (not Next.js /_next/static/).
+    prefixes: ["/assets/"],
   }],
   ["zokivo.vynalthai.com", {
     files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
