@@ -11,6 +11,15 @@
 // Exact host allowlist. Vyncuslim Global is a separate, public-only static
 // website on the si-domain Vercel project; no internal or API paths are open.
 const PUBLIC_RESOURCES = new Map([
+  // Public marketing, documentation and SEO discovery only. No app/API routes.
+  ["vynalthai.com", {
+    files: new Set([
+      "/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/icon.svg",
+      "/manifest.webmanifest", "/about", "/founder", "/en", "/en/",
+      "/en/about", "/en/legal/privacy", "/en/legal/terms",
+    ]),
+    prefixes: ["/_next/static/"],
+  }],
   ["zokivo.vynalthai.com", {
     files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
       "/icon.svg", "/zokivo-mark.svg", "/games", "/how-it-works", "/try",
