@@ -177,6 +177,68 @@ test("an owner GPS pass does not bypass independent School IP policy",async()=>{
  assert.equal(after.headers.get("X-School-Policy"),"blocked");
 });
 
+test("opt-in school bypass grants only freshly authenticated apex owner sessions",async()=>{
+ const school={async fetch(){
+  return new Response("school restriction",{status:403,headers:{"X-School-Policy":"blocked"}});
+ }};
+ const e=env({VYNALTH_OWNER_SCHOOL_EXEMPT_ENABLED:"true",SCHOOL_POLICY:school});
+ // Signing in at the owner's private portal returns a 10-minute pass.
+ const success=await login(e,code,{returnPath:"/c"});
+ assert.equal(success.status,303);
+ assert.equal(success.headers.get("Location"),"https://vynalthai.com/c");
+ const pass=success.headers.getSetCookie()
+  .find(x=>x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
+ // Ordinary campus visitors must remain blocked, including on the public homepage.
+ const guest=await edge.fetch(req("https://vynalthai.com/"),e,{});
+ assert.equal(guest.status,403);
+ assert.equal(guest.headers.get("X-School-Policy"),"blocked");
+ // Even with the owner pass, a different IP must be denied.
+ const wrongIp=await edge.fetch(req("https://vynalthai.com/","GET",{
+  Cookie:pass,"CF-Connecting-IP":"198.51.100.54"
+ }),e,{});
+ assert.equal(wrongIp.status,403);
+ assert.equal(wrongIp.headers.get("X-School-Policy"),"blocked");
+ // Other hosts are not eligible even if their browser sends an owner cookie.
+ const wrongHost=await edge.fetch(req("https://www.vynalthai.com/","GET",{Cookie:pass}),e,{});
+ assert.equal(wrongHost.status,403);
+ // The verified owner can reach the protected Chat UI, not bypass application auth.
+ const originalFetch=globalThis.fetch;
+ let originCalls=0;
+ globalThis.fetch=async()=>{originCalls++;return new Response("chat origin",{status:200})};
+ try{
+  const owner=await edge.fetch(req("https://vynalthai.com/c","GET",{Cookie:pass}),e,{});
+  assert.equal(owner.status,200);
+  assert.equal(await owner.text(),"chat origin");
+  assert.equal(originCalls,1);
+ }finally{globalThis.fetch=originalFetch}
+});
+test("existing GPS-only pass never auto-upgrades to school bypass",async()=>{
+ const school={async fetch(){return new Response("blocked",{status:403,
+  headers:{"X-School-Policy":"blocked"}})}};
+ const e=env({SCHOOL_POLICY:school,VYNALTH_OWNER_SCHOOL_EXEMPT_ENABLED:"false"});
+ const success=await login(e);
+ const pass=success.headers.getSetCookie()
+  .find(x=>x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
+ e.VYNALTH_OWNER_SCHOOL_EXEMPT_ENABLED="true";
+ const result=await edge.fetch(req("https://vynalthai.com/","GET",{Cookie:pass}),e,{});
+ assert.equal(result.status,403);
+ assert.equal(result.headers.get("X-School-Policy"),"blocked");
+});
+test("school bypass fails closed without complete deployment-specific owner verifier",async()=>{
+ const school={async fetch(){return new Response("blocked",{status:403,
+  headers:{"X-School-Policy":"blocked"}})}};
+ const e=env({VYNALTH_OWNER_SCHOOL_EXEMPT_ENABLED:"true",SCHOOL_POLICY:school});
+ const success=await login(e);
+ const pass=success.headers.getSetCookie()
+  .find(x=>x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
+ // Removing an override must immediately revoke the enhanced school privilege.
+ delete e.VYNALTH_TEMP_ACCESS_CODE_SALT_HEX;
+ delete e.VYNALTH_TEMP_ACCESS_CODE_VERIFIER_HEX;
+ const response=await edge.fetch(req("https://vynalthai.com/","GET",{Cookie:pass}),e,{});
+ assert.equal(response.status,403);
+ assert.equal(response.headers.get("X-School-Policy"),"blocked");
+});
+
 test("same-origin browser POST with no Origin but correct Fetch Metadata may log in",async()=>{
  const e=env();
  const result=await login(e,code,{omitOrigin:true,headers:{
