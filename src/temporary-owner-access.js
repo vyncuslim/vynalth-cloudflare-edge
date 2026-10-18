@@ -169,7 +169,7 @@ async function compareCode(value,env){
  for(let i=0;i<32;i++)diff|=result[i]^expected[i];
  return diff===0;
 }
-export async function hasTemporaryOwnerPass(req,env,url){
+async function validateTemporaryOwnerPass(req,env,url,requiredScope=null){
  if(url.hostname!==HOST||!active(env))return false;
  const ip=clientIp(req);if(!ip)return false;
  const token=getCookie(req,PASS);
@@ -181,13 +181,27 @@ export async function hasTemporaryOwnerPass(req,env,url){
   const now=Math.floor(Date.now()/1000);
   if(!Number.isInteger(record?.exp)||record.exp<=now||record.exp>now+OWNER_ACCESS_TTL||
     typeof record.fingerprint!=="string"||record.fingerprint.length!==64)return false;
-  return record.fingerprint===await shaHex(sessionFingerprint(req,ip));
+  return record.fingerprint===await shaHex(sessionFingerprint(req,ip)) &&
+    (requiredScope===null || record.scope===requiredScope);
  }catch{
   // Storage errors never grant access. No passwords, cookies, or IPs in logs.
   console.error("temp-owner-access-verification-unavailable");
   return false;
  }
 }
+// A deliberately separate, opt-in school-policy exemption. A short-lived
+// GPS-only pass never gains this privilege by a later config toggle.
+// The per-deployment owner verifier must be provided through Worker config:
+// the public built-in verifier is never sufficient for a school-policy bypass.
+export async function hasSchoolPolicyOwnerPass(req,env,url){
+ if(env?.VYNALTH_OWNER_SCHOOL_EXEMPT_ENABLED!=="true" ||
+    codeVerifierMode(env)!=="configured" || url.hostname!==HOST)return false;
+ return validateTemporaryOwnerPass(req,env,url,"school");
+}
+export async function hasTemporaryOwnerPass(req,env,url){
+ return validateTemporaryOwnerPass(req,env,url);
+}
+
 export async function handleTemporaryOwnerAccess(req,env,url){
  if(url.hostname!==HOST||url.pathname!==OWNER_PORTAL)return null;
  if(env?.VYNALTH_TEMP_ACCESS_ENABLED!=="true")
@@ -230,7 +244,11 @@ export async function handleTemporaryOwnerAccess(req,env,url){
   const exp=Math.floor(Date.now()/1000)+OWNER_ACCESS_TTL;
   const fingerprint=await shaHex(sessionFingerprint(req,ip));
   stage="kv-session-write";
-  await env.CONSENT_KV.put(await sessionKey(token),JSON.stringify({exp,fingerprint}),{
+  // A school-policy pass requires BOTH explicit opt-in and a non-default
+  // verifier configured outside source control. Ordinary sessions remain GPS-only.
+  const scope=env?.VYNALTH_OWNER_SCHOOL_EXEMPT_ENABLED==="true" &&
+    codeVerifierMode(env)==="configured"?"school":"gps";
+  await env.CONSENT_KV.put(await sessionKey(token),JSON.stringify({exp,fingerprint,scope}),{
    expirationTtl:OWNER_ACCESS_TTL
   });
   // Session persistence succeeded. Failure to clear the attempt counter
