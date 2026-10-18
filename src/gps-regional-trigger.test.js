@@ -38,7 +38,7 @@ test("unknown location and Tor IP never bypass the GPS gate",async()=>{
  }
 });
 test("overseas IP starts with quiet region check, without GPS permission",async()=>{
- const page=await gate(req("/"));
+ const page=await gate(req("/c"));
  assert.equal(page.status,200);
  const html=await page.text();
  assert.match(html,/Checking regional access/);
