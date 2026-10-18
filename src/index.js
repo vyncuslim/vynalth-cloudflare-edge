@@ -4,7 +4,7 @@ import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
-import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-owner-access.js";
+import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass,hasSchoolPolicyOwnerPass } from "./temporary-owner-access.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -85,6 +85,11 @@ async function checkSchoolPolicy(request, env, rootDomain) {
   // mandatory security controls still apply independently.
   if (env?.SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED === "true" &&
       await shieldAccountExempt(request, env, rootDomain)) return null;
+  // Only a freshly verified owner session on the exact apex host can bypass
+  // the School IP restriction, and only with explicit production opt-in.
+  // Do not extend this to other users, hosts, WAF, or application authorization.
+  if (rootDomain === "vynalthai.com" &&
+      await hasSchoolPolicyOwnerPass(request,env,new URL(request.url))) return null;
   if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
 
   // The upstream CF-Connecting-IP is authoritative for this edge request.
