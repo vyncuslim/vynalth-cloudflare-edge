@@ -92,7 +92,7 @@ function formHtml(csrf,error=false,returnPath="/",reason=null){
   'button{margin-top:18px;padding:12px 20px;background:#a4caff;color:#07111c;border:0;border-radius:8px;font-weight:700}'+
   '.error{color:#ffb7b7}</style></head><body><main><small>VYNALTH AI · OWNER ACCESS</small>'+
   '<h1>Temporary website access</h1><p>Enter your access code for a 10-minute GPS-gate exemption. '+
-  'This does not sign you in to an administrator account or override other security rules.</p>'+message+
+  'This does not sign you in to an application account or bypass Cloudflare WAF protection.</p>'+message+
   '<form action="'+OWNER_PORTAL+'" method="POST" autocomplete="off">'+
   '<input type="hidden" name="csrf" value="'+csrf+'">'+
   '<input type="hidden" name="return" value="'+returnPath+'">'+
