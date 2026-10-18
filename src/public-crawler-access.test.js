@@ -38,7 +38,7 @@ test("only Google source-IP-verified search GET pages are exempt", async () => {
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {ip:"2001:4860:4801:10::2"}), ranges), true);
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {ip:"198.51.100.8"}), ranges), false);
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {ua:"Mozilla/5.0"}), ranges), false);
-  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {host:"vynalthai.com"}), ranges), false);
+  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {host:"vynalthai.com"}), ranges), true);
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {method:"POST"}), ranges), false);
   for (const path of ["/api/rooms/123456", "/host", "/join/123456", "/paper/scan/123456",
     "/__shield/gps/verify", "/admin", "/.env", "/_next/image?url=private"]) {
@@ -50,6 +50,30 @@ test("only Google source-IP-verified search GET pages are exempt", async () => {
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {
     ip:"203.0.113.50", headers:{"CF-IPCountry":"US"}
   }), ranges), false, "Country cannot forge identity");
+});
+
+test("Vynalth AI public SEO routes allow verified Google only", async () => {
+  const host = "vynalthai.com";
+  for (const path of ["/", "/robots.txt", "/sitemap.xml", "/favicon.ico",
+    "/icon.svg", "/manifest.webmanifest", "/about", "/founder", "/en",
+    "/en/", "/en/about", "/en/legal/privacy", "/en/legal/terms",
+    "/_next/static/chunks/app.js"]) {
+    assert.equal(await isVerifiedGooglePublicCrawler(request(path, {host}), ranges), true, path);
+  }
+  for (const path of ["/c", "/api/ai/chat", "/api/auth/session", "/admin",
+    "/account", "/__shield/gps/verify", "/__vynalth/consent/state",
+    "/.env", "/en/private", "/_next/image?url=private"]) {
+    assert.equal(await isVerifiedGooglePublicCrawler(request(path, {host}), ranges), false, path);
+  }
+  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {
+    host, ua: "Mozilla/5.0", ip: crawlerIp
+  }), ranges), false, "Ordinary visitors must continue through GPS policy");
+  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {
+    host, ip: "203.0.113.25", ua: "Googlebot/2.1"
+  }), ranges), false, "Googlebot User-Agent without a verified Google source IP is denied");
+  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {
+    host, method: "POST"
+  }), ranges), false, "Write operations never qualify");
 });
 
 test("Google IP list failure fails closed", async () => {
