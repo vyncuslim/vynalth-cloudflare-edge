@@ -1,3 +1,68 @@
+# Permanent owner-only campus access (account-based)
+
+> Status: proposed in PR #40. Do not claim the feature is live until GitHub
+> regression tests, production Worker deployment, and the real login issuer
+> have all been independently verified.
+
+This feature grants an **indefinite entitlement** to exactly one verified
+Vynalth AI account, including when the account is physically at POWIIS. It is
+not a non-expiring login session. The owner must be signed in, and their normal
+SSO session must be valid and renewed by the Vynalth authentication backend.
+Other school students are still denied by GPS / School IP Policy.
+
+## Permanent access setup (recommended)
+
+1. Identify your account's **immutable user ID** from the actual Vynalth AI
+   authentication backend (e.g. the verified `auth.users.id` / SSO `sub`). Do
+   not use the email address, display name, school IP, MAC address, or
+   unauthenticated browser metadata. Never guess the user ID.
+2. On a trusted computer, run
+   `node scripts/owner-sso-fingerprint.mjs "<verified-user-id>"`.
+   Copy its one-way fingerprint output.
+3. Configure these **Cloudflare Worker secrets** on
+   `vynalth-cloudflare-edge`:
+
+   - `VYNALTH_OWNER_SSO_SUBJECT_SHA256` = generated 64-character hex digest
+   - `VYNALTH_PERMANENT_OWNER_ENABLED` = `true` (default absent/false)
+   - `CONSENT_SSO_SIGNING_SECRET` = same existing signing secret used by the
+     legitimate Vynalth AI SSO issuer (must be >= 32 characters).
+
+   Never put the SSO signing secret, live login tokens, or owner login credentials
+   in GitHub or chat. The fingerprint is not an authentication credential.
+
+4. **Required identity integration:** the Vynalth AI login backend must issue
+   and refresh the existing `__Secure-vynalth-sso` cookie after verified login
+   on `vynalthai.com`. Its HMAC-SHA256-signed base64url JSON payload must use
+   `{sub,status,host:"vynalthai.com",exp,sid}`, with stable authenticated
+   `sub`, valid session `sid`, and an expiry within 900 seconds of now.
+   Cookie flags: `Secure; HttpOnly; SameSite=Lax; Path=/`. Do **not** make
+   the cookie unlimited or issue it from the browser. Renew it via server-side
+   authentication while the app login session remains valid. `signedSSO()`
+   is a **validator**, not a login issuer; merely configuring the Worker
+   is insufficient if the application has not implemented issuance/renewal.
+5. Deploy the reviewed Worker. Sign out and in again on the real Vynalth AI
+   account, then open `https://vynalthai.com/c`.
+
+**Permanent means:** the account stays allowlisted until you revoke its
+fingerprint or switch the feature flag off. The short-lived SSO cookie still
+expires and requires normal reauthentication/renewal; this prevents stolen
+cookies from granting access indefinitely.
+
+**Scope:** only `vynalthai.com` on the Worker; other registrable domains and
+school users remain blocked. Cloudflare WAF, separate abuse restrictions,
+application authorization, and upstream services keep their rules.
+
+**Emergency revoke:** remove `VYNALTH_OWNER_SSO_SUBJECT_SHA256` or set
+`VYNALTH_PERMANENT_OWNER_ENABLED=false`. Rotate the SSO signing secret
+and revoke identity-provider sessions if credentials are compromised.
+
+---
+
+## Optional temporary owner-code fallback (10 minutes)
+
+The existing 10-minute owner portal is preserved for recovery or deployments
+that do not yet issue server-verified SSO claims. It is not the permanent path.
+
 # Owner-only access while on a restricted campus
 
 The existing Vynalth AI owner portal grants a **600-second** GPS-only exception.
