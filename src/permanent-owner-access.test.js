@@ -93,7 +93,7 @@ test("host, expired signature and missing owner opt-in all fail closed",async()=
  assert.equal(await check(req("/c",cookie().slice(0,-2)+"xx")),false);
  assert.equal(await check(req("/c",cookie(), "vynalthai.com",{
    "X-Vynalth-Owner":"true","X-User-Email":"owner@example.com"
- }),true,"spoofable headers do not affect verified identity");
+ })),true,"spoofable headers do not affect verified identity");
  assert.equal(await check(req("/c",cookie()),{...options,
    VYNALTH_PERMANENT_OWNER_ENABLED:"false"}),false);
  assert.equal(await check(req("/c",cookie()),{...options,
