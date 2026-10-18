@@ -18,8 +18,8 @@ function cookie(sub=ownerId,host="vynalthai.com",seconds=600,status="normal") {
  const signature=createHmac("sha256",signingKey).update(payload).digest("base64url");
  return "__Secure-vynalth-sso="+payload+"."+signature;
 }
-function req(path="/c",ownerCookie="",hostname="vynalthai.com",headers={}) {
- return new Request("https://"+hostname+path,{headers:{
+function req(path="/c",ownerCookie="",hostname="vynalthai.com",headers={},method="GET") {
+ return new Request("https://"+hostname+path,{method,body:method==="POST"?"{}":undefined,headers:{
    "CF-Connecting-IP":"203.0.113.45","User-Agent":"VynalthTest",
    Accept:"text/html", ...(ownerCookie?{Cookie:ownerCookie}:{}), ...headers
  }});
@@ -119,11 +119,11 @@ test("Chat API POST keeps independent authorization, school filtering for everyo
  await withOrigin(async hits=>{
   const other=await edge.fetch(req("/api/ai/chat",cookie(outsiderId),"vynalthai.com",{
     "Content-Type":"application/json",Accept:"application/json"
-  }),options,{});
+  },"POST"),options,{});
   assert.equal(other.status,403);
   const owner=await edge.fetch(req("/api/ai/chat",cookie(),"vynalthai.com",{
     "Content-Type":"application/json",Accept:"application/json"
-  }),options,{});
+  },"POST"),options,{});
   assert.equal(owner.status,200);
   assert.equal(hits(),1);
  });
