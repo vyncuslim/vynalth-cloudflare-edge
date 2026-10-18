@@ -55,14 +55,17 @@ test("only Google source-IP-verified search GET pages are exempt", async () => {
 test("Vynalth AI public SEO routes allow verified Google only", async () => {
   const host = "vynalthai.com";
   for (const path of ["/", "/robots.txt", "/sitemap.xml", "/favicon.ico",
-    "/icon.svg", "/manifest.webmanifest", "/about", "/founder", "/en",
+    "/icon.svg", "/manifest.json", "/about", "/founder", "/product",
+    "/features", "/how-it-works", "/research", "/science", "/docs",
+    "/security", "/developers", "/contact", "/faq", "/status", "/en",
     "/en/", "/en/about", "/en/legal/privacy", "/en/legal/terms",
-    "/_next/static/chunks/app.js"]) {
+    "/assets/main-abc123.js", "/assets/main-abc123.css"]) {
     assert.equal(await isVerifiedGooglePublicCrawler(request(path, {host}), ranges), true, path);
   }
   for (const path of ["/c", "/api/ai/chat", "/api/auth/session", "/admin",
     "/account", "/__shield/gps/verify", "/__vynalth/consent/state",
-    "/.env", "/en/private", "/_next/image?url=private"]) {
+    "/.env", "/en/private", "/_next/image?url=private",
+    "/_next/static/secret.js", "/assets-private/secret.js"]) {
     assert.equal(await isVerifiedGooglePublicCrawler(request(path, {host}), ranges), false, path);
   }
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {
