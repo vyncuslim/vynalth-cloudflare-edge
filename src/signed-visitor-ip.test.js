@@ -12,16 +12,19 @@ test('Cloudflare signs actual edge visitor and never preserves spoofed browser a
       'x-vynalth-client-ip':'198.51.100.44',
       'x-vynalth-client-signature':'0000',
       'x-vynalth-client-ts':'11111',
+      'x-vynalth-client-host':'attacker.example',
     },
   });
   const signed=await signedVisitorOriginRequest(req,{VISITOR_IP_SIGNING_SECRET:secret},now);
   assert.equal(signed.headers.get('x-vynalth-client-ip'),'203.0.113.9');
+  assert.equal(signed.headers.get('x-vynalth-client-host'),'vynalthai.com');
   assert.equal(signed.headers.get('x-vynalth-client-ts'),String(now/1000));
   assert.match(signed.headers.get('x-vynalth-client-signature'),/^[0-9a-f]{64}$/);
   const unconfigured=await signedVisitorOriginRequest(req,{},now);
   assert.equal(unconfigured.headers.get('x-vynalth-client-ip'),null);
   assert.equal(unconfigured.headers.get('x-vynalth-client-ts'),null);
   assert.equal(unconfigured.headers.get('x-vynalth-client-signature'),null);
+  assert.equal(unconfigured.headers.get('x-vynalth-client-host'),null);
 });
 
 test('No visitor IP yields no attacker-controlled signed claim',async()=>{
