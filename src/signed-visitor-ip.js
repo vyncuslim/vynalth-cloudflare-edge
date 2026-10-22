@@ -2,7 +2,7 @@
 // Never trust x-vynalth-client-* headers submitted by the public browser.
 // This is optional until the same VISITOR_IP_SIGNING_SECRET is configured in
 // BOTH the Cloudflare Worker and the Vercel API project.
-const AUTH_HEADERS = ['x-vynalth-client-ip','x-vynalth-client-ts','x-vynalth-client-signature'];
+const AUTH_HEADERS = ['x-vynalth-client-ip','x-vynalth-client-ts','x-vynalth-client-signature','x-vynalth-client-host'];
 function plausibleIp(value) {
   if (!value || value.length > 45) return false;
   const octets=value.split('.');
@@ -24,6 +24,7 @@ export async function signedVisitorOriginRequest(request, env, now=Date.now()) {
     {name:'HMAC',hash:'SHA-256'},false,['sign']);
   const signature=await crypto.subtle.sign('HMAC',signingKey,new TextEncoder().encode(payload));
   const hex=Array.from(new Uint8Array(signature),b=>b.toString(16).padStart(2,'0')).join('');
+  headers.set('x-vynalth-client-host',host);
   headers.set('x-vynalth-client-ip',ip);
   headers.set('x-vynalth-client-ts',ts);
   headers.set('x-vynalth-client-signature',hex);
