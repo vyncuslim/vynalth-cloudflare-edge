@@ -8,7 +8,7 @@ const env={GPS_GATE_ENABLED:"true",GPS_REGION_TIMEZONE_ENABLED:"true",
  GPS_GATE_SESSION_SECRET:secret,GPS_CAMPUS_LAT:"5.3677",
  GPS_CAMPUS_LON:"100.21995",GPS_CAMPUS_RADIUS_METERS:"120"};
 const site="https://vynalthai.com";
-function req(path="/",country="US",ip="198.51.100.45",method="GET",body,headers={}){
+function req(path="/c",country="US",ip="198.51.100.45",method="GET",body,headers={}){
  const request=new Request(site+path,{method,body,headers:{
   Accept:method==="GET"?"text/html":"application/json",
   "CF-Connecting-IP":ip,...headers}});
@@ -24,7 +24,7 @@ async function check(country,timezone,ip="198.51.100.45",hostEnv=env){
  return response;
 }
 test("Malaysia IP always displays original GPS page regardless of timezone header",async()=>{
- const r=req("/", "MY");
+ const r=req("/c", "MY");
  r.headers.set("CF-IPCountry","US"); // user-supplied country is never authoritative
  const decision=await gate(r);
  assert.equal(decision.status,403);
@@ -32,13 +32,13 @@ test("Malaysia IP always displays original GPS page regardless of timezone heade
 });
 test("unknown location and Tor IP never bypass the GPS gate",async()=>{
  for(const country of [null,"XX","T1"]){
-  const decision=await gate(req("/",country));
+  const decision=await gate(req("/c",country));
   assert.equal(decision.status,403);
   assert.match(await decision.text(),/Precise location required/);
  }
 });
 test("overseas IP starts with quiet region check, without GPS permission",async()=>{
- const page=await gate(req("/"));
+ const page=await gate(req("/c"));
  assert.equal(page.status,200);
  const html=await page.text();
  assert.match(html,/Checking regional access/);
@@ -56,7 +56,7 @@ test("overseas IP plus Malaysia timezone forces GPS even through VPN egress",asy
   const result=await response.json();
   assert.equal(result.gpsRequired,true);
   const cookie=response.headers.get("Set-Cookie").split(";")[0];
-  const visit=await gate(req("/","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
+  const visit=await gate(req("/c","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
   assert.equal(visit.status,403);
   assert.match(await visit.text(),/Precise location required/);
  }
@@ -69,12 +69,12 @@ test("overseas IP and valid overseas timezone can access without GPS",async()=>{
  assert.match(signed,/HttpOnly/);
  assert.match(signed,/Max-Age=120/);
  const cookie=signed.split(";")[0];
- assert.equal(await gate(req("/","GB","198.51.100.45","GET",undefined,{Cookie:cookie})),null);
- const spoofed=await gate(req("/","GB","203.0.113.44","GET",undefined,{Cookie:cookie}));
+ assert.equal(await gate(req("/c","GB","198.51.100.45","GET",undefined,{Cookie:cookie})),null);
+ const spoofed=await gate(req("/c","GB","203.0.113.44","GET",undefined,{Cookie:cookie}));
  assert.equal(spoofed.status,200,"Changed IP must require a new regional check");
- const changedCountry=await gate(req("/","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
+ const changedCountry=await gate(req("/c","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
  assert.equal(changedCountry.status,200);
- const malaysian=await gate(req("/","MY","198.51.100.45","GET",undefined,{Cookie:cookie}));
+ const malaysian=await gate(req("/c","MY","198.51.100.45","GET",undefined,{Cookie:cookie}));
  assert.equal(malaysian.status,403,"Malaysia IP always requires GPS");
 });
 test("invalid, missing or fabricated timezones cannot create overseas bypass",async()=>{
@@ -92,7 +92,7 @@ test("invalid, missing or fabricated timezones cannot create overseas bypass",as
 });
 test("trusted signed status exemptions and old default behavior remain unchanged",async()=>{
  const standard={...env,GPS_REGION_TIMEZONE_ENABLED:"false"};
- const response=await gate(req("/","GB"),standard);
+ const response=await gate(req("/c","GB"),standard);
  assert.equal(response.status,403);
  assert.match(await response.text(),/Precise location required/);
  const checkResult=await gate(req("/__shield/gps/status","GB"));
