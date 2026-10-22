@@ -1,3 +1,4 @@
+import { signedVisitorOriginRequest } from "./signed-visitor-ip.js";
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
 import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
@@ -259,7 +260,10 @@ export default {
       // Preserve the original hostname and Host header. Cloudflare DNS for the
       // matching zone decides the real origin, so every domain/subdomain can
       // keep its own backend while sharing one edge Worker.
-      originResponse = await fetch(request, {
+      // Strip any spoofed client-IP attestation headers and forward only
+      // Cloudflare-signed visitor identity when the shared secret is enabled.
+      const originRequest = await signedVisitorOriginRequest(request, env);
+      originResponse = await fetch(originRequest, {
         redirect: "manual",
       });
     } catch (error) {
