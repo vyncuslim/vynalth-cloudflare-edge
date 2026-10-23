@@ -1,0 +1,28 @@
+name: Route-preserving Worker build validation
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "wrangler.toml"
+      - "scripts/deploy-preserve-routes.mjs"
+      - "test/route-preserving-deploy.test.js"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/route-preserving-build.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install --no-audit --no-fund
+      - name: Run tests including explicit no-route-rewrite invariants
+        run: npm test
+      - name: Verify Wrangler can compile the version release
+        run: npm run check:build
+      - name: Verify Wrangler route config remains intact
+        run: python3 .github/scripts/verify-routes.py
