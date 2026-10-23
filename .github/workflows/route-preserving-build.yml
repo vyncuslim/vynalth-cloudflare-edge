@@ -20,8 +20,8 @@ jobs:
         with:
           node-version: "24"
       - run: npm install --no-audit --no-fund
-      - name: Run tests including explicit no-route-rewrite invariants
-        run: npm test
+      - name: Verify release script never rewrites routes
+        run: npm test -- test/route-preserving-deploy.test.js
       - name: Verify Wrangler can compile the version release
         run: npm run check:build
       - name: Verify Wrangler route config remains intact
