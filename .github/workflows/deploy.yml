@@ -35,7 +35,7 @@ jobs:
       - name: Verify domain routes and disabled safety flags
         run: python3 .github/scripts/verify-routes.py
       - name: Dry-run Worker configuration
-        run: npx wrangler deploy --dry-run --outdir .wrangler-route-test
+        run: npm run check:build
 
       - name: Require deployment credentials
         run: |
@@ -48,9 +48,7 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
+      # Upload a Worker version and promote it, preserving all existing routes.
+      # Do not use `wrangler deploy` here: it can recreate routes and fail 10020.
+      - name: Deploy Worker version without modifying existing route triggers
+        run: npm run deploy
