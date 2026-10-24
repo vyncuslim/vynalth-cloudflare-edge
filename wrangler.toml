@@ -31,6 +31,12 @@ routes = [
 SECURITY_TELEMETRY_ENABLED = "false"
 SECURITY_HONEYPOT_ENABLED = "false"
 SECURITY_ACCESS_MONITOR_ENABLED = "false"
+# vv owns vyncuslim.com apex; signed monitoring arrives by existing GPS_POLICY_EDGE binding.
+SITE_MONITOR_SERVICE_ENABLED = "false"
+SECURITY_MONITOR_ALERTS_ENABLED = "false"
+# Secrets (not vars): GPS_SERVICE_AUTH_SECRET (shared existing HMAC),
+# SECURITY_MONITOR_TELEGRAM_BOT_TOKEN, SECURITY_MONITOR_TELEGRAM_CHAT_ID,
+# SECURITY_MONITOR_NTFY_TOPIC; existing TELEGRAM_BOT_TOKEN/CHAT_ID work too.
 # Non-5xx requests are sampled at 2%; 5xx at 100%. Adjust to ingest quota.
 SECURITY_ACCESS_SAMPLE_RATE = "0.02"
 # Optional Secret SECURITY_TELEMETRY_HASH_KEY enables rotating daily HMAC
