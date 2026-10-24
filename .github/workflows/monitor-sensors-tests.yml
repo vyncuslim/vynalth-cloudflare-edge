@@ -1,0 +1,36 @@
+name: Security Monitor 2.0 (non-deploying)
+on:
+  pull_request:
+    paths:
+      - "src/security-monitor.js"
+      - "src/security-monitor.test.js"
+      - "src/index.js"
+      - "wrangler.toml"
+      - ".github/workflows/monitor-sensors-tests.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sensor-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax
+        run: |
+          node --check src/security-monitor.js
+          node --check src/security-monitor.test.js
+          node --check src/index.js
+      - name: Honeypot and core edge behavior regression
+        run: node --test src/security-monitor.test.js test/edge.test.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify existing route ownership and safety flags
+        run: python3 .github/scripts/verify-routes.py
+      - name: Wrangler no-deploy build verification
+        run: |
+          npm install --no-audit --no-fund
+          npx wrangler deploy --dry-run --outdir .wrangler-monitor-test
