@@ -25,6 +25,17 @@ routes = [
 ]
 
 [vars]
+# Monitoring and low-interaction honeypots stay disabled until the operator
+# creates an ingest-only Axiom API token as a Worker Secret named
+# AXIOM_SECURITY_INGEST_TOKEN. No secret values belong in this file.
+SECURITY_TELEMETRY_ENABLED = "false"
+SECURITY_HONEYPOT_ENABLED = "false"
+SECURITY_ACCESS_MONITOR_ENABLED = "false"
+# Non-5xx requests are sampled at 2%; 5xx at 100%. Adjust to ingest quota.
+SECURITY_ACCESS_SAMPLE_RATE = "0.02"
+# Optional Secret SECURITY_TELEMETRY_HASH_KEY enables rotating daily HMAC
+# pseudonymous actor IDs. Never log the original IP address.
+AXIOM_SECURITY_INGEST_BASE_URL = "https://us-east-1.aws.edge.axiom.co"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
