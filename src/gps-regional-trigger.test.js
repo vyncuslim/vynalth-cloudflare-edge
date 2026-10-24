@@ -24,7 +24,7 @@ async function check(country,timezone,ip="198.51.100.45",hostEnv=env){
  return response;
 }
 test("Malaysia IP always displays original GPS page regardless of timezone header",async()=>{
- const r=req("/", "MY");
+ const r=req("/dashboard", "MY");
  r.headers.set("CF-IPCountry","US"); // user-supplied country is never authoritative
  const decision=await gate(r);
  assert.equal(decision.status,403);
@@ -32,13 +32,13 @@ test("Malaysia IP always displays original GPS page regardless of timezone heade
 });
 test("unknown location and Tor IP never bypass the GPS gate",async()=>{
  for(const country of [null,"XX","T1"]){
-  const decision=await gate(req("/",country));
+  const decision=await gate(req("/dashboard",country));
   assert.equal(decision.status,403);
   assert.match(await decision.text(),/Precise location required/);
  }
 });
 test("overseas IP starts with quiet region check, without GPS permission",async()=>{
- const page=await gate(req("/"));
+ const page=await gate(req("/dashboard"));
  assert.equal(page.status,200);
  const html=await page.text();
  assert.match(html,/Checking regional access/);
@@ -56,7 +56,7 @@ test("overseas IP plus Malaysia timezone forces GPS even through VPN egress",asy
   const result=await response.json();
   assert.equal(result.gpsRequired,true);
   const cookie=response.headers.get("Set-Cookie").split(";")[0];
-  const visit=await gate(req("/","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
+  const visit=await gate(req("/dashboard","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
   assert.equal(visit.status,403);
   assert.match(await visit.text(),/Precise location required/);
  }
@@ -69,12 +69,12 @@ test("overseas IP and valid overseas timezone can access without GPS",async()=>{
  assert.match(signed,/HttpOnly/);
  assert.match(signed,/Max-Age=120/);
  const cookie=signed.split(";")[0];
- assert.equal(await gate(req("/","GB","198.51.100.45","GET",undefined,{Cookie:cookie})),null);
- const spoofed=await gate(req("/","GB","203.0.113.44","GET",undefined,{Cookie:cookie}));
+ assert.equal(await gate(req("/dashboard","GB","198.51.100.45","GET",undefined,{Cookie:cookie})),null);
+ const spoofed=await gate(req("/dashboard","GB","203.0.113.44","GET",undefined,{Cookie:cookie}));
  assert.equal(spoofed.status,200,"Changed IP must require a new regional check");
- const changedCountry=await gate(req("/","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
+ const changedCountry=await gate(req("/dashboard","US","198.51.100.45","GET",undefined,{Cookie:cookie}));
  assert.equal(changedCountry.status,200);
- const malaysian=await gate(req("/","MY","198.51.100.45","GET",undefined,{Cookie:cookie}));
+ const malaysian=await gate(req("/dashboard","MY","198.51.100.45","GET",undefined,{Cookie:cookie}));
  assert.equal(malaysian.status,403,"Malaysia IP always requires GPS");
 });
 test("invalid, missing or fabricated timezones cannot create overseas bypass",async()=>{
@@ -92,7 +92,7 @@ test("invalid, missing or fabricated timezones cannot create overseas bypass",as
 });
 test("trusted signed status exemptions and old default behavior remain unchanged",async()=>{
  const standard={...env,GPS_REGION_TIMEZONE_ENABLED:"false"};
- const response=await gate(req("/","GB"),standard);
+ const response=await gate(req("/dashboard","GB"),standard);
  assert.equal(response.status,403);
  assert.match(await response.text(),/Precise location required/);
  const checkResult=await gate(req("/__shield/gps/status","GB"));
@@ -100,4 +100,22 @@ test("trusted signed status exemptions and old default behavior remain unchanged
  const status=await checkResult.json();
  assert.equal(status.regionalPolicy.enabled,true);
  assert.equal(status.regionalPolicy.vpnDetection,"not-guaranteed");
+});
+
+test("public marketing homepage stays accessible without GPS but protected dashboard still requires it",async()=>{
+ const home=req("/", "MY");
+ assert.equal(await gate(home),null,"Public apex homepage is an explicit, narrow marketing exemption");
+ const dashboard=await gate(req("/dashboard", "MY"));
+ assert.equal(dashboard.status,403,"A public homepage must not grant access to protected pages");
+ const client=await gate(req("/__shield/gps/status", "MY"));
+ assert.equal(client.status,200,"GPS policy status remains available independently");
+});
+test("regional timezone/country never lets a foreign visitor skip a protected API by using the public apex exemption",async()=>{
+ const response=await gate(req("/dashboard","US","198.51.100.45"));
+ assert.equal(response.status,200);
+ const api=await gate(req("/api/private-data","MY","198.51.100.45","POST",JSON.stringify({}),{
+  Origin:site,"Content-Type":"application/json"
+ }));
+ assert.equal(api.status,403);
+ assert.equal((await api.json()).error,"PRECISE_GPS_REQUIRED");
 });
