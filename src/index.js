@@ -1,4 +1,6 @@
 import { signedVisitorOriginRequest } from "./signed-visitor-ip.js";
+import { inspectHoneypotRequest, captureAccessTelemetry } from "./security-monitor.js";
+import { handleSignedVvMonitor } from "./site-monitor-service.js";
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
 import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
@@ -117,15 +119,26 @@ async function checkSchoolPolicy(request, env, rootDomain) {
   return null;
 }
 
-export default {
-  async fetch(request, env, ctx) {
+async function routeRequest(request, env, ctx, requestId) {
     const incomingUrl = new URL(request.url);
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
-    const requestId = crypto.randomUUID();
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // vv owns the personal-site apex; accept only HMAC-signed Service Binding
+    // telemetry and return without origin fetching or running GPS twice.
+    const signedSiteEvent = await handleSignedVvMonitor(request, env, ctx);
+    if (signedSiteEvent)
+      return edgeResponse(signedSiteEvent, request, incomingUrl, requestId, rootDomain);
+
+    // Decoy routes are never forwarded to origin; passive probes are logged
+    // without intercepting existing app routes. Both features are opt-in.
+    const honeypotDecision = await inspectHoneypotRequest(request, env, ctx, requestId);
+    if (honeypotDecision) {
+      return edgeResponse(honeypotDecision, request, incomingUrl, requestId, rootDomain);
     }
 
     // Authenticated Service Binding calls from vv are a policy check only.
@@ -311,5 +324,16 @@ export default {
       requestId,
       rootDomain,
     );
+  }
+
+export default {
+  async fetch(request, env, ctx) {
+    const requestId = crypto.randomUUID();
+    const startTime = Date.now();
+    const response = await routeRequest(request, env, ctx, requestId);
+    // Use the actual response status; do not claim a policy decision proves
+    // the request was blocked. Logging never changes the user response.
+    captureAccessTelemetry(request, response, env, ctx, requestId, startTime);
+    return response;
   },
 };

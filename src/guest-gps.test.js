@@ -484,7 +484,7 @@ test("operator-approved uncertified OSM polygons use temporary near-border permi
  assert.match(sibling.headers.get("Location"),/^https:\/\/vynalthai\.com\/__shield\/gps\/bridge/);
  const api=await invoke(req("/api/protected","GET",{Accept:"application/json"}),env);
  assert.equal(api.status,403);
- const noConsentPage=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}),env);
+ const noConsentPage=await invoke(new Request("https://vynalthai.com/dashboard",{headers:{Accept:"text/html"}}),env);
  assert.equal(noConsentPage.status,403);
  assert.match(await noConsentPage.text(),/Request location again|Allow location/);
 });
@@ -549,7 +549,7 @@ test("proximity cookie cannot unlock private photo data",async()=>{
 
 
 test("new GPS UI matches Vynalth AI site branding and offers browser permission controls",async()=>{
- const resp=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}));
+ const resp=await invoke(new Request("https://vynalthai.com/dashboard",{headers:{Accept:"text/html"}}));
  const html=await resp.text();
  assert.match(html,/Vynalth AI/);
  assert.doesNotMatch(html,/VYNALTH SHIELD/i);
@@ -661,7 +661,7 @@ test("sibling domain completes fresh cross-domain GPS recheck with exactly one t
 
 
 test("GPS challenge and error screens are English without a language toggle",async()=>{
- const resp=await invoke(new Request("https://vynalthai.com/",{headers:{Accept:"text/html"}}));
+ const resp=await invoke(new Request("https://vynalthai.com/dashboard",{headers:{Accept:"text/html"}}));
  assert.equal(resp.status,403);
  const html=await resp.text();
  assert.match(html,/<html lang="en">/);
@@ -828,4 +828,24 @@ test("outside fast-pass rejects forged, expired, near-boundary and blocked cooki
  const response=await invoke(request("__Host-vynalth-geo="+near+
   "; __Host-vynalth-geo-block="+blocked),env);
  assert.equal(response.status,403,"a signed campus block takes priority");
+});
+
+test("apex public landing page exception does not weaken protected document and API gating",async()=>{
+ const home=await invoke(new Request("https://vynalthai.com/",{
+  method:"GET",headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}
+ }));
+ assert.equal(home,null,"Public marketing landing page may pass through to the original website");
+ const protectedDocument=await invoke(new Request("https://vynalthai.com/dashboard",{
+  method:"GET",headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}
+ }));
+ assert.equal(protectedDocument.status,403,"Protected document still requires geolocation");
+ const protectedApi=await invoke(new Request("https://vynalthai.com/api/private-data",{
+  method:"GET",headers:{Accept:"application/json"}
+ }));
+ assert.equal(protectedApi.status,403,"Sensitive API must not inherit public-home exemption");
+ const blockedWrite=await invoke(new Request("https://vynalthai.com/",{
+  method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},
+  body:"{}"
+ }));
+ assert.equal(blockedWrite.status,403,"Only GET/HEAD marketing documents are exempt");
 });
