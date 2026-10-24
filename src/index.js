@@ -1,5 +1,6 @@
 import { signedVisitorOriginRequest } from "./signed-visitor-ip.js";
 import { inspectHoneypotRequest, captureAccessTelemetry } from "./security-monitor.js";
+import { handleSignedVvMonitor } from "./site-monitor-service.js";
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
 import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
@@ -126,6 +127,12 @@ async function routeRequest(request, env, ctx, requestId) {
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
     }
+
+    // vv owns the personal-site apex; accept only HMAC-signed Service Binding
+    // telemetry and return without origin fetching or running GPS twice.
+    const signedSiteEvent = await handleSignedVvMonitor(request, env, ctx);
+    if (signedSiteEvent)
+      return edgeResponse(signedSiteEvent, request, incomingUrl, requestId, rootDomain);
 
     // Decoy routes are never forwarded to origin; passive probes are logged
     // without intercepting existing app routes. Both features are opt-in.
