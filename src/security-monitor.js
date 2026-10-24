@@ -1,3 +1,4 @@
+import { dispatchSecurityMonitorAlert } from "./security-alert-dispatch.js";
 // Opt-in, low-interaction edge honeypots and privacy-conscious security telemetry.
 // These traps never serve real files, credentials, database endpoints, or a login session.
 const DECOYS = new Map([
@@ -77,7 +78,7 @@ async function eventBase(request, env, requestId, event, logType) {
     ...(Number.isSafeInteger(cf.asn) ? { asn: cf.asn } : {}),
   };
 }
-async function ingest(env, dataset, event) {
+export async function ingest(env, dataset, event) {
   try {
     const url = ingestOrigin(env) + '/v1/ingest/' + dataset;
     const response = await fetch(url, {
@@ -93,11 +94,13 @@ async function ingest(env, dataset, event) {
     const result = await response.json();
     if (typeof result.failed === 'number' && result.failed !== 0)
       throw new Error('Axiom partial ingestion');
+    return {stored:true};
   } catch (error) {
     // Avoid sensitive payloads and raw error details in logs.
     console.warn('security_telemetry_ingest_failed', {
       dataset, reason: String(error).replace(/Bearer\s+\S+/gi, '[redacted]').slice(0, 100),
     });
+    return {stored:false};
   }
 }
 function enqueue(ctx, task) {
@@ -105,6 +108,9 @@ function enqueue(ctx, task) {
 }
 export function honeypotType(path) {
   return DECOYS.get(path) || null;
+}
+export function passiveProbeType(path) {
+  return PASSIVE_PROBES.get(path) || null;
 }
 export async function inspectHoneypotRequest(request, env, ctx, requestId) {
   if (env?.SECURITY_HONEYPOT_ENABLED !== 'true' || !enabled(env)) return null;
@@ -124,6 +130,7 @@ export async function inspectHoneypotRequest(request, env, ctx, requestId) {
   // (including /api/.env) continue to their original handlers untouched.
   if (response) event.status_code = response.status;
   enqueue(ctx, ingest(env, 'vynalth-security-logs', event));
+  enqueue(ctx, dispatchSecurityMonitorAlert(env, event, ingest));
   return response;
 }
 export function captureAccessTelemetry(request, response, env, ctx, requestId, startTime) {
