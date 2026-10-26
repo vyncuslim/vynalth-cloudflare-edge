@@ -10,7 +10,46 @@
  */
 // Exact host allowlist. Vyncuslim Global is a separate, public-only static
 // website on the si-domain Vercel project; no internal or API paths are open.
+// Main-site SEO paths are public content only. This exact allowlist does not
+// contain account, search results, checkout, private dashboards, GPS endpoints,
+// admin panels or APIs. Google crawler status still requires published source
+// IP range verification (not a claim in request headers).
+const MAIN_SITE_PUBLIC_ROUTES = [
+  '', 'about', 'product', 'features', 'how-it-works', 'plans', 'research',
+  'science', 'founder', 'docs', 'developers', 'contact', 'faq', 'support',
+  'media', 'blog', 'news', 'changelog', 'status', 'trust', 'security',
+  'legal', 'security/bug-bounty', 'security/hall-of-fame',
+  'security/docs', 'event-center', 'bot',
+  'legal/privacy', 'legal/terms', 'legal/cookies',
+  'legal/biometric-data-notice', 'legal/medical-disclaimer',
+  'legal/data-handling', 'legal/sub-processors', 'legal/dpa',
+  'legal/contact', 'legal/security', 'legal/acceptable-use',
+  'legal/ai-disclaimer', 'legal/abuse-policy', 'legal/account-blocking',
+  'legal/policy-framework', 'legal/vulnerability-disclosure',
+  'legal/bug-bounty', 'legal/appeals-and-complaints',
+  'legal/intellectual-property', 'legal/children-privacy',
+  'legal/open-source', 'legal/transparency',
+];
+const MAIN_SITE_PUBLIC_FILES = new Set([
+  '/', '/robots.txt', '/sitemap.xml', '/sitemap.xsl',
+  '/favicon.ico', '/favicon.svg', '/manifest.json', '/og-image.svg',
+  '/llms.txt', '/llms-full.txt', '/rss.xml',
+]);
+for (const lang of ['en', 'cn', 'ms']) {
+  for (const route of MAIN_SITE_PUBLIC_ROUTES) {
+    MAIN_SITE_PUBLIC_FILES.add('/' + lang + (route ? '/' + route : ''));
+  }
+  MAIN_SITE_PUBLIC_FILES.add('/' + lang + '/');
+}
 const PUBLIC_RESOURCES = new Map([
+  ['vynalthai.com', {
+    files: MAIN_SITE_PUBLIC_FILES,
+    prefixes: ['/assets/'],
+  }],
+  ['www.vynalthai.com', {
+    files: MAIN_SITE_PUBLIC_FILES,
+    prefixes: ['/assets/'],
+  }],
   ["zokivo.vynalthai.com", {
     files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
       "/icon.svg", "/zokivo-mark.svg", "/games", "/how-it-works", "/try",
