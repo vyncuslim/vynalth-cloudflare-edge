@@ -38,7 +38,35 @@ test("only Google source-IP-verified search GET pages are exempt", async () => {
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {ip:"2001:4860:4801:10::2"}), ranges), true);
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {ip:"198.51.100.8"}), ranges), false);
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {ua:"Mozilla/5.0"}), ranges), false);
-  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {host:"vynalthai.com"}), ranges), false);
+  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {host:"vynalthai.com"}), ranges), true);
+  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {host:"www.vynalthai.com"}), ranges), true);
+  for (const host of ["vynalthai.com", "www.vynalthai.com"]) {
+    for (const publicPath of [
+      "/sitemap.xml", "/robots.txt", "/en", "/cn/", "/ms/legal",
+      "/en/legal/privacy", "/cn/legal/terms", "/ms/legal/biometric-data-notice",
+      "/en/about", "/en/news", "/assets/public-code.js",
+    ]) {
+      assert.equal(await isVerifiedGooglePublicCrawler(request(publicPath, {host}), ranges), true,
+        host + publicPath + " must be available only to source-IP-verified crawlers");
+    }
+    for (const privatePath of [
+      "/en/search", "/en/auth", "/en/checkout", "/en/dashboard", "/en/settings",
+      "/en/profile", "/api/ai/chat", "/__shield/gps/verify", "/en/security/recovery",
+      "/en/security/audit-log", "/en/legal/private-draft", "/.env",
+    ]) {
+      assert.equal(await isVerifiedGooglePublicCrawler(request(privatePath, {host}), ranges), false,
+        host + privatePath + " may not gain GPS exemption");
+    }
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/en/legal", {
+      host, ua:"Googlebot/2.1", ip:"203.0.113.88"
+    }), ranges), false, "Googlebot UA alone is insufficient");
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/en/legal", {
+      host, ua:"Mozilla/5.0"
+    }), ranges), false, "Unverified browser is not a Google crawler");
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/en/legal", {
+      host, method:"POST"
+    }), ranges), false, "Non-GET/HEAD requests must not bypass GPS");
+  }
   assert.equal(await isVerifiedGooglePublicCrawler(request("/", {method:"POST"}), ranges), false);
   for (const path of ["/api/rooms/123456", "/host", "/join/123456", "/paper/scan/123456",
     "/__shield/gps/verify", "/admin", "/.env", "/_next/image?url=private"]) {
