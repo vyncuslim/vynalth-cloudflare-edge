@@ -829,3 +829,70 @@ test("outside fast-pass rejects forged, expired, near-boundary and blocked cooki
   "; __Host-vynalth-geo-block="+blocked),env);
  assert.equal(response.status,403,"a signed campus block takes priority");
 });
+
+
+test("published apex legal index, policy, product and trust pages remain readable without GPS",async()=>{
+ const policyPaths=[
+   "/legal", "/legal/privacy", "/legal/biometric-data-notice",
+   "/legal/terms", "/legal/cookies", "/legal/medical-disclaimer",
+   "/legal/data-handling", "/legal/sub-processors", "/legal/dpa",
+   "/legal/contact", "/legal/security", "/legal/acceptable-use",
+   "/legal/ai-disclaimer", "/legal/abuse-policy", "/legal/account-blocking",
+   "/legal/policy-framework", "/legal/vulnerability-disclosure",
+   "/legal/bug-bounty", "/legal/appeals-and-complaints",
+   "/legal/intellectual-property", "/legal/children-privacy",
+   "/legal/open-source", "/legal/transparency",
+   "/product", "/security/trust-center"
+ ];
+ const livePolicy={...cfg,GPS_REGION_TIMEZONE_ENABLED:"true",
+   GPS_RECHECK_EVERY_DOCUMENT:"true"};
+ for(const host of ["vynalthai.com","www.vynalthai.com"]){
+   for(const path of policyPaths){
+     for(const locale of ["en","cn","ms"]){
+       const request=new Request("https://"+host+"/"+locale+path,{
+         headers:{"Accept":"text/html","Sec-Fetch-Dest":"document"}});
+       assert.equal(await invoke(request,livePolicy),null,host+"/"+locale+path);
+     }
+   }
+   for(const locale of ["en","cn","ms"]){
+     const request=new Request("https://"+host+"/"+locale+"/legal",{
+       method:"HEAD",headers:{"Accept":"text/html"}});
+     assert.equal(await invoke(request,livePolicy),null,"HEAD public legal "+host+"/"+locale);
+   }
+ }
+});
+test("public legal GPS exception cannot open private routes or other hosts",async()=>{
+ const livePolicy={...cfg,GPS_REGION_TIMEZONE_ENABLED:"true",
+   GPS_RECHECK_EVERY_DOCUMENT:"true"};
+ for(const pathname of [
+   "/en/admin","/en/dashboard","/cn/settings","/ms/profile",
+   "/en/search","/en/legal/private-draft","/api/private",
+   "/en/security/audit-log",
+ ]){
+   const decision=await invoke(new Request("https://vynalthai.com"+pathname,{
+     headers:{"Accept":"application/json"}}),livePolicy);
+   assert.ok(decision instanceof Response,pathname+" must stay gated");
+   assert.ok(decision.status>=400,pathname+" must stay denied");
+ }
+ for(const hostname of ["vyncuslim.com","search.vynalthai.com"]){
+   for(const pathname of ["/en/legal","/cn/legal/privacy","/en/product"]){
+     const decision=await invoke(new Request("https://"+hostname+pathname,{
+       headers:{"Accept":"application/json"}}),livePolicy);
+     assert.ok(decision instanceof Response,hostname+pathname+" must not gain exemption");
+   }
+ }
+ const write=await invoke(new Request("https://vynalthai.com/en/legal",{
+   method:"POST",headers:{"Accept":"application/json"}}),livePolicy);
+ assert.ok(write instanceof Response,"POST cannot bypass the GPS challenge");
+});
+test("malformed GPS settings fail closed for private resources but allow canonical public legal notices",async()=>{
+ const misconfigured={...cfg,GPS_CAMPUS_LAT:"invalid",
+   GPS_REGION_TIMEZONE_ENABLED:"true"};
+ const publicLegal=await invoke(new Request("https://vynalthai.com/cn/legal",{
+   headers:{"Accept":"text/html"}}),misconfigured);
+ assert.equal(publicLegal,null,"Public legal index must remain readable");
+ const privatePage=await invoke(new Request("https://vynalthai.com/cn/settings",{
+   headers:{"Accept":"application/json"}}),misconfigured);
+ assert.ok(privatePage instanceof Response);
+ assert.equal(privatePage.status,503,"Private settings must remain fail closed");
+});
