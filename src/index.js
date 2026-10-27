@@ -148,7 +148,13 @@ export default {
           forwarded,incomingUrl,requestId,rootDomain);
       const protectedEndpoint=incomingUrl.pathname.startsWith("/__shield/gps/");
       const trusted=!protectedEndpoint&&await shieldAccountExempt(forwarded,env,rootDomain);
-      if (!trusted) {
+      // Only source-IP-verified Googlebot / Search Console fetchers may skip
+      // interactive GPS on explicitly public paths. Signed service provenance
+      // is checked above; no private friends profiles or APIs are exempt.
+      // vv still independently enforces the POWIIS network restriction and WAF.
+      const publicCrawler=!protectedEndpoint &&
+        await isVerifiedGooglePublicCrawler(forwarded);
+      if (!trusted && !publicCrawler) {
         const decision=await guestGpsGate(forwarded,env,incomingUrl,ctx,requestId,
           internalGps.country);
         if (decision)return edgeResponse(decision,forwarded,incomingUrl,requestId,rootDomain);
