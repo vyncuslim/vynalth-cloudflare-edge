@@ -61,6 +61,17 @@ const PUBLIC_RESOURCES = new Map([
     prefixes: ["/assets/"],
   }],
 ]);
+// Public, owner-controlled pages of the personal site. In particular, DO NOT
+// exempt friends.*, /jingxin, private photos, admin, APIs or account data.
+// Public CSS/JS assets are only the named static resources needed to render SEO.
+const VYNCUS_PUBLIC_PATHS = new Set([
+  "/", "/robots.txt", "/sitemap.xml", "/favicon.svg", "/favicon.ico",
+  "/achievements", "/story", "/web-design",
+  "/styles.css", "/script.js", "/fixes.css",
+]);
+for (const host of ["vyncuslim.com", "www.vyncuslim.com"]) {
+  PUBLIC_RESOURCES.set(host, { files: VYNCUS_PUBLIC_PATHS, prefixes: [] });
+}
 const GOOGLE_FEEDS = Object.freeze([
   "https://developers.google.com/static/crawling/ipranges/common-crawlers.json",
   "https://developers.google.com/static/crawling/ipranges/special-crawlers.json",
