@@ -449,16 +449,35 @@ function publicBuildAsset(request,path){
  return (request.method==="GET"||request.method==="HEAD")&&
   /^\/assets\/[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9_-]{8,}\.(?:css|js|mjs|woff|woff2|ttf|otf)$/.test(path);
 }
-// Public marketing and policy pages on the verified Vynalth AI apex must be
-// readable without requiring browser geolocation. This exemption is scoped to
-// GET/HEAD documents only; protected apps, APIs, account data and school-IP
-// policy enforcement are unaffected. Cloudflare WAF still applies.
+// Only published, anonymous informational pages on the Vynalth AI main
+// origin are exempt from this website's interactive GPS consent challenge.
+// This does NOT bypass Cloudflare WAF, signed sessions, School IP Policy,
+// temporary IP denies, or any authenticated/private endpoint.
+const PUBLIC_APEX_INFORMATION_ROUTES = new Set([
+  '', 'legal', 'product', 'security/trust-center',
+  'legal/privacy', 'legal/biometric-data-notice', 'legal/terms',
+  'legal/cookies', 'legal/medical-disclaimer', 'legal/data-handling',
+  'legal/sub-processors', 'legal/dpa', 'legal/contact',
+  'legal/security', 'legal/acceptable-use', 'legal/ai-disclaimer',
+  'legal/abuse-policy', 'legal/account-blocking', 'legal/policy-framework',
+  'legal/vulnerability-disclosure', 'legal/bug-bounty',
+  'legal/appeals-and-complaints', 'legal/intellectual-property',
+  'legal/children-privacy', 'legal/open-source', 'legal/transparency'
+]);
+const PUBLIC_APEX_INFORMATION_PATHS = new Set(['/']);
+for (const route of PUBLIC_APEX_INFORMATION_ROUTES) {
+  if (route) PUBLIC_APEX_INFORMATION_PATHS.add('/' + route);
+  for (const lang of ['en', 'cn', 'ms']) {
+    const fullPath = '/' + lang + (route ? '/' + route : '');
+    PUBLIC_APEX_INFORMATION_PATHS.add(fullPath);
+    if (!route) PUBLIC_APEX_INFORMATION_PATHS.add(fullPath + '/');
+  }
+}
 function publicBrandingPage(path,request,hostname){
- if(!["vynalthai.com","www.vynalthai.com"].includes(hostname.toLowerCase()))return false;
- if(request.method!=="GET"&&request.method!=="HEAD")return false;
- return new Set(["/","/en","/en/","/cn","/cn/","/ms","/ms/",
-  "/en/legal/privacy","/legal/privacy","/en/legal/terms","/legal/terms",
-  "/en/legal/acceptable-use","/legal/acceptable-use"]).has(path);
+  if (!['vynalthai.com','www.vynalthai.com'].includes(hostname.toLowerCase()))
+    return false;
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  return PUBLIC_APEX_INFORMATION_PATHS.has(path);
 }
 function skip(path,request,hostname){return publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
