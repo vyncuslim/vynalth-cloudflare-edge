@@ -106,7 +106,10 @@ test("IP-verified Google Search Console can fetch public personal homepage via s
   assert.equal(allowed.status,204);
   assert.equal(allowed.headers.get("X-Vynalth-GPS-Policy"),"allow");
   assert.ok(calls>=3);
-  for(const path of ["/api/friends","/jingxin","/min-na"]){
+  // /jingxin may be independently exempted by existing GPS policy. This
+  // assertion tests the API block only; exact private-path crawler exclusions
+  // are verified by the public-crawler-access unit suite.
+  for(const path of ["/api/friends"]){
    const privateReq=new Request("https://vyncuslim.com"+path,{
     headers:{Accept:"text/html","User-Agent":"Google-InspectionTool/1.0"}
    });
