@@ -116,18 +116,15 @@ Do not proxy ordinary mail transport records such as MX targets used for SMTP/IM
 
 - `src/index.js` — multi-zone edge Worker and tracing logic.
 - `wrangler.toml` — Worker configuration and multi-zone routes.
-- `.github/workflows/deploy.yml` — GitHub Actions deployment workflow.
+- `.github/workflows/deploy.yml` — GitHub Actions verification workflow (tests, route checks, Wrangler dry-run only).
 
-## GitHub repository secrets
+## Deployment ownership and credentials
 
-Automatic deployment requires:
+**Cloudflare Workers Builds is the sole automatic production deployer.** Cloudflare's Git integration watches the `main` branch and invokes `npx wrangler deploy` using the build token configured in Cloudflare Workers Builds.
 
-```text
-CLOUDFLARE_API_TOKEN
-CLOUDFLARE_ACCOUNT_ID
-```
+GitHub Actions does **not** deploy the Worker and does **not** require a `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` repository secret. The GitHub verification workflow executes unit/security tests, checks zone routes, and performs an offline Wrangler dry-run.
 
-The Cloudflare API token must be allowed to deploy Workers and manage Worker routes for all managed zones.
+**Important:** Passing GitHub verification does not prove a Cloudflare production deployment succeeded. Check the Cloudflare Workers Builds status and the full deploy log separately. The Cloudflare build token must have sufficient privileges for the Worker and all seven configured zones; do not bypass safeguards or remove routes to conceal deployment errors.
 
 ## Verification
 
