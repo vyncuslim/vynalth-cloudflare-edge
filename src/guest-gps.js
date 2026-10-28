@@ -455,6 +455,7 @@ function publicBuildAsset(request,path){
 // temporary IP denies, or any authenticated/private endpoint.
 const PUBLIC_APEX_INFORMATION_ROUTES = new Set([
   '', 'legal', 'product', 'security/trust-center', 'security/bug-bounty',
+  'news/bug-bounty-program',
   'legal/privacy', 'legal/biometric-data-notice', 'legal/terms',
   'legal/cookies', 'legal/medical-disclaimer', 'legal/data-handling',
   'legal/sub-processors', 'legal/dpa', 'legal/contact',
