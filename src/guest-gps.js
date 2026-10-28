@@ -454,7 +454,7 @@ function publicBuildAsset(request,path){
 // This does NOT bypass Cloudflare WAF, signed sessions, School IP Policy,
 // temporary IP denies, or any authenticated/private endpoint.
 const PUBLIC_APEX_INFORMATION_ROUTES = new Set([
-  '', 'legal', 'product', 'security/trust-center',
+  '', 'legal', 'product', 'security/trust-center', 'security/bug-bounty',
   'legal/privacy', 'legal/biometric-data-notice', 'legal/terms',
   'legal/cookies', 'legal/medical-disclaimer', 'legal/data-handling',
   'legal/sub-processors', 'legal/dpa', 'legal/contact',
