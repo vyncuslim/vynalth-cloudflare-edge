@@ -19,6 +19,25 @@ test("public bug bounty page is anonymous GET/HEAD readable only on apex hosts",
   }
 });
 
+test("retired public news article can reach its HTTP redirect on apex hosts", async () => {
+  for (const host of ["vynalthai.com", "www.vynalthai.com"]) {
+    for (const lang of ["en", "cn", "ms"]) {
+      for (const method of ["GET", "HEAD"]) {
+        assert.equal(await call(host, "/" + lang + "/news/bug-bounty-program", method), null);
+      }
+    }
+  }
+  for (const [host, path, method] of [
+    ["vynalthai.com", "/en/news/bug-bounty-program", "POST"],
+    ["shield.vynalthai.com", "/en/news/bug-bounty-program", "GET"],
+    ["vynalthai.com", "/en/news/private-content", "GET"]
+  ]) {
+    const result = await call(host, path, method);
+    assert.ok(result instanceof Response);
+    assert.equal(result.status, 503);
+  }
+});
+
 test("public bug bounty exemption does not open submission APIs, POSTs, or other hosts", async () => {
   for (const [host, path, method] of [
     ["vynalthai.com", "/en/security/bug-bounty", "POST"],
