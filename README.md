@@ -66,28 +66,15 @@ Certificate and Vercel ownership validation paths are exempt from this redirect:
 /.well-known/vercel/*
 ```
 
-## Worker routes
+## Worker routes — Dashboard-owned (avoids 10020)
 
-`wrangler.toml` attaches this Worker to both the apex and wildcard route for every managed zone:
+The operator's production routes are managed at **Cloudflare Dashboard → Workers & Pages → vynalth-cloudflare-edge → Settings → Domains & Routes**. They are **not** declared in `wrangler.toml` because Wrangler's re-registration of already-existing patterns returned Cloudflare error `10020` and caused partial deployment errors.
 
-```text
-vynalthai.com/*
-*.vynalthai.com/*
-
-vyncuslim.com/*
-*.vyncuslim.com/*
-
-sleepsomno.com/*
-*.sleepsomno.com/*
-
-powiismunc.com/*
-*.powiismunc.com/*
-
-vitamindai.online/*
-*.vitamindai.online/*
-```
-
-A hostname must still have a valid Cloudflare DNS record and its HTTP/HTTPS traffic must actually enter Cloudflare for the Worker route to execute.
+- **Do not delete or reassign** an existing route to resolve error 10020 without verifying its current owner. That could interrupt other services.
+- The historical intended coverage is the apex `vynalthai.com/*` and seven wildcard patterns (`*.vynalthai.com/*`, `*.vyncuslim.com/*`, `*.sleepsomno.com/*`, `*.powiismunc.com/*`, `*.vitamindai.online/*`, `*.vynalthai.si/*`, `*.vyncuslim.si/*`). **This is an intended inventory, not a claim that every pattern is currently active.** Review every live route and its assigned Worker in Dashboard.
+- `workers_dev = true` remains enabled to preserve the existing `vynalth-cloudflare-edge.ongyuze1401.workers.dev` entrypoint. Cloudflare's no-route dashboard workflow typically recommends disabling workers.dev; this project intentionally preserves the existing URL and validates that direct endpoint separately.
+- The route regression script verifies that Wrangler cannot re-register any routes and leaves all original GPS, School Policy, and privacy controls unchanged.
+- After deploying, verify the actual Worker route mapping and an `x-vynalth-edge` response header on the intended website endpoints. Do not assume a clean build proves every route is assigned correctly.
 
 ## vynalthai.com partial DNS setup
 
@@ -115,7 +102,7 @@ Do not proxy ordinary mail transport records such as MX targets used for SMTP/IM
 ## Files
 
 - `src/index.js` — multi-zone edge Worker and tracing logic.
-- `wrangler.toml` — Worker configuration and multi-zone routes.
+- `wrangler.toml` — Worker configuration; existing routes are managed in Cloudflare Dashboard.
 - `.github/workflows/deploy.yml` — GitHub Actions verification workflow (tests, route checks, Wrangler dry-run only).
 
 ## Deployment ownership and credentials
