@@ -12,10 +12,12 @@ workers_dev = true
 # Preserve existing Dashboard > Settings > Domains & Routes assignments.
 # Never automatically delete or seize another Worker's route.
 [vars]
-# Off until the website Vercel production API, secret auth, Cloudflare
-# request routing and end-to-end database write are verified.
-# Enabling only this flag does not create the site's missing API.
-THREAT_INTEL_COLLECT_ENABLED = "false"
+# Explicit operator-approved, narrow suspicious-probe event forwarding.
+# Never send IP, cookies, request body or query strings. Sender is async,
+# non-blocking, and automatically fails closed when the secret is absent.
+# 2026-10-31: enable following successful fix for route conflict code 10020.
+# Require real database proof before claiming production ingestion success.
+THREAT_INTEL_COLLECT_ENABLED = "true"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
