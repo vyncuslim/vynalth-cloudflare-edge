@@ -6,6 +6,7 @@ import { handleJingxinMedia } from "./jingxin-media.js";
 import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
 import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-owner-access.js";
+import { scheduleThreatTelemetry } from "./threat-telemetry.js";
 const ROOT_DOMAINS = [
   "vynalthai.com",
   "vyncuslim.com",
@@ -157,6 +158,10 @@ export default {
         headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"allow"}}),
         forwarded,incomingUrl,requestId,rootDomain);
     }
+
+    // Nonblocking and opt-in: observe only known suspicious probe paths that
+    // actually reached this Worker. Never mark GPS/school denials as attacks.
+    scheduleThreatTelemetry(request, env, ctx, requestId);
 
     // Temporary, self-expiring owner-requested network restriction. The
     // verified trust/contact/status identity exemption is unconditional for
