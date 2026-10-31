@@ -19,7 +19,7 @@ jobs:
         shell: bash
         run: |
           set -eu
-          for path in '/api/config.json' '/.git/config'; do
+          for path in '/' '/robots.txt' '/api/config.json' '/.git/config'; do
             echo "Synthetic owner-authorized GET: $path"
             status=$(curl --silent --show-error --max-time 12 \
               --output /tmp/shield-probe-response \
