@@ -60,3 +60,32 @@ test('transport failures do not impact request handling',async()=>{
   try{const tasks=[];assert.equal(scheduleThreatTelemetry(req(),env,{waitUntil(p){tasks.push(p)}},'x'),true);
   await Promise.all(tasks)}finally{globalThis.fetch=fetch0;console.warn=warn}
 });
+
+test('all eleven managed domains and their subdomains forward only bounded probe metadata', async () => {
+  const roots=['vynalthai.com','vynalthai.si','vyncuslim.com','vyncuslim.si',
+    'vyncuslim.my','sleepsomno.com','vitamindai.online','powiismunc.com',
+    'vynli.xyz','vynlink.xyz','zokivo.xyz'];
+  const original=globalThis.fetch;
+  const calls=[];const pending=[];
+  globalThis.fetch=async(_url, options)=>{
+    calls.push(JSON.parse(options.body));
+    return new Response(null,{status:202});
+  };
+  try{
+    for(const root of roots)for(const host of [root,'www.'+root]){
+      assert.equal(scheduleThreatTelemetry(req('https://'+host+'/.git/config?key=secret'),
+        env,{waitUntil(task){pending.push(task)}},'test-id'),true,host);
+    }
+    await Promise.all(pending);
+    assert.equal(calls.length,roots.length*2);
+    for(const event of calls){
+      assert.equal(event.path,'/.git/*');
+      assert.equal(event.source,'cloudflare_worker');
+      assert.ok(!JSON.stringify(event).includes('secret'));
+    }
+    for(const host of ['vyncuslim.my.attacker.tld','notzokivo.xyz','evil.vynlink.xyz.attacker.test']){
+      assert.equal(scheduleThreatTelemetry(req('https://'+host+'/.env'),
+        env,{waitUntil(){throw Error('unexpected forward')}},'bad'),false,host);
+    }
+  }finally{globalThis.fetch=original}
+});
