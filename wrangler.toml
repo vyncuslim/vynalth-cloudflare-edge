@@ -25,6 +25,10 @@ routes = [
 ]
 
 [vars]
+# Off until the website Vercel production API, secret auth, Cloudflare
+# request routing and end-to-end database write are verified.
+# Enabling only this flag does not create the site's missing API.
+THREAT_INTEL_COLLECT_ENABLED = "false"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
