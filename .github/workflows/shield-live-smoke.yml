@@ -1,0 +1,32 @@
+name: Shield live collection synthetic smoke (one-time)
+
+on:
+  push:
+    branches:
+      - test/shield-production-smoke-20261031
+    paths:
+      - '.github/workflows/shield-live-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  one-time-synthetic-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe two harmless owned-site security decoy paths (no credentials)
+        shell: bash
+        run: |
+          set -eu
+          for path in '/api/config.json' '/.git/config'; do
+            echo "Synthetic owner-authorized GET: $path"
+            status=$(curl --silent --show-error --max-time 12 \
+              --output /tmp/shield-probe-response \
+              --dump-header /tmp/shield-probe-headers \
+              --write-out '%{http_code}' \
+              "https://vynalthai.com$path" || true)
+            echo "HTTP status: $status"
+            grep -Ei '^(x-vynalth-edge|x-vynalth-ray-id|cf-ray|server):' /tmp/shield-probe-headers | sed -E 's/^(cf-ray|x-vynalth-ray-id):.*/\1: present/' || true
+          done
+          echo 'No passwords, cookies, IP addresses or response bodies printed.'
