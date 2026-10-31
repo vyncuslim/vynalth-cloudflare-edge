@@ -13,7 +13,10 @@ const FRESH_BRIDGE_COOKIE="__Host-vynalth-gps-fresh";
 const GPS_BRIDGE_HUB="vynalthai.com";
 const GPS_BRIDGE_ROOTS=Object.freeze([
  "vynalthai.com","vyncuslim.com","vynalthai.si","vyncuslim.si",
- "vitamindai.online","sleepsomno.com","powiismunc.com"
+ "vitamindai.online","sleepsomno.com","powiismunc.com",
+ // Explicit new managed domains use the same signed, short-lived GPS
+ // handoff protocol; this does not extend four-domain consent/SSO grants.
+ "vyncuslim.my","vynli.xyz","vynlink.xyz","zokivo.xyz"
 ]);
 function allowedTarget(host){
  if(typeof host!=="string"||host.length>253||host===GPS_BRIDGE_HUB||
