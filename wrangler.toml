@@ -1,13 +1,14 @@
 name = "vynalth-cloudflare-edge"
 main = "src/index.js"
 compatibility_date = "2026-09-19"
-workers_dev = false
+workers_dev = true
 
 # Routes and custom-domain triggers are already owned by Cloudflare.
 # DO NOT re-register them through Wrangler: the current account has existing
 # patterns which cause Cloudflare error 10020 (duplicate route). Cloudflare's
-# official dashboard-managed routing configuration requires omitting both
-# 'route' and 'routes' and disabling the workers.dev URL.
+# route list is now managed from the Cloudflare dashboard; omit both
+# 'route' and 'routes' to avoid re-registering existing route patterns.
+# Keep workers_dev=true because the public workers.dev URL was already enabled.
 # Preserve existing Dashboard > Settings > Domains & Routes assignments.
 # Never automatically delete or seize another Worker's route.
 [vars]
