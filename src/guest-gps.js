@@ -480,7 +480,10 @@ function publicBrandingPage(path,request,hostname){
   if (request.method !== 'GET' && request.method !== 'HEAD') return false;
   return PUBLIC_APEX_INFORMATION_PATHS.has(path);
 }
-function skip(path,request,hostname){return publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
+// GPS applies to browser access, not a dedicated server-to-server telemetry
+// receiver. Vercel independently enforces the Bearer secret and rejects all
+// unauthorized requests; Cloudflare WAF and school policy remain in force.
+function skip(path,request,hostname){return (hostname==="vynalthai.com"&&path==="/api/security/ingest"&&request.method==="POST")||publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
 export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
