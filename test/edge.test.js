@@ -351,3 +351,31 @@ test("full edge still returns GPS 403 for HTML page without location pass",async
   assert.equal(hits(),0);
  });
 });
+
+
+test("Shield ingest POST skips browser GPS only at the main site; origin still authenticates", async()=>{
+ const env={GPS_GATE_ENABLED:"true",GPS_GATE_SESSION_SECRET:
+  "test-verdict-signing-secret-0000000000000000",
+  GPS_CAMPUS_LAT:"5.3677",GPS_CAMPUS_LON:"100.21995",
+  GPS_CAMPUS_RADIUS_METERS:"180"};
+ await withOrigin(async count=>{
+  const req=new Request("https://vynalthai.com/api/security/ingest",{
+   method:"POST",
+   headers:{"Accept":"application/json","Content-Type":"application/json",
+    "Authorization":"Bearer must-validate-at-origin"},
+   body:JSON.stringify({test:true})
+  });
+  const resp=await edge.fetch(req,env,{});
+  assert.equal(resp.status,200,"Authorized endpoint route must reach the real origin");
+  assert.equal(count(),1);
+  assert.equal(resp.headers.get("x-vynalth-edge"),"cloudflare-worker");
+ });
+ await withOrigin(async count=>{
+  const req=new Request("https://search.vynalthai.com/api/security/ingest",{
+   method:"POST",headers:{"Accept":"application/json"}
+  });
+  const resp=await edge.fetch(req,env,{});
+  assert.equal(resp.status,403,"Do not exempt other hosts");
+  assert.equal(count(),0);
+ });
+});
