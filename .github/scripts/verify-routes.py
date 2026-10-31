@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Validate Vynalth's Cloudflare Worker routes with the TOML parser.
+"""Validate Worker configuration without trying to seize pre-existing routes.
 
-This deliberately parses TOML rather than grepping for route strings:
-"routes" placed below [vars] is NOT a top-level Worker route definition.
+Route ownership is intentionally managed by Cloudflare Dashboard. Error 10020
+was caused by redeclaring already-owned patterns at Wrangler deploy time.
 """
 from pathlib import Path
 import sys
@@ -35,23 +35,15 @@ def check(path: Path) -> None:
     config = tomllib.loads(path.read_text(encoding="utf-8"))
     assert config.get("name") == "vynalth-cloudflare-edge", "Wrong Worker name"
     assert config.get("main") == "src/index.js", "Worker entrypoint changed"
-    routes = config.get("routes")
-    assert isinstance(routes, list), "Worker routes missing at TOML ROOT level"
-    assert isinstance(config.get("vars"), dict), "[vars] section missing"
-    assert "routes" not in config["vars"], "routes must NOT be nested inside [vars]"
-    seen = []
-    for r in routes:
-        assert isinstance(r, dict), f"Invalid route item: {r!r}"
-        assert isinstance(r.get("pattern"), str), f"Route pattern missing: {r!r}"
-        assert isinstance(r.get("zone_name"), str), f"Zone name missing: {r!r}"
-        seen.append((r["pattern"], r["zone_name"]))
-    assert len(seen) == len(set(seen)), "Duplicate Cloudflare routes"
-    assert len(seen) == 8, f"Expected 8 routes, found {len(seen)}"
-    missing = EXPECTED - set(seen)
-    unexpected = set(seen) - EXPECTED
-    assert not missing and not unexpected, (
-        f"Route mismatch, missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+    # Keep this deployment route-free: never auto-create/delete a route.
+    assert "routes" not in config and "route" not in config, (
+        "Wrangler must not redeclare Cloudflare Dashboard-owned routes (10020)"
     )
+    assert config.get("workers_dev") is True, (
+        "Preserve the previously published workers.dev endpoint"
+    )
+    assert isinstance(config.get("vars"), dict), "[vars] section missing"
+    assert "routes" not in config["vars"], "Never nest route declarations in [vars]"
     for flag in (
         "CONSENT_CMP_ENABLED",
         "SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED",
@@ -81,7 +73,8 @@ def check(path: Path) -> None:
     assert any(s.get("binding") == "SCHOOL_POLICY"
                and s.get("service") == "website-block-by-school-powiis"
                for s in services), "School policy service binding must remain unchanged"
-    print("PASS: 8 exact top-level routes across seven Cloudflare zones")
+    print("PASS: Wrangler will not re-register Cloudflare Dashboard-owned routes")
+    print("REVIEW: Expected historical route inventory (must be audited in dashboard):")
     for pattern, zone in sorted(EXPECTED):
         print(f"  {pattern}  zone={zone}")
 
