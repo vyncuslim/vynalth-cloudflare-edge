@@ -278,10 +278,11 @@ test("privacy declaration and privacy policy can be read even if location gate i
 
 
 
-test("anonymous HTML visitors on six sibling domains and subdomains redirect via first-party hub",async()=>{
+test("anonymous HTML visitors on all ten sibling domains and subdomains redirect via first-party hub",async()=>{
  const all=["vyncuslim.com","vynalthai.si","vyncuslim.si",
    "vitamindai.online","sleepsomno.com","powiismunc.com",
-   "app.vyncuslim.com","dashboard.vynalthai.si"];
+   "vyncuslim.my","vynli.xyz","vynlink.xyz","zokivo.xyz",
+   "app.vyncuslim.com","dashboard.vynalthai.si","www.zokivo.xyz","profile.vynlink.xyz"];
  for(const host of all){
   const first=await initialGuestRedirect(host,"/my-page?private=123");
   const target=new URL(first.hubUrl);
@@ -296,7 +297,7 @@ test("anonymous HTML visitors on six sibling domains and subdomains redirect via
 
 
 
-test("anonymous guest approved at hub gets per-domain 15-minute Cookies on six sites",async()=>{
+test("anonymous guest approved at hub gets per-domain 15-minute Cookies on all ten sibling sites",async()=>{
  const verified=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
   method:"POST",headers:{"Origin":"https://vynalthai.com",
     "Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
@@ -306,7 +307,8 @@ test("anonymous guest approved at hub gets per-domain 15-minute Cookies on six s
  const hubCookie=verified.headers.getSetCookie()
    .find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
  for(const host of ["vyncuslim.com","vynalthai.si","vyncuslim.si",
-  "vitamindai.online","sleepsomno.com","powiismunc.com"]){
+  "vitamindai.online","sleepsomno.com","powiismunc.com",
+  "vyncuslim.my","vynli.xyz","vynlink.xyz","zokivo.xyz"]){
   const first=await initialGuestRedirect(host);
   const hub=await invoke(new Request(first.hubUrl,{headers:{Cookie:hubCookie}}));
   assert.equal(hub.status,302,host);

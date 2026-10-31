@@ -7,30 +7,10 @@ import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
 import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-owner-access.js";
 import { scheduleThreatTelemetry } from "./threat-telemetry.js";
-const ROOT_DOMAINS = [
-  "vynalthai.com",
-  "vyncuslim.com",
-  "sleepsomno.com",
-  "powiismunc.com",
-  "vitamindai.online",
-  "vynalthai.si",
-  "vyncuslim.si",
-];
+import { getRootDomain } from "./managed-domains.js";
 
 const VYNALTH_APEX = "vynalthai.com";
 const VYNALTH_WWW = `www.${VYNALTH_APEX}`;
-
-function getRootDomain(hostname) {
-  const normalized = hostname.toLowerCase();
-
-  for (const root of ROOT_DOMAINS) {
-    if (normalized === root || normalized.endsWith(`.${root}`)) {
-      return root;
-    }
-  }
-
-  return null;
-}
 
 function isValidationPath(pathname) {
   return (
