@@ -1,3 +1,5 @@
+import { getRootDomain } from './managed-domains.js';
+
 // Opt-in collection of narrow security-probe observations reaching this Worker.
 // This is NOT a Cloudflare WAF log stream or evidence of a confirmed intrusion.
 const INGEST_URL = 'https://vynalthai.com/api/security/ingest';
@@ -33,8 +35,7 @@ export function scheduleThreatTelemetry(request, env, ctx, requestId) {
       !ctx || typeof ctx.waitUntil !== 'function' ||
       !isObservedSecurityProbe(request)) return false;
   const url = new URL(request.url);
-  if (url.hostname !== 'vynalthai.com' &&
-      !url.hostname.endsWith('.vynalthai.com')) return false;
+  if (!getRootDomain(url.hostname)) return false;
 
   // Never send an IP, cookies, query strings, body, UA, GPS or visitor identity.
   const probeTemplate = PATH_PROBES.find(([pattern]) => pattern.test(url.pathname))?.[1];
