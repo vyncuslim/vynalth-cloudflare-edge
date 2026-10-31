@@ -38,12 +38,17 @@ test('all 11 domains reach their original host-specific origin without rewriting
           method:'GET',headers:{Accept:'text/plain'}
         });
         const response = await edge.fetch(request, {GPS_GATE_ENABLED:'false'}, {});
-        assert.equal(response.status, 200, host);
-        assert.equal(await response.text(), 'origin:'+host);
+        if (host === 'www.vynalthai.com') {
+          assert.equal(response.status, 301);
+          assert.equal(response.headers.get('location'), 'https://vynalthai.com/robots.txt');
+        } else {
+          assert.equal(response.status, 200, host);
+          assert.equal(await response.text(), 'origin:'+host);
+        }
         assert.equal(response.headers.get('x-vynalth-zone'), root);
         assert.equal(response.headers.get('x-vynalth-edge'), 'cloudflare-worker');
       }
     }
-    assert.equal(origins.length, ROOTS.length*2);
+    assert.equal(origins.length, ROOTS.length*2 - 1);
   } finally {globalThis.fetch=originalFetch}
 });
