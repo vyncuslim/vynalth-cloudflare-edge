@@ -42,6 +42,18 @@ test('sender strips visitor metadata and only targets first-party ingest',async(
       assert.equal(JSON.stringify(body).includes(secret),false);
   }finally{globalThis.fetch=saved}
 });
+test('arbitrary path segments never enter telemetry payload',async()=>{
+  const original=globalThis.fetch, task=[];
+  let payload;
+  globalThis.fetch=async(_url, opts)=>{payload=JSON.parse(opts.body);return new Response(null,{status:202})};
+  try{
+    const request=new Request('https://vynalthai.com/.git/config/very-private-visitor-identifier?key=SECRET');
+    assert.equal(scheduleThreatTelemetry(request,env,{waitUntil(p){task.push(p)}},'id-1'),true);
+    await Promise.all(task);
+    assert.equal(payload.path,'/.git/*');
+    assert.ok(!JSON.stringify(payload).includes('very-private-visitor-identifier'));
+  }finally{globalThis.fetch=original}
+});
 test('transport failures do not impact request handling',async()=>{
   const fetch0=globalThis.fetch,warn=console.warn;
   globalThis.fetch=async()=>{throw Error('network unavailable')};console.warn=()=>{};
