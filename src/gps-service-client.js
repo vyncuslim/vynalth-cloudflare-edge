@@ -31,7 +31,7 @@ export async function createSignedGpsPolicyRequest(original, env){
   const code=country==="MY"
     ? validated(original.cf?.regionCode,/^[A-Za-z0-9-]*$/,16):"";
   const region=country==="MY"
-    ? validated(original.cf?.region,/^[\\p{L}\\p{M} .-]*$/u,80):"";
+    ? validated(original.cf?.region,/^[\p{L}\p{M} .-]*$/u,80):"";
   const ts=String(Math.floor(Date.now()/1000));
   const payload=["gps-service-v2",ts,original.method.toUpperCase(),
     original.url,ip,country,code,region].join("\n");
