@@ -3,7 +3,9 @@
  * timezone claim. Neither field proves real physical position nor VPN status.
  */
 const COOKIE="__Host-vynalth-region";
-const TTL=120;
+// Signed regional preflight is scoped to host, Cloudflare country and source IP.
+// Keep it for 30 minutes to avoid repeated full-page checks on navigation.
+const TTL=1800;
 const ENC=new TextEncoder();
 const MALAYSIA_TIMEZONES=new Set(["Asia/Kuala_Lumpur","Asia/Kuching"]);
 const HEAD={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer",
