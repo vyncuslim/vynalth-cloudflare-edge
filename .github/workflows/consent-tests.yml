@@ -17,6 +17,8 @@ on:
       - "src/guest-gps.test.js"
       - "src/gps-telegram-alert.js"
       - "src/gps-telegram-alert.test.js"
+      - "src/edge-telegram-alert.js"
+      - "src/edge-telegram-alert.test.js"
       - "src/jingxin-media.js"
       - "src/jingxin-media.test.js"
       - "test/edge.test.js"
@@ -45,6 +47,8 @@ on:
       - "src/guest-gps.test.js"
       - "src/gps-telegram-alert.js"
       - "src/gps-telegram-alert.test.js"
+      - "src/edge-telegram-alert.js"
+      - "src/edge-telegram-alert.test.js"
       - "src/gps-verification-ui.js"
       - "src/index.js"
       - "src/public-crawler-access.js"
@@ -75,6 +79,8 @@ jobs:
           node --check src/guest-gps.test.js
           node --check src/gps-telegram-alert.js
           node --check src/gps-telegram-alert.test.js
+          node --check src/edge-telegram-alert.js
+          node --check src/edge-telegram-alert.test.js
           node --check src/jingxin-media.js
           node --check src/jingxin-media.test.js
           node --check src/universal-consent.js

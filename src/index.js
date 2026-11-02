@@ -7,6 +7,7 @@ import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
 import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-owner-access.js";
 import { scheduleThreatTelemetry } from "./threat-telemetry.js";
+import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
 
 const VYNALTH_APEX = "vynalthai.com";
@@ -104,6 +105,16 @@ export default {
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
     const requestId = crypto.randomUUID();
+    // Every response from this Worker is inspected, including edge-generated
+    // failures and origin 5xx. Telegram dispatch runs in waitUntil(), so
+    // notification outages cannot delay or change the user's HTTP response.
+    const observedResponse = (...args) => {
+      const result = edgeResponse(...args);
+      scheduleEdgeTelegramAlert({
+        env, ctx, request, url: incomingUrl, response: result, requestId
+      });
+      return result;
+    };
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
@@ -115,16 +126,16 @@ export default {
     const internalGps = await verifyGpsServiceCall(request,env,incomingUrl);
     if (internalGps) {
       if (!internalGps.authenticated) {
-        return edgeResponse(new Response("Forbidden",{status:403,
+        return observedResponse(new Response("Forbidden",{status:403,
           headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"invalid-service-auth"}}),
           request,incomingUrl,requestId,rootDomain);
       }
       const forwarded = internalGps.request;
       const temporary = temporaryIpBlockResponse(forwarded,incomingUrl);
       if (temporary && !(await shieldAccountExempt(forwarded,env,rootDomain)))
-        return edgeResponse(temporary,forwarded,incomingUrl,requestId,rootDomain);
+        return observedResponse(temporary,forwarded,incomingUrl,requestId,rootDomain);
       if (env?.GPS_GATE_ENABLED!=="true")
-        return edgeResponse(new Response("GPS policy is not enabled",{status:503,
+        return observedResponse(new Response("GPS policy is not enabled",{status:503,
           headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"not-ready"}}),
           forwarded,incomingUrl,requestId,rootDomain);
       const protectedEndpoint=incomingUrl.pathname.startsWith("/__shield/gps/");
@@ -132,9 +143,9 @@ export default {
       if (!trusted) {
         const decision=await guestGpsGate(forwarded,env,incomingUrl,ctx,requestId,
           internalGps.country);
-        if (decision)return edgeResponse(decision,forwarded,incomingUrl,requestId,rootDomain);
+        if (decision)return observedResponse(decision,forwarded,incomingUrl,requestId,rootDomain);
       }
-      return edgeResponse(new Response(null,{status:204,
+      return observedResponse(new Response(null,{status:204,
         headers:{"Cache-Control":"no-store","X-Vynalth-GPS-Policy":"allow"}}),
         forwarded,incomingUrl,requestId,rootDomain);
     }
@@ -148,7 +159,7 @@ export default {
     // this feature. This runs before GPS and origin proxying.
     const temporaryDenial = temporaryIpBlockResponse(request,incomingUrl);
     if (temporaryDenial && !(await shieldAccountExempt(request,env,rootDomain))) {
-      return edgeResponse(temporaryDenial,request,incomingUrl,requestId,rootDomain);
+      return observedResponse(temporaryDenial,request,incomingUrl,requestId,rootDomain);
     }
 
     // Owner's 10-minute access portal is served by the Worker before the GPS
@@ -156,7 +167,7 @@ export default {
     // creates an application admin/SSO session or bypasses School Policy.
     const temporaryOwnerPage=await handleTemporaryOwnerAccess(request,env,incomingUrl);
     if(temporaryOwnerPage){
-      return edgeResponse(temporaryOwnerPage,request,incomingUrl,requestId,rootDomain);
+      return observedResponse(temporaryOwnerPage,request,incomingUrl,requestId,rootDomain);
     }
 
     // Keep School IP Policy enforcement for protected photo bytes. A guest's
@@ -169,7 +180,7 @@ export default {
         !(await shieldAccountExempt(request,env,rootDomain))) {
       const schoolDenial = await checkSchoolPolicy(request,env,rootDomain);
       if (schoolDenial) {
-        return edgeResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
+        return observedResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
       }
     }
     // Private Jingxin media is handled entirely at the edge before generic
@@ -177,14 +188,14 @@ export default {
     // to potentially public static photo assets.
     const photoDecision = await handleJingxinMedia(request,env,incomingUrl,rootDomain);
     if (photoDecision) {
-      return edgeResponse(photoDecision,request,incomingUrl,requestId,rootDomain);
+      return observedResponse(photoDecision,request,incomingUrl,requestId,rootDomain);
     }
 
     // Dedicated consent endpoints are first-party and must work without GPS
     // consent and without bypassing the existing host routing/security model.
     const consentDecision = await handleUniversalConsent(request, env, incomingUrl, rootDomain);
     if (consentDecision) {
-      return edgeResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
+      return observedResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
     }
 
     // GPS and Cookie Consent are independent modules in ONE existing Worker.
@@ -204,7 +215,7 @@ export default {
     if (!canonicallyExempt && !temporaryOwnerExempt && !verifiedPublicCrawler) {
       const gpsDecision = await guestGpsGate(request,env,incomingUrl,ctx,requestId);
       if (gpsDecision) {
-        return edgeResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
+        return observedResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
       }
     }
 
@@ -213,7 +224,7 @@ export default {
     if (!isValidationPath(incomingUrl.pathname)) {
       const denial = await checkSchoolPolicy(request, env, rootDomain);
       if (denial) {
-        return edgeResponse(denial, request, incomingUrl, requestId, rootDomain);
+        return observedResponse(denial, request, incomingUrl, requestId, rootDomain);
       }
     }
 
@@ -227,7 +238,7 @@ export default {
       target.hostname = VYNALTH_APEX;
       target.port = "";
 
-      return edgeResponse(
+      return observedResponse(
         new Response(null, {
           status: 301,
           headers: { location: target.toString() },
@@ -258,7 +269,7 @@ export default {
         error,
       });
 
-      return edgeResponse(
+      return observedResponse(
         new Response("Bad Gateway", {
           status: 502,
           headers: {
@@ -289,7 +300,7 @@ export default {
         headers: safeHeaders
       });
     }
-    return edgeResponse(
+    return observedResponse(
       originResponse,
       request,
       incomingUrl,

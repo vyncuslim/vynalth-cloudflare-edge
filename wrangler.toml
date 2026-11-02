@@ -30,6 +30,13 @@ GPS_REGION_TIMEZONE_ENABLED = "true"
 # Requires Telegram Bot and Chat ID configured as Worker secrets.
 # Reuses existing TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID if bound.
 GPS_TELEGRAM_ALERTS_ENABLED = "true"
+# Operational alerts: EVERY Worker-observed 4xx/5xx and known sensitive-path probe.
+# Requires pre-existing TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID secrets.
+# Sends only fixed route families, host, status, method and request ID.
+# Every observed HTTP 4xx/5xx request queues its own alert; no cross-request cooldown.
+# Telegram rate limits and outages still constrain actual delivery; add durable queue before promising 100%.
+# Does not see WAF-preblocked requests, browser errors or unproxied domains.
+EDGE_TELEGRAM_ALERTS_ENABLED = "true"
 # Fresh GPS is required on first access, after the signed outside cookie
 # expires, and whenever the location is inside or near a campus boundary.
 GPS_RECHECK_EVERY_DOCUMENT = "true"
