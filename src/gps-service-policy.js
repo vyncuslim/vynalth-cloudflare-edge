@@ -33,7 +33,7 @@ export async function verifyGpsServiceCall(request,env,url){
    // unknown. v1 requests cannot carry extra unverified region headers.
    (isV2 ? (typeof code!=="string"||code.length>16||
      !/^[A-Za-z0-9-]*$/.test(code)||typeof region!=="string"||
-     region.length>80||!/^[\\p{L}\\p{M} .-]*$/u.test(region)) :
+     region.length>80||!/^[\p{L}\p{M} .-]*$/u.test(region)) :
      signedCode!==null||signedRegion!==null)){
   return {authenticated:false};
  }
