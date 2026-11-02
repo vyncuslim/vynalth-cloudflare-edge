@@ -491,7 +491,7 @@ function publicBrandingPage(path,request,hostname){
 // unauthorized requests; Cloudflare WAF and school policy remain in force.
 function skip(path,request,hostname){return (hostname==="vynalthai.com"&&path==="/api/security/ingest"&&request.method==="POST")||publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
-export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null){
+export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null,verifiedRegionCode=null,verifiedRegion=null){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
  if(url.pathname==="/__shield/gps/verify-info"&&request.method==="GET"){
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
@@ -504,7 +504,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  // Prefer friction-free navigation everywhere except IP-identified Penang.
  // Optional geo challenge fails open when Cloudflare region is unknown.
  // Independent WAF, School IP, origin auth and private-media policies remain.
- const penang=gpsPenangOnlyDecision(request,env,verifiedCountry);
+ const penang=gpsPenangOnlyDecision(request,env,verifiedCountry,verifiedRegionCode,verifiedRegion);
  if(penang.enabled && !penang.requireGPS &&
     !url.pathname.startsWith("/__shield/gps/"))return null;
  const cfg=config(env);
