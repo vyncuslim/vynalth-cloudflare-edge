@@ -142,7 +142,7 @@ export default {
       const trusted=!protectedEndpoint&&await shieldAccountExempt(forwarded,env,rootDomain);
       if (!trusted) {
         const decision=await guestGpsGate(forwarded,env,incomingUrl,ctx,requestId,
-          internalGps.country);
+          internalGps.country,internalGps.regionCode,internalGps.region);
         if (decision)return observedResponse(decision,forwarded,incomingUrl,requestId,rootDomain);
       }
       return observedResponse(new Response(null,{status:204,
