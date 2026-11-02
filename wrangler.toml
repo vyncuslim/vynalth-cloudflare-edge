@@ -22,9 +22,14 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
 GPS_GATE_ENABLED = "true"
-# Show GPS only when Cloudflare IP country is MY, browser timezone is MY,
-# or source location is unavailable. Foreign visitors first pass a lightweight
-# browser-timezone check; this is NOT a comprehensive VPN detection service.
+# GPS is presented ONLY when Cloudflare edge IP geolocation specifically
+# identifies Malaysia, Penang (Pulau Pinang / MY-07). Non-Penang MY states,
+# overseas visitors, and unknown state/country do not see the GPS prompt.
+# This is an optional user-experience selector, NOT a reliable security border
+# (mobile IPs, CGNAT and VPNs can be mislocated); WAF and origin auth remain.
+GPS_PENANG_ONLY_ENABLED = "true"
+# Retain legacy country/timezone feature flag for rollback only. When Penang-
+# only mode is enabled, its timezone preflight does not run for site traffic.
 GPS_REGION_TIMEZONE_ENABLED = "true"
 # Server-side Telegram notification for GPS 403, separate from visitor access.
 # Requires Telegram Bot and Chat ID configured as Worker secrets.
