@@ -4,7 +4,8 @@ import { isObservedSecurityProbe } from "./threat-telemetry.js";
  * Nonblocking, privacy-minimized Cloudflare edge alerts for all hosts that
  * actually pass through this Worker. The Bot token never enters the browser.
  *
- * Every 4xx/5xx response (including expected denials) is reported per request.\n * This is intentionally noisy; do not mislabel ordinary 4xx as outages.
+ * Every 4xx/5xx response (including expected denials) is reported per request. 
+ * This is intentionally noisy; do not mislabel ordinary 4xx as outages.
  * Specific GPS denials have their own independent notification pipeline.
  * This is not Cloudflare WAF analytics, a client-side error collector, or
  * proof of a successful Telegram delivery until Telegram acknowledges it.
@@ -12,15 +13,15 @@ import { isObservedSecurityProbe } from "./threat-telemetry.js";
 const TOKEN_RE = /^[0-9]{5,20}:[A-Za-z0-9_-]{25,}$/;
 const CHAT_RE = /^(?:-?[0-9]{3,24}|@[A-Za-z0-9_]{5,32})$/;
 const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
-// Each HTTP failure is an independent event. Do not suppress other failures just\n// because their path family/status matches a previous failure.
+// Each HTTP failure is an independent event. Do not suppress other failures just
+// because their path family/status matches a previous failure.
 
 export function edgeTelegramStatus(env) {
   const enabled = env?.EDGE_TELEGRAM_ALERTS_ENABLED === "true";
   const token = env?.EDGE_TELEGRAM_BOT_TOKEN || env?.TELEGRAM_BOT_TOKEN;
   const chat = env?.EDGE_TELEGRAM_CHAT_ID || env?.TELEGRAM_CHAT_ID || env?.ADMIN_TELEGRAM_CHAT_ID;
   const configured = TOKEN_RE.test(String(token || "")) &&
-    CHAT_RE.test(String(chat || "")) &&
-    true;
+    CHAT_RE.test(String(chat || ""));
   return { enabled, configured };
 }
 
@@ -87,7 +88,8 @@ async function dispatch({ env, request, url, response, requestId, fetchImpl }) {
       "Method: " + request.method,
       "Event ID: " + safeRef(requestId),
       "Time (UTC): " + new Date().toISOString(),
-      "Evidence: " + issue.description,\n      "Delivery: Telegram Bot API acknowledged this individual event (if received).",
+      "Evidence: " + issue.description,
+      "Delivery: Telegram Bot API acknowledged this individual event (if received).",
       "Source: Cloudflare edge Worker",
       "Privacy: no IP, GPS, user identifier, query, Cookie, request body or secret."
     ].join("\n");
