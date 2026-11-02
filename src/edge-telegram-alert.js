@@ -4,7 +4,7 @@ import { isObservedSecurityProbe } from "./threat-telemetry.js";
  * Nonblocking, privacy-minimized Cloudflare edge alerts for all hosts that
  * actually pass through this Worker. The Bot token never enters the browser.
  *
- * Every 4xx/5xx response (including expected denials) is reported per request. 
+ * Every 4xx/5xx response (including expected denials) is reported per request.
  * This is intentionally noisy; do not mislabel ordinary 4xx as outages.
  * Specific GPS denials have their own independent notification pipeline.
  * This is not Cloudflare WAF analytics, a client-side error collector, or
@@ -71,7 +71,6 @@ async function dispatch({ env, request, url, response, requestId, fetchImpl }) {
   const issue = issueFor(request, response);
   if (!issue) return { state: "ignored" };
 
-  const kv = env.CONSENT_KV;
   const host = hostLabel(url.hostname.toLowerCase());
   const family = routeFamily(url.pathname);
 
@@ -89,7 +88,7 @@ async function dispatch({ env, request, url, response, requestId, fetchImpl }) {
       "Event ID: " + safeRef(requestId),
       "Time (UTC): " + new Date().toISOString(),
       "Evidence: " + issue.description,
-      "Delivery: Telegram Bot API acknowledged this individual event (if received).",
+      "Note: automated observation; not every 4xx indicates a site malfunction.",
       "Source: Cloudflare edge Worker",
       "Privacy: no IP, GPS, user identifier, query, Cookie, request body or secret."
     ].join("\n");
@@ -123,7 +122,7 @@ export function scheduleEdgeTelegramAlert({
   const config = edgeTelegramStatus(env);
   if (!config.enabled) return false;
   if (!config.configured) {
-    console.warn("[EDGE TELEGRAM] enabled but Bot/Chat/KV binding is incomplete");
+    console.warn("[EDGE TELEGRAM] enabled but Bot/Chat credentials are incomplete");
     return false;
   }
   if (!ctx || typeof ctx.waitUntil !== "function" ||
