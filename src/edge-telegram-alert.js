@@ -12,7 +12,6 @@ import { isObservedSecurityProbe } from "./threat-telemetry.js";
  */
 const TOKEN_RE = /^[0-9]{5,20}:[A-Za-z0-9_-]{25,}$/;
 const CHAT_RE = /^(?:-?[0-9]{3,24}|@[A-Za-z0-9_]{5,32})$/;
-const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
 // Each HTTP failure is an independent event. Do not suppress other failures just
 // because their path family/status matches a previous failure.
 
@@ -41,7 +40,6 @@ function routeFamily(path) {
 }
 
 function issueFor(request, response) {
-  if (!ALLOWED_METHODS.has(request.method)) return null;
   const status = response.status;
   if (status >= 500 && status <= 599) {
     return { code: "HTTP_5XX", severity: status >= 502 ? "Critical" : "High",
