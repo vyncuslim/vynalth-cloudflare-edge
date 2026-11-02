@@ -4,7 +4,7 @@ import { isObservedSecurityProbe } from "./threat-telemetry.js";
  * Nonblocking, privacy-minimized Cloudflare edge alerts for all hosts that
  * actually pass through this Worker. The Bot token never enters the browser.
  *
- * Normal 401/403/404, including expected GPS denials, are not outages.
+ * Every 4xx/5xx response (including expected denials) is reported per request.\n * This is intentionally noisy; do not mislabel ordinary 4xx as outages.
  * Specific GPS denials have their own independent notification pipeline.
  * This is not Cloudflare WAF analytics, a client-side error collector, or
  * proof of a successful Telegram delivery until Telegram acknowledges it.
@@ -12,7 +12,7 @@ import { isObservedSecurityProbe } from "./threat-telemetry.js";
 const TOKEN_RE = /^[0-9]{5,20}:[A-Za-z0-9_-]{25,}$/;
 const CHAT_RE = /^(?:-?[0-9]{3,24}|@[A-Za-z0-9_]{5,32})$/;
 const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
-const COOLDOWN_SECONDS = 600;
+// Each HTTP failure is an independent event. Do not suppress other failures just\n// because their path family/status matches a previous failure.
 
 export function edgeTelegramStatus(env) {
   const enabled = env?.EDGE_TELEGRAM_ALERTS_ENABLED === "true";
@@ -20,8 +20,7 @@ export function edgeTelegramStatus(env) {
   const chat = env?.EDGE_TELEGRAM_CHAT_ID || env?.TELEGRAM_CHAT_ID || env?.ADMIN_TELEGRAM_CHAT_ID;
   const configured = TOKEN_RE.test(String(token || "")) &&
     CHAT_RE.test(String(chat || "")) &&
-    typeof env?.CONSENT_KV?.get === "function" &&
-    typeof env?.CONSENT_KV?.put === "function";
+    true;
   return { enabled, configured };
 }
 
@@ -47,13 +46,13 @@ function issueFor(request, response) {
     return { code: "HTTP_5XX", severity: status >= 502 ? "Critical" : "High",
       status, description: "Server/edge error observed" };
   }
-  if (status === 429) {
-    return { code: "HTTP_429", severity: "Warning", status,
-      description: "Request rate limit observed; not necessarily an attack" };
-  }
   if (isObservedSecurityProbe(request)) {
     return { code: "SUSPICIOUS_PROBE", severity: "Warning", status,
       description: "Known sensitive-path probe observed; intrusion UNVERIFIED" };
+  }
+  if (status >= 400 && status <= 499) {
+    return { code: "HTTP_4XX", severity: status === 429 ? "High" : "Warning",
+      status, description: "Client/request error or access denial observed; may be expected, not a verified incident" };
   }
   return null;
 }
@@ -74,12 +73,8 @@ async function dispatch({ env, request, url, response, requestId, fetchImpl }) {
   const kv = env.CONSENT_KV;
   const host = hostLabel(url.hostname.toLowerCase());
   const family = routeFamily(url.pathname);
-  const fingerprint = [host, issue.code, String(issue.status), family].join(":");
-  // Key contains only fixed categories and a sanitized first-party hostname.
-  const key = "ops:telegram:v1:" + fingerprint;
 
   try {
-    if (await kv.get(key)) return { state: "deduplicated" };
     const token = env.EDGE_TELEGRAM_BOT_TOKEN || env.TELEGRAM_BOT_TOKEN;
     const chat = env.EDGE_TELEGRAM_CHAT_ID || env.TELEGRAM_CHAT_ID || env.ADMIN_TELEGRAM_CHAT_ID;
     const message = [
@@ -90,9 +85,9 @@ async function dispatch({ env, request, url, response, requestId, fetchImpl }) {
       "Route family: " + family,
       "HTTP status: " + issue.status,
       "Method: " + request.method,
-      "Request ID: " + safeRef(requestId),
+      "Event ID: " + safeRef(requestId),
       "Time (UTC): " + new Date().toISOString(),
-      "Evidence: " + issue.description,
+      "Evidence: " + issue.description,\n      "Delivery: Telegram Bot API acknowledged this individual event (if received).",
       "Source: Cloudflare edge Worker",
       "Privacy: no IP, GPS, user identifier, query, Cookie, request body or secret."
     ].join("\n");
@@ -112,7 +107,6 @@ async function dispatch({ env, request, url, response, requestId, fetchImpl }) {
       console.warn("[EDGE TELEGRAM] Telegram acknowledgment missing");
       return { state: "unconfirmed" };
     }
-    await kv.put(key, "1", { expirationTtl: COOLDOWN_SECONDS });
     return { state: "sent" };
   } catch {
     // Do not log fetch URLs, request bodies or error objects containing secrets.
