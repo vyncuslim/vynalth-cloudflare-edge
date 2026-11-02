@@ -34,7 +34,7 @@ export async function verifyGpsServiceCall(request,env,url){
    (isV2 ? (typeof code!=="string"||code.length>16||
      !/^[A-Za-z0-9-]*$/.test(code)||typeof region!=="string"||
      region.length>80||!/^[\\p{L}\\p{M} .-]*$/u.test(region)) :
-     signedCode!==null||signedRegion!==null))){
+     signedCode!==null||signedRegion!==null)){
   return {authenticated:false};
  }
  const bytes=hexToBytes(sig);
