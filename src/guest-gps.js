@@ -548,7 +548,8 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  if(url.pathname==="/__shield/gps/client.js"&&request.method==="GET")return script();
  if(url.pathname==="/__shield/gps/verify")return verify(request,url,cfg,env,ctx,requestId);
  if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
-  return reply(200,{enabled:true,configurationAvailable:true,enforcing:true,
+  return reply(200,{enabled:true,configurationAvailable:true,
+    enforcing:penang.requireGPS,
    telegramAlerts:telegramGpsStatus(env),
    gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
