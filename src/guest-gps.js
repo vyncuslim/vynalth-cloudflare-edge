@@ -272,12 +272,14 @@ async function bridge(request,url,cfg,env){
  const path=url.searchParams.get("return"),state=url.searchParams.get("state");
  if(!allowedTarget(target)||!safeRelativePath(path)||!validState(state))
    return reply(400,{error:"INVALID_BRIDGE_DESTINATION"});
- if(env?.GPS_RECHECK_EVERY_DOCUMENT==="true"&&
+ // An existing signed OUTSIDE hub session is already an approved proof.
+ // INSIDE blocks win; near-boundary access continues to require fresh proof.
+ if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
+ const verdict=await sessionVerdict(request,cfg,url.hostname);
+ if(env?.GPS_RECHECK_EVERY_DOCUMENT==="true"&&verdict&&
+    !(env?.GPS_OUTSIDE_SESSION_FASTPASS==="true"&&verdict==="outside")&&
     !(await consumeFreshBridge(request,env,cfg,url.hostname)))
    return reply(403,{error:"FRESH_GPS_REQUIRED"});
- let verdict=null;
- if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
- verdict=await sessionVerdict(request,cfg,url.hostname);
  if(!verdict)return page(); // First-party hub asks for browser GPS; NO login needed.
  const ticket=await handoffToken(cfg,target,path,state,verdict);
  const destination=new URL("https://"+target+"/__shield/gps/import");
@@ -551,24 +553,22 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  // Existing trusted server-verified account states bypass this GPS policy.
  if(await exempt(request,cfg,url.hostname))return null;
  if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
- // Foreign IP: signed short-lived browser-timezone preflight.
+ // A valid host-bound, HMAC-signed OUTSIDE verdict is stronger than the
+ // browser-timezone preflight. Avoid interrupting an already verified visitor.
+ // Other WAF, School IP and identity controls still apply in src/index.js.
+ if(env?.GPS_OUTSIDE_SESSION_FASTPASS==="true"&&
+    await sessionVerdict(request,cfg,url.hostname)==="outside")return null;
+ // Foreign IP: signed browser-timezone preflight.
  // A MY/unknown IP never qualifies for a GPS bypass.
  const region=await gpsRegionalDecision(request,env,url,verifiedCountry);
  if(region.response)return region.response;
  if(region.skipGPS)return null;
- // A genuinely OUTSIDE verdict is backed by a host-bound HMAC cookie that
- // expires within 15 minutes. Reuse it for HTML documents only when the site
- // operator explicitly enables fast-pass. IP city/country alone never grants
- // this exemption; near-boundary, inside, expired and forged cookies do not.
- // The independent school-IP policy and WAF still run in src/index.js.
- if(env?.GPS_OUTSIDE_SESSION_FASTPASS==="true"&&
-    await sessionVerdict(request,cfg,url.hostname)==="outside")return null;
  // Without a verified outside session, full document navigation requires
  // a fresh browser GPS read. One-visit navigation proofs remain enforced.
  if(env?.GPS_RECHECK_EVERY_DOCUMENT==="true"&&isBrowserDocument(request)){
   if(await consumeVisitProof(request,env,cfg,url))return null;
   if(url.hostname!==GPS_BRIDGE_HUB&&allowedTarget(url.hostname))
-   return beginHandoff(url,true);
+   return beginHandoff(url,env?.GPS_OUTSIDE_SESSION_FASTPASS!=="true");
   return page();
  }
  if(await permitted(request,cfg,url.hostname))return null;
