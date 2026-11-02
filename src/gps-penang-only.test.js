@@ -108,6 +108,16 @@ test("GPS status and verify-info routes remain accessible", async () => {
   assert.equal((await info.json()).regionalMode, "penang-only");
 });
 
+test("status endpoint reports GPS enforcement only for Penang visitors", async () => {
+  const johor = await gate(request("/__shield/gps/status",
+    { country: "MY", region: "Johor", regionCode: "01" }));
+  assert.equal(johor?.status, 200);
+  const status = await johor.json();
+  assert.equal(status.enforcing, false);
+  assert.equal(status.regionalPolicy.mode, "penang-only");
+  assert.equal(status.regionalPolicy.gpsRequired, false);
+});
+
 test("the legacy selection behavior is unchanged when Penang mode is disabled", async () => {
   const old = { ...ENV, GPS_PENANG_ONLY_ENABLED: "false",
     GPS_REGION_TIMEZONE_ENABLED: "false" };
