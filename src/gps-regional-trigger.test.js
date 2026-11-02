@@ -67,7 +67,7 @@ test("overseas IP and valid overseas timezone can access without GPS",async()=>{
  assert.equal((await response.json()).gpsRequired,false);
  const signed=response.headers.get("Set-Cookie");
  assert.match(signed,/HttpOnly/);
- assert.match(signed,/Max-Age=120/);
+ assert.match(signed,/Max-Age=1800/);
  const cookie=signed.split(";")[0];
  assert.equal(await gate(req("/protected","GB","198.51.100.45","GET",undefined,{Cookie:cookie})),null);
  const spoofed=await gate(req("/protected","GB","203.0.113.44","GET",undefined,{Cookie:cookie}));
