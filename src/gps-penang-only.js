@@ -13,7 +13,7 @@
 const PENANG_REGION_NAMES = new Set(["penang", "pulau pinang"]);
 const PENANG_REGION_CODES = new Set(["07", "MY-07"]);
 
-export function gpsPenangOnlyDecision(request, env, verifiedCountry = null) {
+export function gpsPenangOnlyDecision(request, env, verifiedCountry = null, verifiedRegionCode = null, verifiedRegion = null) {
   if (env?.GPS_PENANG_ONLY_ENABLED !== "true") {
     return { enabled: false, requireGPS: true, reason: "legacy-policy" };
   }
@@ -27,8 +27,14 @@ export function gpsPenangOnlyDecision(request, env, verifiedCountry = null) {
   if (country !== "MY") {
     return { enabled: true, requireGPS: false, reason: "outside-malaysia-or-unknown" };
   }
-  const regionCode = hasSignedCountry ? "" : String(cf?.regionCode ?? "").trim().toUpperCase();
-  const regionName = hasSignedCountry ? "" : String(cf?.region ?? "").trim().toLowerCase();
+  const regionCode = String(hasSignedCountry ? (verifiedRegionCode ?? "") : (cf?.regionCode ?? "")).trim().toUpperCase();
+  const regionName = String(hasSignedCountry ? (verifiedRegion ?? "") : (cf?.region ?? "")).trim().toLowerCase();
+  // If the two signed/Cloudflare-derived region fields contradict each other,
+  // do not force GPS on a likely falsely identified visitor.
+  if (regionCode && regionName &&
+      PENANG_REGION_CODES.has(regionCode) !== PENANG_REGION_NAMES.has(regionName)) {
+    return { enabled:true,requireGPS:false,reason:"conflicting-region-evidence" };
+  }
   if (PENANG_REGION_CODES.has(regionCode) || PENANG_REGION_NAMES.has(regionName)) {
     return { enabled: true, requireGPS: true, reason: "penang-ip-region" };
   }
