@@ -27,7 +27,7 @@ function source(region, code, country="MY"){
  Object.defineProperty(req,"cf",{value:{country,region,regionCode:code}});
  return req;
 }
-test("v2 signed original Penang state causes GPS check through internal service",async()=>{
+test("v2 signed Penang STATE alone cannot establish island residence and is not GPS gated",async()=>{
  const r=await createSignedGpsPolicyRequest(source("Penang","07"),ENV);
  const a=await verifyGpsServiceCall(r,ENV,new URL(r.url));
  assert.equal(a.authenticated,true);
@@ -36,8 +36,8 @@ test("v2 signed original Penang state causes GPS check through internal service"
  assert.equal(a.region,"Penang");
  assert.equal(r.headers.get("x-vynalth-gps-service-v"),"2");
  const decision=await edge.fetch(r,ENV,{});
- assert.equal(decision.status,302); // first-party GPS handoff on non-hub HTML host
- assert.match(decision.headers.get("location"),/\/__shield\/gps\/(?:bridge|recheck)/);
+ assert.equal(decision.status,204); // state-only signature does not prove island
+ assert.equal(decision.headers.get("X-Vynalth-GPS-Policy"),"allow");
 });
 test("v2 signed Johor state returns authorized 204 to the same policy-only route",async()=>{
  const req=await createSignedGpsPolicyRequest(source("Johor","01"),ENV);

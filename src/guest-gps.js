@@ -34,7 +34,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-outside-coarse-accuracy-v3";
+const GPS_POLICY_REVISION="gps-island-city-bounds-v4";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -507,12 +507,13 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
     exemptAccountStatuses:["trust","contact","status"],preciseCoordinatesStoredInCookie:false,
     crossDomainCookieReading:false,defaultEnabled:false,
-    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-only":"legacy"});
+    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-island-only":"legacy"});
  }
 
  if(env?.GPS_GATE_ENABLED!=="true")return null;
- // Prefer friction-free navigation everywhere except IP-identified Penang.
- // Optional geo challenge fails open when Cloudflare region is unknown.
+ // Prefer friction-free navigation except for conservatively IP-identified
+ // Penang ISLAND. Mainland Penang (Butterworth/Seberang Perai) does not
+ // automatically receive a GPS prompt. Missing/ambiguous city fails open.
  // Independent WAF, School IP, origin auth and private-media policies remain.
  const penang=gpsPenangOnlyDecision(request,env,verifiedCountry,verifiedRegionCode,verifiedRegion);
  if(penang.enabled && !penang.requireGPS &&
@@ -564,9 +565,10 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
    gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:penang.enabled
-    ? {enabled:true,mode:"penang-only",trigger:"cloudflare-ip-region",
-       regionKnown:penang.reason==="penang-ip-region",
-       gpsRequired:penang.requireGPS,vpnDetection:"not-guaranteed"}
+    ? {enabled:true,mode:"penang-island-only",trigger:"cloudflare-ip-city-and-coarse-coordinates",
+       regionKnown:penang.reason==="penang-island-ip-evidence",
+       gpsRequired:penang.requireGPS,selectionReason:penang.reason,
+       vpnDetection:"not-guaranteed",preciseGpsInferred:false}
     : {enabled:env?.GPS_REGION_TIMEZONE_ENABLED==="true",
        malaysiaIpOrTimezone:true,vpnDetection:"not-guaranteed"},
    policyRevision:GPS_POLICY_REVISION,
