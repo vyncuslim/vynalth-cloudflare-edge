@@ -489,7 +489,17 @@ function publicBrandingPage(path,request,hostname){
 // GPS applies to browser access, not a dedicated server-to-server telemetry
 // receiver. Vercel independently enforces the Bearer secret and rejects all
 // unauthorized requests; Cloudflare WAF and school policy remain in force.
-function skip(path,request,hostname){return (hostname==="vynalthai.com"&&path==="/api/security/ingest"&&request.method==="POST")||publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
+// The Shield SDK must be publicly loadable even when optional Penang GPS
+// consent is pending. This only exempts a narrowly defined script/verification
+// route from the WEBSITE GPS overlay; it does not bypass Cloudflare WAF,
+// rate limits, backend authentication or Shield's risk/decision engine.
+function shieldOperationalRoute(path,request,hostname){
+ if(hostname!=="shield.vynalthai.com")return false;
+ if(path==="/widget.js")return request.method==="GET"||request.method==="HEAD";
+ if(path==="/api/verify")return ["GET","HEAD","POST","OPTIONS"].includes(request.method);
+ return false;
+}
+function skip(path,request,hostname){return shieldOperationalRoute(path,request,hostname)||(hostname==="vynalthai.com"&&path==="/api/security/ingest"&&request.method==="POST")||publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
 export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null,verifiedRegionCode=null,verifiedRegion=null){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
