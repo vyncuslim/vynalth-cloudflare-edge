@@ -130,3 +130,32 @@ test("signed internal country without a signed state must not trust the second W
   assert.equal(decision.requireGPS, false,
     "the internal Worker's region is not proof of the original visitor state");
 });
+
+
+test("Shield SDK and verification API are not blocked by the optional Penang GPS overlay",async()=>{
+  const env={...ENV};
+  const cf={country:"MY",regionCode:"07",region:"Penang"};
+  for(const method of ["GET","HEAD"]){
+    const req=new Request("https://shield.vynalthai.com/widget.js",{method,headers:{"Accept":"application/javascript"}});
+    Object.defineProperty(req,"cf",{value:cf});
+    assert.equal(await guestGpsGate(req,env,new URL(req.url)),null,method+" widget.js");
+  }
+  for(const method of ["GET","HEAD","POST","OPTIONS"]){
+    const req=new Request("https://shield.vynalthai.com/api/verify",{method});
+    Object.defineProperty(req,"cf",{value:cf});
+    assert.equal(await guestGpsGate(req,env,new URL(req.url)),null,method+" /api/verify");
+  }
+  // Exact host/path/method only: this must NOT exempt private Shield URLs
+  // or unrelated origins from the campus GPS policy.
+  for(const u of ["https://shield.vynalthai.com/api/admin",
+                  "https://shield.vynalthai.com/widget.js.map",
+                  "https://another.vynalthai.com/widget.js"]){
+    const req=new Request(u);
+    Object.defineProperty(req,"cf",{value:cf});
+    const result=await guestGpsGate(req,env,new URL(req.url));
+    assert.equal(result?.status,403,u);
+  }
+  const unsafe=new Request("https://shield.vynalthai.com/api/verify",{method:"DELETE"});
+  Object.defineProperty(unsafe,"cf",{value:cf});
+  assert.equal((await guestGpsGate(unsafe,env,new URL(unsafe.url)))?.status,403);
+});
