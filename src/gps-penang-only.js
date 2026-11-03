@@ -67,9 +67,9 @@ function islandCandidate(cf) {
 export function gpsPenangOnlyDecision(
   request, env, verifiedCountry = null, verifiedRegionCode = null, verifiedRegion = null
 ) {
-  // Explicit legacy opt-out remains, but missing flags default to the LESS
-  // intrusive island policy, not an all-country GPS permission prompt.
-  if (env?.GPS_PENANG_ONLY_ENABLED === "false") {
+  // Preserve explicitly scoped legacy policy on other domains. The island
+  // selector is active only where the operator enabled Penang-only mode.
+  if (env?.GPS_PENANG_ONLY_ENABLED !== "true") {
     return {enabled:false,requireGPS:true,reason:"legacy-policy"};
   }
   const cf = request?.cf;
