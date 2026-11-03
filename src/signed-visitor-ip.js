@@ -2,7 +2,10 @@
 // Never trust x-vynalth-client-* headers submitted by the public browser.
 // This is optional until the same VISITOR_IP_SIGNING_SECRET is configured in
 // BOTH the Cloudflare Worker and the Vercel API project.
-const AUTH_HEADERS = ['x-vynalth-client-ip','x-vynalth-client-ts','x-vynalth-client-signature','x-vynalth-client-host'];
+const AUTH_HEADERS = [
+  'x-vynalth-client-ip','x-vynalth-client-ts','x-vynalth-client-signature','x-vynalth-client-host',
+  'x-vynalth-client-country','x-vynalth-client-region','x-vynalth-client-geo-signature',
+];
 function plausibleIp(value) {
   if (!value || value.length > 45) return false;
   const octets=value.split('.');
@@ -28,5 +31,20 @@ export async function signedVisitorOriginRequest(request, env, now=Date.now()) {
   headers.set('x-vynalth-client-ip',ip);
   headers.set('x-vynalth-client-ts',ts);
   headers.set('x-vynalth-client-signature',hex);
+
+  // Only request.cf is provided by the Cloudflare runtime. Never sign browser
+  // supplied cf-ipcountry / x-vercel-ip-country / x-vynalth-client-country.
+  // Geo is approximate IP-derived location, not GPS.
+  const country=String(request.cf?.country || '').toUpperCase();
+  const region=String(request.cf?.regionCode || '').toUpperCase();
+  if (/^[A-Z]{2}$/.test(country) && country!=='XX' && country!=='T1') {
+    const safeRegion=/^[A-Z0-9-]{1,12}$/.test(region)?region:'';
+    const geoPayload=['geo-v1',ip,ts,host,country,safeRegion].join('|');
+    const geoMac=await crypto.subtle.sign('HMAC',signingKey,new TextEncoder().encode(geoPayload));
+    const geoHex=Array.from(new Uint8Array(geoMac),b=>b.toString(16).padStart(2,'0')).join('');
+    headers.set('x-vynalth-client-country',country);
+    headers.set('x-vynalth-client-region',safeRegion);
+    headers.set('x-vynalth-client-geo-signature',geoHex);
+  }
   return new Request(request,{headers});
 }
