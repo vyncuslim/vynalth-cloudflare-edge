@@ -32,18 +32,45 @@ function request(path="/protected", cf, headers={}) {
 const gate = (req, env=ENV, country=null) =>
   guestGpsGate(req, env, new URL(req.url), null, null, country);
 
-test("Penang state codes and names trigger existing GPS challenge", async () => {
-  for (const cf of [
-    { country: "MY", regionCode: "07", region: "Penang" },
-    { country: "MY", regionCode: "MY-07" },
-    { country: "MY", region: "Pulau Pinang" },
-    { country: "MY", region: "PENANG" },
-  ]) {
-    const req = request("/private", cf);
-    assert.equal(gpsPenangOnlyDecision(req, ENV).requireGPS, true);
-    const result = await gate(req);
-    assert.equal(result?.status, 403, JSON.stringify(cf));
-    assert.match(await result.text(), /Precise location required/);
+test("Penang island city and IP coordinates together trigger GPS",async()=>{
+  for(const cf of [
+    {country:"MY",regionCode:"07",region:"Penang",city:"George Town",latitude:"5.414",longitude:"100.329"},
+    {country:"MY",regionCode:"MY-07",city:"Bayan Lepas",latitude:"5.294",longitude:"100.266"},
+    {country:"MY",region:"Pulau Pinang",city:"Balik Pulau",latitude:"5.347",longitude:"100.232"}
+  ]){
+    const r=request("/private",cf);
+    assert.equal(gpsPenangOnlyDecision(r,ENV).requireGPS,true,JSON.stringify(cf));
+    const response=await gate(r);
+    assert.equal(response?.status,403,JSON.stringify(cf));
+    assert.match(await response.text(),/Precise location required/);
+  }
+});
+
+test("Butterworth and other Penang mainland cities do NOT trigger island-only GPS",async()=>{
+  for(const cf of [
+    {country:"MY",regionCode:"07",region:"Penang",city:"Butterworth",latitude:"5.399",longitude:"100.374"},
+    {country:"MY",regionCode:"07",region:"Penang",city:"Seberang Perai",latitude:"5.389",longitude:"100.38"},
+    {country:"MY",regionCode:"07",city:"Bukit Mertajam",latitude:"5.363",longitude:"100.463"},
+    // A mainland city declaration overrides misleading IP coordinates.
+    {country:"MY",regionCode:"07",city:"Butterworth",latitude:"5.414",longitude:"100.329"}
+  ]){
+    const r=request("/private",cf);
+    assert.equal(gpsPenangOnlyDecision(r,ENV).requireGPS,false,JSON.stringify(cf));
+    assert.equal(await gate(r),null,JSON.stringify(cf));
+  }
+});
+
+test("Penang state alone or ambiguous location does not force GPS",async()=>{
+  for(const cf of [
+    {country:"MY",regionCode:"07",region:"Penang"},
+    {country:"MY",regionCode:"MY-07",city:"Penang",latitude:"5.414",longitude:"100.329"},
+    {country:"MY",regionCode:"07",city:"George Town"},
+    {country:"MY",regionCode:"07",city:"George Town",latitude:"5.399",longitude:"100.374"},
+    {country:"MY",regionCode:"07",city:"George Town",latitude:"invalid",longitude:"100.329"}
+  ]){
+    const r=request("/private",cf);
+    assert.equal(gpsPenangOnlyDecision(r,ENV).requireGPS,false,JSON.stringify(cf));
+    assert.equal(await gate(r),null,JSON.stringify(cf));
   }
 });
 
@@ -81,7 +108,7 @@ test("browser-supplied CF-IPCountry, state and timezone cannot spoof Penang sele
     "X-Timezone": "Asia/Kuala_Lumpur",
   });
   assert.equal(await gate(spoofed), null);
-  const actual = request("/private", { country: "MY", regionCode: "07" }, {
+  const actual = request("/private", { country: "MY", regionCode: "07", city:"George Town", latitude:"5.414",longitude:"100.329" }, {
     "CF-IPCountry": "US", "X-Region-Code": "01", "X-Timezone": "Europe/London",
   });
   assert.equal((await gate(actual))?.status, 403);
@@ -91,21 +118,21 @@ test("non-Penang visits remain accessible if GPS signing configuration fails", a
   const wrong = { ...ENV, GPS_GATE_SESSION_SECRET: "broken" };
   const johor = request("/private", { country: "MY", region: "Johor" });
   assert.equal(await gate(johor, wrong), null);
-  const penang = request("/private", { country: "MY", regionCode: "07" });
+  const penang = request("/private", { country: "MY", regionCode: "07",city:"George Town",latitude:"5.414",longitude:"100.329" });
   assert.equal((await gate(penang, wrong))?.status, 503);
 });
 
 test("GPS status and verify-info routes remain accessible", async () => {
-  const r = request("/__shield/gps/status", { country: "MY", regionCode: "07" });
+  const r = request("/__shield/gps/status", { country: "MY", regionCode: "07",city:"George Town",latitude:"5.414",longitude:"100.329" });
   const response = await gate(r);
   assert.equal(response?.status, 200);
   const status = await response.json();
-  assert.equal(status.regionalPolicy.mode, "penang-only");
+  assert.equal(status.regionalPolicy.mode, "penang-island-only");
   assert.equal(status.regionalPolicy.gpsRequired, true);
   assert.equal(status.regionalPolicy.vpnDetection, "not-guaranteed");
-  const info = await gate(request("/__shield/gps/verify-info", { country: "MY", regionCode: "07" }));
+  const info = await gate(request("/__shield/gps/verify-info", { country: "MY", regionCode: "07",city:"George Town",latitude:"5.414",longitude:"100.329" }));
   assert.equal(info?.status, 200);
-  assert.equal((await info.json()).regionalMode, "penang-only");
+  assert.equal((await info.json()).regionalMode, "penang-island-only");
 });
 
 test("status endpoint reports GPS enforcement only for Penang visitors", async () => {
@@ -114,7 +141,7 @@ test("status endpoint reports GPS enforcement only for Penang visitors", async (
   assert.equal(johor?.status, 200);
   const status = await johor.json();
   assert.equal(status.enforcing, false);
-  assert.equal(status.regionalPolicy.mode, "penang-only");
+  assert.equal(status.regionalPolicy.mode, "penang-island-only");
   assert.equal(status.regionalPolicy.gpsRequired, false);
 });
 
@@ -158,4 +185,13 @@ test("Shield SDK and verification API are not blocked by the optional Penang GPS
   const unsafe=new Request("https://shield.vynalthai.com/api/verify",{method:"DELETE"});
   Object.defineProperty(unsafe,"cf",{value:cf});
   assert.equal((await guestGpsGate(unsafe,env,new URL(unsafe.url)))?.status,403);
+});
+
+test("Penang island selector is the default without an opt-in environment flag",async()=>{
+  const e={...ENV};delete e.GPS_PENANG_ONLY_ENABLED;
+  const mainland=request("/private",{country:"MY",regionCode:"07",city:"Butterworth",latitude:"5.399",longitude:"100.374"});
+  assert.equal(gpsPenangOnlyDecision(mainland,e).requireGPS,false);
+  assert.equal(await gate(mainland,e),null);
+  const island=request("/private",{country:"MY",regionCode:"07",city:"George Town",latitude:"5.414",longitude:"100.329"});
+  assert.equal(gpsPenangOnlyDecision(island,e).requireGPS,true);
 });
