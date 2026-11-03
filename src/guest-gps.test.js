@@ -685,12 +685,12 @@ test("GPS status advertises active boundary-side policy revision without coordin
  assert.equal(data.enabled,true);
  assert.equal(data.configurationAvailable,true);
  assert.equal(data.enforcing,true);
- assert.equal(data.policyRevision,"gps-outside-coarse-accuracy-v3");
+ assert.equal(data.policyRevision,"gps-island-city-bounds-v4");
  assert.equal(JSON.stringify(data).includes("latitude"),false);
  const invalid=await invoke(req("/__shield/gps/status"),{...cfg,GPS_GATE_SESSION_SECRET:undefined});
  assert.equal(invalid.status,503);
  const bad=await invalid.json();
- assert.equal(bad.policyRevision,"gps-outside-coarse-accuracy-v3");
+ assert.equal(bad.policyRevision,"gps-island-city-bounds-v4");
  assert.equal(bad.configurationAvailable,false);
 });
 
