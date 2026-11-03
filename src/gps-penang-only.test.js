@@ -187,11 +187,12 @@ test("Shield SDK and verification API are not blocked by the optional Penang GPS
   assert.equal((await guestGpsGate(unsafe,env,new URL(unsafe.url)))?.status,403);
 });
 
-test("Penang island selector is the default without an opt-in environment flag",async()=>{
-  const e={...ENV};delete e.GPS_PENANG_ONLY_ENABLED;
-  const mainland=request("/private",{country:"MY",regionCode:"07",city:"Butterworth",latitude:"5.399",longitude:"100.374"});
-  assert.equal(gpsPenangOnlyDecision(mainland,e).requireGPS,false);
-  assert.equal(await gate(mainland,e),null);
-  const island=request("/private",{country:"MY",regionCode:"07",city:"George Town",latitude:"5.414",longitude:"100.329"});
-  assert.equal(gpsPenangOnlyDecision(island,e).requireGPS,true);
+test("Explicit Penang-only flag remains required to avoid changing unrelated domains",async()=>{
+  const env={...ENV};delete env.GPS_PENANG_ONLY_ENABLED;
+  const mainland=request("/private",{
+    country:"MY",regionCode:"07",city:"Butterworth",latitude:"5.399",longitude:"100.374"
+  });
+  assert.equal(gpsPenangOnlyDecision(mainland,env).enabled,false);
+  const legacy=await gate(mainland,env);
+  assert.equal(legacy?.status,403,"Existing non-opted-in legacy policy is unchanged");
 });
