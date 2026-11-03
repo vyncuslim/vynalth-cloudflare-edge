@@ -1,44 +1,98 @@
 /**
- * Penang-only opt-in GPS trigger.
+ * Conservative, *optional* GPS prompt selector for Penang ISLAND only.
  *
- * Uses Cloudflare-provided request.cf geo metadata, NOT browser-provided
- * headers or client timezones. This is an approximate UX selector, not
- * physical-position proof or a security boundary: IP geolocation can be
- * wrong, masked by VPN, or missing.
+ * Butterworth, Seberang Perai and the mainland are in Penang STATE (MY-07).
+ * Region alone is NOT evidence of being on Penang island.
  *
- * When region cannot be positively identified as Penang, leave the ordinary
- * website accessible (fail open for this optional location challenge).
- * Existing WAF, School IP, authentication and private-media controls remain.
+ * Cloudflare IP-derived city/latitude/longitude are approximate and can be
+ * wrong, especially behind VPNs, mobile operators and NAT. They are ONLY used
+ * to decide whether to display an optional browser GPS prompt, never to prove
+ * identity, make authorization decisions or claim precise user location.
+ *
+ * Conservative availability policy: ambiguous, missing or contradictory
+ * Cloudflare city/coordinates must NOT force a GPS permission dialog.
+ * Existing WAF, signup protection, School IP and private API rules remain.
  */
 const PENANG_REGION_NAMES = new Set(["penang", "pulau pinang"]);
 const PENANG_REGION_CODES = new Set(["07", "MY-07"]);
 
-export function gpsPenangOnlyDecision(request, env, verifiedCountry = null, verifiedRegionCode = null, verifiedRegion = null) {
-  if (env?.GPS_PENANG_ONLY_ENABLED !== "true") {
-    return { enabled: false, requireGPS: true, reason: "legacy-policy" };
+const ISLAND_CITY_NAMES = new Set([
+  "george town","georgetown","bayan lepas","bayan baru","balik pulau",
+  "air itam","ayer itam","batu ferringhi","batu feringghi",
+  "tanjung bungah","tanjung tokong","gelugor","jelutong","pulau tikus",
+  "teluk bahang","sungai nibong","batu maung","tanjung bunga"
+]);
+const MAINLAND_CITY_NAMES = new Set([
+  "butterworth","seberang perai","seberang prai","perai","prai",
+  "bukit mertajam","kepala batas","tasek gelugor","tasik gelugor",
+  "nibong tebal","juru","simpang ampat","permatang pauh",
+  "bagan ajam","bagan luar","mak mandin","sungai bakap","alma"
+]);
+
+// Only a conservative inner bounding rectangle is used for prompt selection.
+// It is NOT a legal/administrative or security geofence. The second city check
+// is intentionally required to reduce inaccurate IP-location prompts.
+const ISLAND_BOUNDS = Object.freeze({
+  minLat: 5.265, maxLat: 5.485,
+  minLon: 100.17, maxLon: 100.355
+});
+
+function normalizeCity(value) {
+  return typeof value === "string"
+    ? value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ")
+    : "";
+}
+
+function islandCandidate(cf) {
+  // Only runtime request.cf is trusted as a Cloudflare observation. Never
+  // consult CF-IPCountry, X-Region, X-City or client-supplied browser headers.
+  const city = normalizeCity(cf?.city);
+  if (MAINLAND_CITY_NAMES.has(city)) return {requireGPS:false,reason:"penang-mainland-city"};
+  if (!ISLAND_CITY_NAMES.has(city)) return {requireGPS:false,reason:"penang-island-city-unconfirmed"};
+
+  const lat = Number(cf?.latitude);
+  const lon = Number(cf?.longitude);
+  if (cf?.latitude == null || cf?.longitude == null ||
+      !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return {requireGPS:false,reason:"penang-island-coordinates-unavailable"};
   }
 
-  // For signed Service Binding calls, the signed country must override the
-  // internal worker's request.cf.country; request.cf.region is not proof of
-  // the end user's region across a Worker-to-Worker hop.
+  if (lat < ISLAND_BOUNDS.minLat || lat > ISLAND_BOUNDS.maxLat ||
+      lon < ISLAND_BOUNDS.minLon || lon > ISLAND_BOUNDS.maxLon) {
+    return {requireGPS:false,reason:"penang-island-coordinates-outside"};
+  }
+  return {requireGPS:true,reason:"penang-island-ip-evidence"};
+}
+
+export function gpsPenangOnlyDecision(
+  request, env, verifiedCountry = null, verifiedRegionCode = null, verifiedRegion = null
+) {
+  // Explicit legacy opt-out remains, but missing flags default to the LESS
+  // intrusive island policy, not an all-country GPS permission prompt.
+  if (env?.GPS_PENANG_ONLY_ENABLED === "false") {
+    return {enabled:false,requireGPS:true,reason:"legacy-policy"};
+  }
   const cf = request?.cf;
   const hasSignedCountry = verifiedCountry !== null;
   const country = hasSignedCountry ? verifiedCountry : cf?.country;
   if (country !== "MY") {
-    return { enabled: true, requireGPS: false, reason: "outside-malaysia-or-unknown" };
+    return {enabled:true,requireGPS:false,reason:"outside-malaysia-or-unknown"};
   }
   const regionCode = String(hasSignedCountry ? (verifiedRegionCode ?? "") : (cf?.regionCode ?? "")).trim().toUpperCase();
   const regionName = String(hasSignedCountry ? (verifiedRegion ?? "") : (cf?.region ?? "")).trim().toLowerCase();
-  // If the two signed/Cloudflare-derived region fields contradict each other,
-  // do not force GPS on a likely falsely identified visitor.
   if (regionCode && regionName &&
       PENANG_REGION_CODES.has(regionCode) !== PENANG_REGION_NAMES.has(regionName)) {
-    return { enabled:true,requireGPS:false,reason:"conflicting-region-evidence" };
+    return {enabled:true,requireGPS:false,reason:"conflicting-region-evidence"};
   }
-  if (PENANG_REGION_CODES.has(regionCode) || PENANG_REGION_NAMES.has(regionName)) {
-    return { enabled: true, requireGPS: true, reason: "penang-ip-region" };
+  if (!(PENANG_REGION_CODES.has(regionCode) || PENANG_REGION_NAMES.has(regionName))) {
+    return {enabled:true,requireGPS:false,reason:"outside-penang-or-unknown-region"};
   }
-  // In particular, MY with an unknown region must not trigger a geolocation
-  // permission prompt on every request. It is an explicit availability tradeoff.
-  return { enabled: true, requireGPS: false, reason: "outside-penang-or-unknown-region" };
+  // A signed Worker-to-Worker policy request only attests country and state,
+  // not the ORIGINAL visitor's city or IP coordinates. Do not treat the
+  // downstream Worker's request.cf city as if it were the user.
+  if (hasSignedCountry) {
+    return {enabled:true,requireGPS:false,reason:"island-evidence-not-signed"};
+  }
+  const candidate = islandCandidate(cf);
+  return {enabled:true,...candidate};
 }
