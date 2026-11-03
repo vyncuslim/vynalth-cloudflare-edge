@@ -161,7 +161,7 @@ test("signed internal country without a signed state must not trust the second W
 
 test("Shield SDK and verification API are not blocked by the optional Penang GPS overlay",async()=>{
   const env={...ENV};
-  const cf={country:"MY",regionCode:"07",region:"Penang"};
+  const cf={country:"MY",regionCode:"07",region:"Penang",city:"George Town",latitude:"5.414",longitude:"100.329"};
   for(const method of ["GET","HEAD"]){
     const req=new Request("https://shield.vynalthai.com/widget.js",{method,headers:{"Accept":"application/javascript"}});
     Object.defineProperty(req,"cf",{value:cf});
