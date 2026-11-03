@@ -507,7 +507,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
     exemptAccountStatuses:["trust","contact","status"],preciseCoordinatesStoredInCookie:false,
     crossDomainCookieReading:false,defaultEnabled:false,
-    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="false"?"legacy":"penang-island-only"});
+    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-island-only":"legacy"});
  }
 
  if(env?.GPS_GATE_ENABLED!=="true")return null;
