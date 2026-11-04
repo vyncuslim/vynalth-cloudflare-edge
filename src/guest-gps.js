@@ -499,15 +499,21 @@ function shieldOperationalRoute(path,request,hostname){
  if(path==="/api/verify")return ["GET","HEAD","POST","OPTIONS"].includes(request.method);
  return false;
 }
-// GPS is an optional campus-location gate, not a prerequisite for public text chat.
-// The guest chat endpoint enforces independent Turnstile, JEV, Redis and WAF controls.
-// Keep GPS enabled for other protected routes; this exemption is exact host/method/path.
+// GPS is an optional location gate, not a prerequisite for authenticated
+// or guest text chat. SPA navigation to /c/:id does not request HTML;
+// a hard refresh does. Both must be consistent to avoid refresh-only GPS.
+// These exemptions are main Chat origin + exact method/path only.
+// They do not override Cloudflare WAF, School IP Policy, account auth,
+// Supabase row ownership, guest Turnstile, or API rate controls.
 function publicGuestChatRoute(path,request,hostname){
  const host=String(hostname||"").toLowerCase();
  if(host!=="vynalthai.com"&&host!=="www.vynalthai.com")return false;
  if((request.method==="GET"||request.method==="HEAD")&&
-    /^\/(?:(?:en|cn|ms)\/)?c\/?$/.test(path))return true;
- return request.method==="POST"&&path==="/api/ai/chat-guest";
+     /^\/(?:(?:en|cn|ms)\/)?c(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?\/?$/i.test(path))return true;
+ // Authenticated Chat requires its existing valid bearer session at origin.
+ // Guest Chat independently verifies human challenges and rate limits.
+ return request.method==="POST"&&
+   (path==="/api/ai/chat-guest"||path==="/api/ai/chat");
 }
 function skip(path,request,hostname){return publicGuestChatRoute(path,request,hostname)||shieldOperationalRoute(path,request,hostname)||(hostname==="vynalthai.com"&&path==="/api/security/ingest"&&request.method==="POST")||publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}

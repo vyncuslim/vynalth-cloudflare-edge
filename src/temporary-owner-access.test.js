@@ -311,33 +311,43 @@ test("return path is preserved after invalid access-code retry without leaking i
  assert.equal(form.headers.get("Referrer-Policy"),"same-origin");
 });
 
-test("chat API POST obeys same ten-minute owner cookie without relaxing GPS enforcement",async()=>{
+test("chat API uses backend auth, not an owner or GPS cookie",async()=>{
  const e=env();
  const url="https://vynalthai.com/api/ai/chat";
  const headers={"Accept":"application/json","Content-Type":"application/json",
   "Origin":"https://vynalthai.com"};
- const payload=JSON.stringify({message:"请画SVG流程图"});
- const denied=await edge.fetch(req(url,"POST",headers,payload),e,{});
- assert.equal(denied.status,403);
- assert.equal((await denied.json()).error,"PRECISE_GPS_REQUIRED");
-
- const granted=await login(e,code,{returnPath:"/c"});
- assert.equal(granted.status,303);
- assert.equal(granted.headers.get("Location"),"https://vynalthai.com/c");
- const cookie=granted.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
+ const payload=JSON.stringify({message:"Please explain SVG."});
  let count=0;const original=globalThis.fetch;
  globalThis.fetch=async request=>{
   count++;
   assert.equal(new URL(request.url).pathname,"/api/ai/chat");
+  // The actual backend independently verifies a Bearer token; this fake
+  // models its 401 response, not any new edge authorization grant.
+  if(!request.headers.get("Authorization"))
+   return new Response(JSON.stringify({error:"AUTH_REQUIRED"}),{
+    status:401,headers:{"Content-Type":"application/json"}
+   });
   return new Response(JSON.stringify({reply:"SVG generated"}),{
    status:200,headers:{"Content-Type":"application/json"}
   });
  };
  try{
-  const approved=await edge.fetch(req(url,"POST",{...headers,Cookie:cookie},payload),e,{});
-  assert.equal(approved.status,200);
-  assert.equal((await approved.json()).reply,"SVG generated");
-  assert.equal(count,1);
+  const unauthenticated=await edge.fetch(req(url,"POST",headers,payload),e,{});
+  assert.equal(unauthenticated.status,401,"Chat must not authorize anonymous requests");
+  assert.equal((await unauthenticated.json()).error,"AUTH_REQUIRED");
+  const granted=await login(e,code,{returnPath:"/c"});
+  assert.equal(granted.status,303);
+  const cookie=granted.headers.getSetCookie().find(x=>
+    x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
+  const ownerCookieOnly=await edge.fetch(req(url,"POST",{...headers,Cookie:cookie},payload),e,{});
+  assert.equal(ownerCookieOnly.status,401,"Owner GPS pass does not grant AI auth");
+  const authenticated=await edge.fetch(req(url,"POST",{
+   ...headers,Authorization:"Bearer test-token"},payload),e,{});
+  assert.equal(authenticated.status,200);
+  assert.equal((await authenticated.json()).reply,"SVG generated");
+  assert.equal(count,3);
+  const invalidMethod=await edge.fetch(req(url,"GET",{Accept:"application/json"}),e,{});
+  assert.equal(invalidMethod.status,403,"GET stays subject to the optional GPS policy");
  }finally{globalThis.fetch=original}
 });
 
