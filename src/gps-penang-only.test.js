@@ -215,8 +215,8 @@ test("public guest /c and text-only chat POST never require location consent", a
     "the authenticated AI route is not exempted by guest chat policy");
   const otherHost = new Request("https://private.vynalthai.com/c",{headers:{Accept:"text/html"}});
   Object.defineProperty(otherHost,"cf",{value:island});
-  assert.equal((await guestGpsGate(otherHost,ENV,new URL(otherHost.url)))?.status,403,
-    "the GPS exception is only for the primary site");
+  assert.equal((await guestGpsGate(otherHost,ENV,new URL(otherHost.url)))?.status,302,
+    "an independently protected subdomain still enters signed GPS bridge instead of bypass");
 });
 
 test("GPS UI waits for an explicit click and exits stalled permission requests", () => {
