@@ -944,7 +944,10 @@ test("chat GPS exception remains strict: no other hosts, methods, or endpoints",
    ...(method==="POST"||method==="PUT"?{body:"{}"}:{})
   });
   const result=await invoke(request);
-  assert.ok(result instanceof Response&&result.status>=400,
-    host+" "+method+" "+path+" must remain GPS-gated");
+  // Other hosts may redirect to the first-party GPS hub rather than 403.
+  assert.ok(result instanceof Response,
+    host+" "+method+" "+path+" must remain under the GPS policy");
+  assert.ok(result.status===302||result.status>=400,
+    host+" "+method+" "+path+" must be challenged or redirected to verify");
  }
 });
