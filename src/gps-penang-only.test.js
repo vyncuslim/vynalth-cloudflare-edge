@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { gpsPenangOnlyDecision } from "./gps-penang-only.js";
 import { guestGpsGate } from "./guest-gps.js";
+import { GPS_HTML, GPS_CLIENT } from "./gps-verification-ui.js";
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 const SITE = "https://vynalthai.com";
@@ -195,4 +196,34 @@ test("Explicit Penang-only flag remains required to avoid changing unrelated dom
   assert.equal(gpsPenangOnlyDecision(mainland,env).enabled,false);
   const legacy=await gate(mainland,env);
   assert.equal(legacy?.status,403,"Existing non-opted-in legacy policy is unchanged");
+});
+
+test("public guest /c and text-only chat POST never require location consent", async () => {
+  const island = {country:"MY",regionCode:"07",region:"Penang",
+    city:"George Town",latitude:"5.414",longitude:"100.329"};
+  for (const path of ["/c","/en/c","/cn/c","/ms/c","/c/"]) {
+    assert.equal(await gate(request(path,island)), null, path);
+  }
+  const post = new Request(SITE+"/api/ai/chat-guest", {
+    method:"POST",headers:{"Content-Type":"application/json"},body:"{}"
+  });
+  Object.defineProperty(post,"cf",{value:island});
+  assert.equal(await gate(post),null,"guest API continues to server Turnstile/JEV checks");
+  assert.equal((await gate(request("/private",island)))?.status,403,
+    "sensitive pages must still require their GPS check");
+  assert.equal((await gate(request("/api/ai/chat",island)))?.status,403,
+    "the authenticated AI route is not exempted by guest chat policy");
+  const otherHost = new Request("https://private.vynalthai.com/c",{headers:{Accept:"text/html"}});
+  Object.defineProperty(otherHost,"cf",{value:island});
+  assert.equal((await guestGpsGate(otherHost,ENV,new URL(otherHost.url)))?.status,403,
+    "the GPS exception is only for the primary site");
+});
+
+test("GPS UI waits for an explicit click and exits stalled permission requests", () => {
+  assert.match(GPS_HTML,/Open public chat without location permission/);
+  assert.match(GPS_CLIENT,/watchdog=setTimeout\(\(\)=>\{/);
+  assert.match(GPS_CLIENT,/22000/);
+  assert.match(GPS_CLIENT,/\$\("start"\)\.addEventListener\("click",run\)/);
+  assert.doesNotMatch(GPS_CLIENT,/queueMicrotask\(autoRequest\)/);
+  assert.doesNotMatch(GPS_CLIENT,/visibilitychange.*autoRequest/);
 });
