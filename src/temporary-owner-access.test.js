@@ -84,12 +84,13 @@ test("valid temporary owner cookie bypasses GPS challenge but not application au
  const success=await login(e);
  const pass=success.headers.getSetCookie().find(x=>x.startsWith("__Host-vynalth-owner-pass=")).split(";")[0];
  assert.equal(await hasTemporaryOwnerPass(req("https://vynalthai.com/","GET",{Cookie:pass}),e,new URL("https://vynalthai.com/")),true);
- const before=await edge.fetch(req("https://vynalthai.com/"),e,{});
+ // The homepage is intentionally public: use a GPS-protected document path.
+ const before=await edge.fetch(req("https://vynalthai.com/protected"),e,{});
  assert.equal(before.status,403);
  let originCalls=0;const originalFetch=globalThis.fetch;
  globalThis.fetch=async()=>{originCalls++;return new Response("website",{status:200})};
  try{
-  const after=await edge.fetch(req("https://vynalthai.com/","GET",{Cookie:pass}),e,{});
+  const after=await edge.fetch(req("https://vynalthai.com/protected","GET",{Cookie:pass}),e,{});
   assert.equal(after.status,200);
   assert.equal(await after.text(),"website");
   assert.equal(originCalls,1);
