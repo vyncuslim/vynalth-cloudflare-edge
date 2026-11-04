@@ -898,3 +898,53 @@ test("malformed GPS settings fail closed for private resources but allow canonic
  assert.ok(privatePage instanceof Response);
  assert.equal(privatePage.status,503,"Private settings must remain fail closed");
 });
+
+
+test("direct chat conversation navigation never requires optional GPS",async()=>{
+ const cid="2b7fcc3e-8002-4f3c-b679-f2efea8d1a61";
+ const endpoints=["/c","/c/","/en/c","/cn/c","/ms/c",
+   "/c/"+cid,"/en/c/"+cid,"/cn/c/"+cid,"/ms/c/"+cid];
+ for(const host of ["vynalthai.com","www.vynalthai.com"]){
+  for(const path of endpoints){
+   for(const method of ["GET","HEAD"]){
+    const response=await invoke(new Request("https://"+host+path,{
+      method,headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}
+    }));
+    assert.equal(response,null,host+" "+method+" "+path+" must pass to app authorization");
+   }
+  }
+  for(const path of ["/api/ai/chat","/api/ai/chat-guest"]){
+   const response=await invoke(new Request("https://"+host+path,{
+     method:"POST",headers:{"Content-Type":"application/json"},
+     body:JSON.stringify({message:"test"})
+   }));
+   assert.equal(response,null,host+" "+path+" must reach its existing authenticated or guest API");
+  }
+ }
+});
+
+test("chat GPS exception remains strict: no other hosts, methods, or endpoints",async()=>{
+ const cid="2b7fcc3e-8002-4f3c-b679-f2efea8d1a61";
+ const denied=[
+   ["vynalthai.com","/api/ai/chat","GET"],
+   ["vynalthai.com","/api/ai/chat-guest","GET"],
+   ["vynalthai.com","/api/ai/chat","PUT"],
+   ["vynalthai.com","/api/ai/chat/metadata","POST"],
+   ["vynalthai.com","/c/"+cid+"/settings","GET"],
+   ["vynalthai.com","/c/not-a-uuid","GET"],
+   ["vynalthai.com","/c/"+cid,"POST"],
+   ["vynalthai.com","/c/"+cid+"evil","GET"],
+   ["vynalthai.com","/admin","GET"],
+   ["vyncuslim.com","/c/"+cid,"GET"],
+   ["search.vynalthai.com","/api/ai/chat","POST"]
+ ];
+ for(const [host,path,method] of denied){
+  const request=new Request("https://"+host+path,{
+   method,headers:{Accept:"text/html",...(method==="POST"||method==="PUT"?{"Content-Type":"application/json"}:{})},
+   ...(method==="POST"||method==="PUT"?{body:"{}"}:{})
+  });
+  const result=await invoke(request);
+  assert.ok(result instanceof Response&&result.status>=400,
+    host+" "+method+" "+path+" must remain GPS-gated");
+ }
+});
