@@ -510,6 +510,15 @@ function publicGuestChatRoute(path,request,hostname){
  if(host!=="vynalthai.com"&&host!=="www.vynalthai.com")return false;
  if((request.method==="GET"||request.method==="HEAD")&&
      /^\/(?:(?:en|cn|ms)\/)?c(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?\/?$/i.test(path))return true;
+ // The homepage chat model selector is public, GET-only, no credentials:
+ // it exposes only capability metadata, never provider API keys or health.
+ if(request.method==="GET"&&path==="/api/ai/model-capabilities")return true;
+ // Continuous ElevenLabs chat is authenticated for BOTH GET status/poll and
+ // POST message. Origin enforces bearer auth, user-owned conversation IDs,
+ // rate limits, device checks, TypeSafe and high-risk challenges. No GPS
+ // cookie is an authentication substitute for these independent guards.
+ if((request.method==="GET"||request.method==="POST")&&
+   path==="/api/ai/custom-channel")return true;
  // Authenticated Chat requires its existing valid bearer session at origin.
  // Guest Chat independently verifies human challenges and rate limits.
  return request.method==="POST"&&
