@@ -951,3 +951,57 @@ test("chat GPS exception remains strict: no other hosts, methods, or endpoints",
     host+" "+method+" "+path+" must be challenged or redirected to verify");
  }
 });
+
+
+test("chat model capabilities and signed Custom Channel bootstrap remain available without GPS",async()=>{
+ const chatHost="https://vynalthai.com";
+ const allowed=[
+   ["GET","/api/ai/model-capabilities"],
+   ["GET","/api/ai/custom-channel"],
+   ["GET","/api/ai/custom-channel?messageId=msg_example12345"],
+   ["POST","/api/ai/custom-channel"],
+ ];
+ for(const host of ["vynalthai.com","www.vynalthai.com"]){
+  for(const [method,path] of allowed){
+   const response=await invoke(new Request("https://"+host+path,{
+    method,headers:{Accept:"application/json",...(method==="POST"?{"Content-Type":"application/json"}:{})},
+    ...(method==="POST"?{body:JSON.stringify({message:"hello"})}:{})
+   }));
+   assert.equal(response,null,host+" "+method+" "+path+
+    " must reach independently protected backend without a GPS overlay");
+  }
+ }
+ // Invalid GPS config still allows ONLY independently authorized chat APIs:
+ // app authentication, message ownership, WAF and abuse controls still apply.
+ const badConfig={...cfg,GPS_GATE_SESSION_SECRET:"invalid"};
+ assert.equal(await invoke(new Request(chatHost+"/api/ai/model-capabilities"),badConfig),null);
+ assert.equal(await invoke(new Request(chatHost+"/api/ai/custom-channel"),badConfig),null);
+ assert.equal((await invoke(new Request(chatHost+"/api/private",{
+  headers:{Accept:"application/json"}}),badConfig)).status,503);
+});
+
+test("Chat bootstrap exceptions do not open other methods, subpaths, hosts or private APIs",async()=>{
+ const denied=[
+  ["vynalthai.com","GET","/api/ai/model-capabilities/debug"],
+  ["vynalthai.com","POST","/api/ai/model-capabilities"],
+  ["vynalthai.com","HEAD","/api/ai/model-capabilities"],
+  ["vynalthai.com","PUT","/api/ai/custom-channel"],
+  ["vynalthai.com","DELETE","/api/ai/custom-channel"],
+  ["vynalthai.com","GET","/api/ai/custom-channel/turns"],
+  ["vynalthai.com","GET","/api/ai/chat"],
+  ["vynalthai.com","GET","/api/ai/browser"],
+  ["vynalthai.com","POST","/api/admin/config"],
+  ["search.vynalthai.com","GET","/api/ai/model-capabilities"],
+  ["vyncuslim.com","POST","/api/ai/custom-channel"],
+ ];
+ for(const [host,method,path] of denied){
+  const result=await invoke(new Request("https://"+host+path,{
+   method,headers:{Accept:"application/json",...(method==="POST"||method==="PUT"?{"Content-Type":"application/json"}:{})},
+   ...(method==="POST"||method==="PUT"?{body:"{}"}:{})
+  }));
+  assert.ok(result instanceof Response,
+   host+" "+method+" "+path+" must still be checked by the GPS policy");
+  assert.ok(result.status===302||result.status>=400,
+   host+" "+method+" "+path+" must not pass as a chat bootstrap exception");
+ }
+});
