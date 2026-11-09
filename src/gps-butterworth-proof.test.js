@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { guestGpsGate, gpsOutsideOrLegacyExempt } from "./guest-gps.js";
 import { BUTTERWORTH_PROOF_COOKIE, BUTTERWORTH_PROOF_TTL,
-  inApproximateButterworth, hasButterworthProof, inspectButterworthProof } from "./gps-butterworth-proof.js";
+  inApproximateButterworth, isAmbiguousIpRecoveryEligible, hasButterworthProof, inspectButterworthProof, MISLOCATED_OUTSIDE_KIND, BUTTERWORTH_PROOF_KIND } from "./gps-butterworth-proof.js";
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const HOST="vynalthai.com";
 const IP="8.8.8.8";
@@ -21,11 +21,11 @@ function request(host=HOST,path="/private",method="GET",headers={},body,clientIp
  return req;
 }
 const gate=(r,env=ENV)=>guestGpsGate(r,env,new URL(r.url));
-async function verify(lat,lon,accuracy=20,headers={},env=ENV){
+async function verify(lat,lon,accuracy=20,headers={},env=ENV,recoveryRequested=false){
  const r=request(HOST,"/__shield/gps/verify","POST",{
   Origin:"https://"+HOST,"Sec-Fetch-Site":"same-origin",
   "Content-Type":"application/json",...headers
- },JSON.stringify({lat,lon,accuracy}));
+ },JSON.stringify({lat,lon,accuracy,recoveryRequested}));
  return gate(r,env);
 }
 function cookieByName(response,name){
@@ -69,7 +69,9 @@ test("Butterworth approximate bounds never include Tasek Glugor and reject coars
  assert.equal(BUTTERWORTH_PROOF_TTL,1800);
  assert.equal(inApproximateButterworth(5.405,100.382,20),true);
  assert.equal(inApproximateButterworth(5.48,100.50,20),false);
- assert.equal(inApproximateButterworth(5.405,100.382,400),false);
+ assert.equal(inApproximateButterworth(5.405,100.382,400),true);
+ assert.equal(inApproximateButterworth(5.405,100.382,2000),true);
+ assert.equal(inApproximateButterworth(5.405,100.382,2800),false);
  assert.equal(inApproximateButterworth(5.3751,100.382,20),false);
 });
 test("reported Tasek Glugor outside campus does not gain Butterworth proof",async()=>{
@@ -122,7 +124,7 @@ test("diagnostics distinguish no cookie, invalid network, expiry, and feature di
  const res=await verify(5.405,100.382);
  const proof=cookieByName(res,BUTTERWORTH_PROOF_COOKIE);
  const good=await inspectButterworthProof(request(HOST,"/private","GET",{Cookie:proof}),ENV,HOST);
- assert.deepEqual(good,{valid:true,status:"valid"});
+ assert.deepEqual(good,{valid:true,status:"valid",kind:BUTTERWORTH_PROOF_KIND});
  const otherIp=await inspectButterworthProof(
   request(HOST,"/private","GET",{Cookie:proof},undefined,"1.1.1.1"),ENV,HOST);
  assert.deepEqual(otherIp,{valid:false,status:"invalid-or-network-changed"});
@@ -162,7 +164,7 @@ test("standard signed OUTSIDE session permits navigation even when Butterworth p
  const statusResponse=await gate(request(HOST,"/__shield/gps/status","GET",{Cookie:outsideCookie}));
  assert.equal(statusResponse.status,200);
  const status=await statusResponse.json();
- assert.equal(status.policyRevision,"gps-penang-butterworth-recovery-feedback-v11");
+ assert.equal(status.policyRevision,"gps-penang-butterworth-consented-proof-v12");
  assert.equal(status.verified,true);
  assert.equal(status.regionalPolicy.gpsRequired,true,"regional rule still applies");
  assert.equal(status.regionalPolicy.browserProofActive,false);
@@ -199,11 +201,11 @@ test("verification distinguishes ordinary outside access from optional 30-minute
  assert.equal(cookieByName(outside,BUTTERWORTH_PROOF_COOKIE),null);
  assert.ok(cookieByName(outside,"__Host-vynalth-geo"),
   "normal outside campus 15-minute cookie remains valid");
- const imprecise=await verify(5.405,100.382,200);
+ const imprecise=await verify(5.405,100.382,6000);
  assert.equal(imprecise.status,200);
  const result=await imprecise.json();
  assert.deepEqual(result.butterworthRecovery,{
-  offered:false,reason:"accuracy-over-100m",maxDurationSeconds:1800
+  offered:false,reason:"accuracy-over-5000m",maxDurationSeconds:1800
  });
  assert.equal(cookieByName(imprecise,BUTTERWORTH_PROOF_COOKIE),null);
  assert.doesNotMatch(JSON.stringify(result),/5\\.405|100\\.382/,
@@ -216,7 +218,51 @@ test("browser recovery UI stays on page to show proof outcome instead of silentl
  assert.ok(script.includes('location.pathname==="/__shield/gps/recover"'));
  assert.ok(script.includes("data.butterworthRecovery?.offered"));
  assert.ok(script.includes("outside-butterworth-recovery-area"));
- assert.ok(script.includes("accuracy-over-100m"));
+ assert.ok(script.includes("accuracy-over-5000m"));
+ assert.ok(script.includes("recoveryRequested:location.pathname"));
  assert.ok(script.includes('statusData?.regionalPolicy?.browserProofActive'));
  assert.ok(script.includes('busy=false;'));
+});
+
+test("explicit fresh OUTSIDE verification grants misclassified Tasek Glugor IP a 30-minute recovery without pretending to prove Butterworth",async()=>{
+ const response=await verify(5.48,100.50,1200,{},ENV,true);
+ assert.equal(response.status,200);
+ const payload=await response.json();
+ assert.equal(payload.classification,"outside");
+ assert.deepEqual(payload.butterworthRecovery,{
+  offered:true,reason:"issued-after-fresh-outside-verification",maxDurationSeconds:1800
+ });
+ const proof=cookieByName(response,BUTTERWORTH_PROOF_COOKIE);
+ assert.ok(proof);
+ const inspect=await inspectButterworthProof(request(HOST,"/private","GET",{Cookie:proof}),ENV,HOST);
+ assert.deepEqual(inspect,{valid:true,status:"valid",kind:MISLOCATED_OUTSIDE_KIND});
+ const status=await (await gate(request(HOST,"/__shield/gps/status","GET",{Cookie:proof}))).json();
+ assert.equal(status.regionalPolicy.gpsRequired,false);
+ assert.equal(status.regionalPolicy.selectionReason,"consented-outside-ambiguous-ip-exempt");
+ assert.equal(status.regionalPolicy.browserProofKind,MISLOCATED_OUTSIDE_KIND);
+ assert.equal(status.navigationAssessment.protectedDocumentGpsPromptExpected,false);
+ assert.equal(await gate(request(HOST,"/private","GET",{Cookie:proof})),null);
+ assert.equal((await gate(request(HOST,"/private","GET",{Cookie:proof},undefined,"1.1.1.1"))).status,403);
+});
+
+test("no automatic Tasek Glugor exemption: city fallback requires explicit recovery and fresh outside verdict",async()=>{
+ const oldWay=await verify(5.48,100.50,1200);
+ assert.equal(oldWay.status,200);
+ assert.equal(cookieByName(oldWay,BUTTERWORTH_PROOF_COOKIE),null);
+ const denied=await verify(5.3677,100.21995,12,{},ENV,true);
+ assert.equal(denied.status,403);
+ assert.equal(cookieByName(denied,BUTTERWORTH_PROOF_COOKIE),null);
+ const noMetadata=request(HOST,"/__shield/gps/verify","POST",{
+  Origin:"https://"+HOST,"Sec-Fetch-Site":"same-origin","Content-Type":"application/json",
+  "X-City":"Tasek Glugor","CF-City":"Tasek Glugor"
+ },JSON.stringify({lat:5.48,lon:100.50,accuracy:1200,recoveryRequested:true}),
+ IP,{country:"MY",region:"Penang",regionCode:"07",city:"George Town"});
+ const checked=await gate(noMetadata);
+ assert.equal(checked.status,200);
+ assert.equal((await checked.json()).butterworthRecovery.offered,false);
+ assert.equal(cookieByName(checked,BUTTERWORTH_PROOF_COOKIE),null);
+ assert.equal(isAmbiguousIpRecoveryEligible(noMetadata,1200),false);
+ const unknownRegion=request(HOST,"/private","GET",{},undefined,IP,
+  {country:"MY",regionCode:"03",region:"Kelantan",city:"Tasek Glugor"});
+ assert.equal(isAmbiguousIpRecoveryEligible(unknownRegion,1200),false);
 });
