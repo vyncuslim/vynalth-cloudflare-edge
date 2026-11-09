@@ -35,7 +35,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-penang-butterworth-recovery-diagnostics-v9";
+const GPS_POLICY_REVISION="gps-penang-butterworth-session-status-v10";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -628,9 +628,29 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  if(url.pathname==="/__shield/gps/import")return importHandoff(request,url,cfg,env);
  if(url.pathname==="/__shield/gps/client.js"&&request.method==="GET")return script();
  if(url.pathname==="/__shield/gps/verify")return verify(request,url,cfg,env,ctx,requestId);
- if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
+ if(url.pathname==="/__shield/gps/status"&&request.method==="GET"){
+  // Regional GPS selection is different from signed-session access.
+  // A visitor can be verified without a separate Butterworth proof.
+  const session=await sessionVerdict(request,cfg,url.hostname);
+  const accountExempt=await exempt(request,cfg,url.hostname);
+  const blockedByPriorVerdict=await hasBlockVerdict(request,cfg,url.hostname);
+  const outsideFastpass=env?.GPS_OUTSIDE_SESSION_FASTPASS==="true"&&session==="outside";
+  const sessionAllowedWithoutFreshProof=env?.GPS_RECHECK_EVERY_DOCUMENT!=="true"&&session!==null;
+  const protectedDocumentGpsPromptExpected=penang.requireGPS && !browserProof &&
+    !accountExempt && !outsideFastpass && !sessionAllowedWithoutFreshProof &&
+    !blockedByPriorVerdict;
   return reply(200,{enabled:true,configurationAvailable:true,
     enforcing:penang.requireGPS && !browserProof,
+   signedSession:{
+    state:session||"none",
+    outsideFastpassActive:outsideFastpass,
+    hostBound:true
+   },
+   navigationAssessment:{
+    protectedDocumentGpsPromptExpected,
+    previouslyRestricted:blockedByPriorVerdict,
+    note:"The region GPS rule may remain active while a signed outside session permits access."
+   },
    telegramAlerts:telegramGpsStatus(env),
    gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
@@ -658,8 +678,9 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
     : {enabled:env?.GPS_REGION_TIMEZONE_ENABLED==="true",
        malaysiaIpOrTimezone:true,vpnDetection:"not-guaranteed"},
    policyRevision:GPS_POLICY_REVISION,
-   verified:(await permitted(request,cfg,url.hostname))||browserProof,
-   exempt:(await exempt(request,cfg,url.hostname))||browserProof});
+   verified:session!==null||browserProof,
+   exempt:accountExempt||browserProof});
+ }
  if(skip(url.pathname,request,url.hostname))return null;
  // Existing trusted server-verified account states bypass this GPS policy.
  if(await exempt(request,cfg,url.hostname))return null;
