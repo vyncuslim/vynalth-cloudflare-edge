@@ -34,7 +34,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-penang-butterworth-exempt-v6";
+const GPS_POLICY_REVISION="gps-penang-butterworth-multisignal-v7";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -600,7 +600,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:penang.enabled
     ? {enabled:true,mode:"penang-state-except-butterworth",trigger:"cloudflare-ip-state-city-metadata",
-       regionKnown:penang.reason.startsWith("penang-state-")||penang.reason==="butterworth-ip-city-exempt",
+       regionKnown:penang.reason.startsWith("penang-state-")||penang.reason.startsWith("butterworth-"),
        gpsRequired:penang.requireGPS,selectionReason:penang.reason,
        // The visitor can see the coarse city reported by Cloudflare to diagnose
        // mistaken Butterworth classifications, without revealing the IP or GPS.
