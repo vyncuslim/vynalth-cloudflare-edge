@@ -49,6 +49,9 @@ test("consented precise Butterworth fix outside campus issues IP- and host-bound
  assert.equal(res.status,200);
  const parsed=await res.json();
  assert.equal(parsed.classification,"outside");
+ assert.deepEqual(parsed.butterworthRecovery,{
+  offered:true,reason:"issued",maxDurationSeconds:1800
+ });
  const proof=cookieByName(res,BUTTERWORTH_PROOF_COOKIE);
  assert.ok(proof,"missing opt-in recovery cookie");
  assert.match(res.headers.getSetCookie().find(x=>x.startsWith(BUTTERWORTH_PROOF_COOKIE+"=")),/Max-Age=1800/);
@@ -159,7 +162,7 @@ test("standard signed OUTSIDE session permits navigation even when Butterworth p
  const statusResponse=await gate(request(HOST,"/__shield/gps/status","GET",{Cookie:outsideCookie}));
  assert.equal(statusResponse.status,200);
  const status=await statusResponse.json();
- assert.equal(status.policyRevision,"gps-penang-butterworth-session-status-v10");
+ assert.equal(status.policyRevision,"gps-penang-butterworth-recovery-feedback-v11");
  assert.equal(status.verified,true);
  assert.equal(status.regionalPolicy.gpsRequired,true,"regional rule still applies");
  assert.equal(status.regionalPolicy.browserProofActive,false);
@@ -182,4 +185,38 @@ test("regional GPS requirement means a first-time protected visitor needs verifi
  assert.equal(status.signedSession.outsideFastpassActive,false);
  assert.equal(status.navigationAssessment.protectedDocumentGpsPromptExpected,true);
  assert.equal(status.navigationAssessment.previouslyRestricted,false);
+});
+
+test("verification distinguishes ordinary outside access from optional 30-minute proof",async()=>{
+ const outside=await verify(5.48,100.50,15);
+ assert.equal(outside.status,200);
+ const response=await outside.json();
+ assert.equal(response.verified,true);
+ assert.equal(response.classification,"outside");
+ assert.deepEqual(response.butterworthRecovery,{
+  offered:false,reason:"outside-butterworth-recovery-area",maxDurationSeconds:1800
+ });
+ assert.equal(cookieByName(outside,BUTTERWORTH_PROOF_COOKIE),null);
+ assert.ok(cookieByName(outside,"__Host-vynalth-geo"),
+  "normal outside campus 15-minute cookie remains valid");
+ const imprecise=await verify(5.405,100.382,200);
+ assert.equal(imprecise.status,200);
+ const result=await imprecise.json();
+ assert.deepEqual(result.butterworthRecovery,{
+  offered:false,reason:"accuracy-over-100m",maxDurationSeconds:1800
+ });
+ assert.equal(cookieByName(imprecise,BUTTERWORTH_PROOF_COOKIE),null);
+ assert.doesNotMatch(JSON.stringify(result),/5\\.405|100\\.382/,
+  "the recovery result must not include the submitted coordinates");
+});
+test("browser recovery UI stays on page to show proof outcome instead of silently navigating",async()=>{
+ const result=await gate(request(HOST,"/__shield/gps/client.js"));
+ assert.equal(result.status,200);
+ const script=await result.text();
+ assert.ok(script.includes('location.pathname==="/__shield/gps/recover"'));
+ assert.ok(script.includes("data.butterworthRecovery?.offered"));
+ assert.ok(script.includes("outside-butterworth-recovery-area"));
+ assert.ok(script.includes("accuracy-over-100m"));
+ assert.ok(script.includes('statusData?.regionalPolicy?.browserProofActive'));
+ assert.ok(script.includes('busy=false;'));
 });
