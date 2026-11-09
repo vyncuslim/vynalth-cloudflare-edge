@@ -590,8 +590,16 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:penang.enabled
     ? {enabled:true,mode:"penang-state-except-butterworth",trigger:"cloudflare-ip-state-city-metadata",
-       regionKnown:penang.requireGPS,
+       regionKnown:penang.reason.startsWith("penang-state-")||penang.reason==="butterworth-ip-city-exempt",
        gpsRequired:penang.requireGPS,selectionReason:penang.reason,
+       // The visitor can see the coarse city reported by Cloudflare to diagnose
+       // mistaken Butterworth classifications, without revealing the IP or GPS.
+       observedIpCity:(()=>{
+        const raw=verifiedCountry!==null?verifiedCity:request.cf?.city;
+        return typeof raw==="string"&&raw.length<=80&&
+          /^[\p{L}\p{M} .'-]*$/u.test(raw)?(raw.trim()||null):null;
+       })(),
+       citySource:verifiedCountry!==null?"signed-service-v3":"cloudflare-original-request",
        vpnDetection:"not-guaranteed",preciseGpsInferred:false}
     : {enabled:env?.GPS_REGION_TIMEZONE_ENABLED==="true",
        malaysiaIpOrTimezone:true,vpnDetection:"not-guaranteed"},
