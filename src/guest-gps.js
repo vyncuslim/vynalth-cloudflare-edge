@@ -34,7 +34,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-penang-state-campus-v5";
+const GPS_POLICY_REVISION="gps-penang-butterworth-exempt-v6";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -526,20 +526,20 @@ function publicGuestChatRoute(path,request,hostname){
 }
 function skip(path,request,hostname){return publicGuestChatRoute(path,request,hostname)||shieldOperationalRoute(path,request,hostname)||(hostname==="vynalthai.com"&&path==="/api/security/ingest"&&request.method==="POST")||publicBrandingPage(path,request,hostname)||publicBuildAsset(request,path)||jingxinPublicPage(path)||path.startsWith("/.well-known/")||path.startsWith("/api/auth/")||path.startsWith("/auth/")||path.startsWith("/api/oauth/")||path.startsWith("/api/webhooks/")||path==="/robots.txt"||path==="/favicon.ico"||path==="/sitemap.xml"||
  path==="/en/legal/privacy"||path==="/legal/privacy"||path==="/__shield/campus-beacon"}
-export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null,verifiedRegionCode=null,verifiedRegion=null){
+export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verifiedCountry=null,verifiedRegionCode=null,verifiedRegion=null,verifiedCity=null){
  if(url.pathname==="/__shield/gps/disclaimer"&&request.method==="GET")return disclaimerPage();
  if(url.pathname==="/__shield/gps/verify-info"&&request.method==="GET"){
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
     exemptAccountStatuses:["trust","contact","status"],preciseCoordinatesStoredInCookie:false,
     crossDomainCookieReading:false,defaultEnabled:false,
-    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-state-only":"legacy"});
+    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-state-except-butterworth":"legacy"});
  }
 
  if(env?.GPS_GATE_ENABLED!=="true")return null;
- // Penang STATE (including Butterworth and Seberang Perai) requests browser
- // GPS consent before a campus geofence check. IP state is a prompt selector,
- // not a campus verdict. Independent WAF, School IP, and auth remain.
- const penang=gpsPenangOnlyDecision(request,env,verifiedCountry,verifiedRegionCode,verifiedRegion);
+ // Penang state triggers GPS consent except when ORIGINAL trusted Cloudflare
+ // IP city metadata identifies Butterworth. This optional city exemption is
+ // best-effort only; IP city cannot prove real physical location.
+ const penang=gpsPenangOnlyDecision(request,env,verifiedCountry,verifiedRegionCode,verifiedRegion,verifiedCity);
  if(penang.enabled && !penang.requireGPS &&
     !url.pathname.startsWith("/__shield/gps/"))return null;
  const cfg=config(env);
@@ -589,7 +589,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
    gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:penang.enabled
-    ? {enabled:true,mode:"penang-state-only",trigger:"cloudflare-ip-state-metadata",
+    ? {enabled:true,mode:"penang-state-except-butterworth",trigger:"cloudflare-ip-state-city-metadata",
        regionKnown:penang.requireGPS,
        gpsRequired:penang.requireGPS,selectionReason:penang.reason,
        vpnDetection:"not-guaranteed",preciseGpsInferred:false}

@@ -22,11 +22,13 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
 GPS_GATE_ENABLED = "true"
-# Browser GPS prompt applies across all Penang STATE (MY-07), including
-# Butterworth/Seberang Perai and the island, before campus geofence checks.
-# Cloudflare IP state only selects the consent prompt; browser GPS must
-# independently decide campus inside/outside. Unknown/contradictory region
-# data does not force GPS; mobile IP/CGNAT/VPN can mislocate. WAF/auth remain.
+# Browser GPS prompt covers Penang state (MY-07) EXCEPT Butterworth.
+# Trusted Cloudflare request.cf.city == Butterworth skips optional GPS;
+# other Penang towns including Seberang Perai still require campus GPS.
+# This is an approximate IP-derived city exemption, NOT proof of location.
+# Separate WAF, School IP and origin authentication remain unaffected.
+# Upstream Service Binding calls need signed city metadata v3 to apply
+# Butterworth's exemption; v1/v2 callers cannot assert the source city.
 GPS_PENANG_ONLY_ENABLED = "true"
 # Retain legacy country/timezone feature flag for rollback only. When Penang-
 # state mode is enabled, its timezone preflight does not run for site traffic.

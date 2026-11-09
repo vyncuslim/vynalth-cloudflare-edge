@@ -1,8 +1,8 @@
-# Penang-only GPS trigger and signed Service Binding v2
+# Penang GPS trigger with Butterworth exemption and signed Service Binding v3
 
 ## Intended visitor experience
 
-- All of Penang STATE (including Butterworth, Seberang Perai and Penang island) triggers the consent gate when trusted Cloudflare IP metadata identifies country `MY` and state `Penang / Pulau Pinang / 07 / MY-07`. City and coarse IP coordinates are not needed.
+- Penang STATE (except Cloudflare IP-city **Butterworth**) triggers the consent gate when trusted Cloudflare IP metadata identifies country `MY` and state `Penang / Pulau Pinang / 07 / MY-07`. Other Penang towns remain eligible. Butterworth is exempt only when its name is present in trusted Cloudflare city metadata. IP coordinates are not used.
 - Other Malaysian states, other countries, and unknown state/country skip this **optional** GPS middleware, without bypassing School IP Policy, Cloudflare WAF, private content authorization or app authentication.
 - Contradictory state name and code are treated as uncertain, not as proof of Penang.
 - This is a **best-effort IP regional filter**; it cannot reliably detect VPN endpoints or confirm someone's actual physical position. A Penang user whose IP resolves to another state can enter without a GPS prompt. If requiring actual geographic enforcement, explicit consent-based GPS for all relevant users would be necessary and would conflict with this UX requirement.
@@ -10,8 +10,8 @@
 
 ## Versioned Service Binding source attestation
 
-The receiving edge Worker now verifies `gps-service-v2` HMAC signed with the existing `GPS_SERVICE_AUTH_SECRET`, covering:
-`version, timestamp, method, full URL, source IP, country, regionCode, region`.
+The receiving edge Worker now verifies `gps-service-v3` HMAC signed with the existing `GPS_SERVICE_AUTH_SECRET`, covering:
+`version, timestamp, method, full URL, source IP, country, regionCode, region, city`.
 
 Use `src/gps-service-client.js` in the *originating Worker that receives the real visitor request*, before forwarding to the private policy-only Service Binding. It sources state **exclusively from the Cloudflare-provided original `request.cf` object**. Keep the secret only in Worker secrets; never browser JS or repo commits.
 
@@ -30,7 +30,7 @@ export default {
 ```
 The example is **not** a replacement for the existing calling Worker. Actual integration must happen in that Worker's source and deployment environment. The reference client's `VYNALTH_GPS_POLICY` name is an example only; the current live binding name is not verified here.
 
-The receiver strips all signed service headers after verification; no user-controlled value can forge a verified state without the shared secret. The existing authenticated v1 country-only protocol is still accepted for compatibility, but it intentionally provides **no region assertion**. For a Malaysian v1 service call, the optional GPS prompt is therefore skipped rather than claiming the visitor is in Penang. To apply Penang-state gating through a Service Binding, the originating Worker must send verified v2 signed state metadata. **Do not treat this as a fully finished production migration until the upstream calling Worker is verified to emit v2.**
+The receiver strips all signed service headers after verification; no user-controlled value can forge a verified state without the shared secret. The existing authenticated v1 country-only protocol is still accepted for compatibility, but it intentionally provides **no region assertion**. For a Malaysian v1 service call, the optional GPS prompt is therefore skipped rather than claiming the visitor is in Penang. To apply Penang-state gating through a Service Binding, the originating Worker must send verified v3 signed state + city metadata. **Do not treat this as a fully finished production migration until the upstream calling Worker is verified to emit v3.**
 
 ## Validation
 
@@ -47,3 +47,11 @@ The receiver strips all signed service headers after verification; no user-contr
 - Cloudflare IP region is only a prompt trigger, not proof of the user's real location. A VPN or mobile IP may be misclassified.
 - Existing campus polygons were taken from OSM community mapping and are not official certified surveys; this is a site-defined access decision, not an assertion that somebody attends a school.
 - Existing guest /c and public asset exemptions, authenticated SSO policy, WAF, and School IP policy remain independent.
+
+## Butterworth GPS prompt exemption (2026-11-09)
+
+- Trusted Cloudflare **original visitor** city exactly `Butterworth` (case-insensitive) + Penang state + Malaysia => skip the optional GPS prompt on that route. No browser geolocation permission is needed.
+- In a Service Binding call, this exemption requires a **v3 HMAC-signed source city**. Older v1/v2 callers cannot claim a source city and remain subject to the Penang GPS gate if their signed state is Penang.
+- A browser-supplied city header is not trusted, and the policy worker's own `request.cf.city` does not describe the original visitor.
+- IP-derived city may be inaccurate. Some Butterworth visitors may still be challenged if their IP geolocation resolves elsewhere; a campus user could appear to be in Butterworth via a VPN or ISP. **This exemption is not compatible with guaranteeing that all physically on-campus users are blocked.** Existing independent WAF, app auth and School IP restrictions still apply.
+- For geographically reliable exemption plus guaranteed campus enforcement, additional reliable signals and consent/alternative identity checks would be necessary. Do not label this city filter as precise geofencing.
