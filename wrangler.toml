@@ -18,6 +18,10 @@ workers_dev = true
 # 2026-10-31: enable following successful fix for route conflict code 10020.
 # Require real database proof before claiming production ingestion success.
 THREAT_INTEL_COLLECT_ENABLED = "true"
+# Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
+SCHOOL_POLICY_INLINE_ENABLED = "true"
+SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"
+MODE = "observe"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
@@ -89,3 +93,8 @@ service = "website-block-by-school-powiis"
 
 [observability]
 enabled = true
+
+# Existing School Worker KV namespace; same namespace prevents policy drift.
+[[kv_namespaces]]
+binding = "SCHOOL_IP_KV"
+id = "afbc03d02494467e8f39b63f755de44d"

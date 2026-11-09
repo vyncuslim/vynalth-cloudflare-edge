@@ -9,6 +9,10 @@ import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-ow
 import { scheduleThreatTelemetry } from "./threat-telemetry.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
+import { schoolGuard, coveredHost } from "./school/policy.js";
+import { adminApi } from "./school/admin-api.js";
+import { adminPage } from "./school/admin-page.js";
+import { studentIpReport, ipStatus } from "./school/student-report.js";
 
 const VYNALTH_APEX = "vynalthai.com";
 const VYNALTH_WWW = `www.${VYNALTH_APEX}`;
@@ -62,12 +66,28 @@ function edgeResponse(response, request, incomingUrl, requestId, rootDomain) {
 
 // A Cloudflare Service Binding makes policy decisions without overwriting any
 // route, Host header, existing Shield rules, redirects or application handler.
-async function checkSchoolPolicy(request, env, rootDomain) {
+async function checkSchoolPolicy(request, env, rootDomain, ctx) {
   // Authenticate SSO status on the server. These three statuses are
   // exempt from this School IP policy only; Cloudflare WAF, abuse and
   // mandatory security controls still apply independently.
   if (env?.SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED === "true" &&
       await shieldAccountExempt(request, env, rootDomain)) return null;
+  // Inline migration is opt-in; existing Service Binding remains the default.
+  if (env?.SCHOOL_POLICY_INLINE_ENABLED === "true") {
+    const url = new URL(request.url);
+    if (!coveredHost(url.hostname)) return null;
+    url.search = "";
+    url.hash = "";
+    const ip = request.headers.get("CF-Connecting-IP");
+    if (!ip) return null;
+    const internal = new Request(url.toString(), {
+      method: request.method, headers: { "CF-Connecting-IP": ip }
+    });
+    const decision = await schoolGuard(internal, env, ctx, () =>
+      new Response(null, { status: 204, headers: { "X-School-Policy": "allow" } }));
+    return decision.status === 403 && decision.headers.get("X-School-Policy") === "blocked"
+      ? decision : null;
+  }
   if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
 
   // The upstream CF-Connecting-IP is authoritative for this edge request.
@@ -118,6 +138,44 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Legacy school management and voluntary report endpoints, opt-in only.
+    // Keep canonical paths so the existing UI JavaScript and CSRF checks work.
+    // Never expose these handlers on other product subdomains.
+    if (env?.SCHOOL_MANAGEMENT_INLINE_ENABLED === "true" &&
+        hostname === "vynalthai.com") {
+      const path = incomingUrl.pathname;
+      let schoolResponse = null;
+      if (path === "/__vynalth/school/health" && request.method === "GET") {
+        schoolResponse = new Response(JSON.stringify({
+          ok: true,
+          service: "vynalth-cloudflare-edge",
+          schoolPolicy: "inline-v1",
+          mode: env?.MODE === "enforce" ? "enforce" : "observe",
+          inlineEnabled: env?.SCHOOL_POLICY_INLINE_ENABLED === "true",
+          kvBound: typeof env?.SCHOOL_IP_KV?.get === "function"
+        }), {status: 200, headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store", "X-Robots-Tag": "noindex"
+        }});
+      } else if (path === "/__vynalth/school" && request.method === "GET") {
+        schoolResponse = new Response(null, {status: 302, headers: {
+          Location: "/block-ip", "Cache-Control": "no-store",
+          "X-Robots-Tag": "noindex,nofollow"
+        }});
+      } else       if (path.startsWith("/admin/ip/api/")) {
+        schoolResponse = await adminApi(request, env, incomingUrl);
+      } else if (path === "/admin/ip" || path === "/admin/ip/app.js") {
+        schoolResponse = adminPage(request, incomingUrl);
+      } else if (path === "/ip-status") {
+        schoolResponse = ipStatus(request);
+      } else if (path === "/block-ip") {
+        schoolResponse = await studentIpReport(request, env, incomingUrl);
+      }
+      if (schoolResponse) {
+        return observedResponse(schoolResponse, request, incomingUrl, requestId, rootDomain);
+      }
     }
 
     // Authenticated Service Binding calls from vv are a policy check only.
@@ -179,7 +237,7 @@ export default {
       incomingUrl.pathname.startsWith("/media/jingxin/");
     if (photoResource && env?.JINGXIN_PRIVATE_MEDIA_ENABLED === "true" &&
         !(await shieldAccountExempt(request,env,rootDomain))) {
-      const schoolDenial = await checkSchoolPolicy(request,env,rootDomain);
+      const schoolDenial = await checkSchoolPolicy(request,env,rootDomain,ctx);
       if (schoolDenial) {
         return observedResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
       }
@@ -223,7 +281,7 @@ export default {
     // Preserve domain validation/ACME checks; apply the school IP policy to
     // remaining requests without changing upstream Cloudflare WAF behavior.
     if (!isValidationPath(incomingUrl.pathname)) {
-      const denial = await checkSchoolPolicy(request, env, rootDomain);
+      const denial = await checkSchoolPolicy(request, env, rootDomain, ctx);
       if (denial) {
         return observedResponse(denial, request, incomingUrl, requestId, rootDomain);
       }
