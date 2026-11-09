@@ -33,6 +33,26 @@ export function inApproximateButterworth(lat,lon,accuracy){
     lon>=INNER_REGION.west+lonMargin &&
     lon<=INNER_REGION.east-lonMargin;
 }
+/**
+ * Fallback for an explicit, fresh OUTSIDE-campus verification on a request
+ * whose original trusted Cloudflare metadata labels the IP as Tasek Glugor.
+ * This does NOT assert the visitor is physically in Butterworth; it only
+ * extends a user-initiated outside-campus verdict. Do not check browser
+ * headers, user-provided city, timezone, or GPS coordinates here.
+ *
+ * Call ONLY after the independent campus geofence has returned OUTSIDE.
+ */
+export function isAmbiguousIpRecoveryEligible(request,accuracy){
+ const cf=request?.cf;
+ const country=String(cf?.country??"").trim().toUpperCase();
+ const code=String(cf?.regionCode??"").trim().toUpperCase();
+ const name=String(cf?.region??"").trim().toLowerCase();
+ const city=String(cf?.city??"").normalize("NFKC").trim().toLowerCase();
+ const penang=(code==="07"||code==="MY-07") &&
+   (!name||name==="penang"||name==="pulau pinang");
+ return country==="MY"&&penang&&city==="tasek glugor"&&
+   Number.isFinite(accuracy)&&accuracy>0&&accuracy<=5000;
+}
 function b64(bytes) {
  let raw="";for(const b of bytes)raw+=String.fromCharCode(b);
  return btoa(raw).replaceAll("+","-").replaceAll("/","_").replace(/=+$/g,"");
