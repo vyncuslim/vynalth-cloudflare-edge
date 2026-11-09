@@ -1005,3 +1005,45 @@ test("Chat bootstrap exceptions do not open other methods, subpaths, hosts or pr
    host+" "+method+" "+path+" must not pass as a chat bootstrap exception");
  }
 });
+
+
+test("all reviewed sitemap landing pages are GPS-exempt on the main apex only",async()=>{
+ const publiclyIndexable=[
+   "about","features","how-it-works","plans","research","sponsor","science",
+   "founder","docs","docs/supabase-integration","3d-world","event-center",
+   "trust","developers","chain","bot","apps/health-sync","apps/food-scanner",
+   "apps/insurtech","contact","faq","status","design-lab","neuroshield",
+   "neuroshield/waf","ai-coach","security-challenge-2026",
+   "security/hall-of-fame","security/momentum-checkpoint","device-id",
+   "security/passwordless","security/recovery","security/docs","blog",
+   "news","changelog","media","support"
+ ];
+ const policy={...cfg,GPS_REGION_TIMEZONE_ENABLED:"true",
+   GPS_RECHECK_EVERY_DOCUMENT:"true"};
+ for(const route of publiclyIndexable){
+   for(const locale of ["en","cn","ms"]){
+     const path="/"+locale+"/"+route;
+     for(const method of ["GET","HEAD"]){
+       const request=new Request("https://vynalthai.com"+path,{method,
+         headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}});
+       assert.equal(await invoke(request,policy),null,method+" "+path);
+     }
+   }
+ }
+ for(const path of [
+   "/en/security/audit-log","/cn/security/audit-log",
+   "/ms/settings","/en/admin","/en/search","/api/security/audit-log"
+ ]){
+   const result=await invoke(new Request("https://vynalthai.com"+path,{
+     headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}}),policy);
+   assert.ok(result instanceof Response,path+" must remain subject to GPS");
+ }
+ for(const host of ["vyncuslim.com","search.vynalthai.com"]){
+   const result=await invoke(new Request("https://"+host+"/en/about",{
+     headers:{Accept:"text/html"}}),policy);
+   assert.ok(result instanceof Response,host+" must not inherit main apex exemption");
+ }
+ const write=await invoke(new Request("https://vynalthai.com/en/about",{
+   method:"POST",headers:{Accept:"application/json"}}),policy);
+ assert.ok(write instanceof Response,"POST must remain protected");
+});
