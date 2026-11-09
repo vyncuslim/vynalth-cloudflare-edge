@@ -18,7 +18,10 @@ const PATH_PROBES = [
   [/^\/xmlrpc\.php$/, '/xmlrpc.php'],
   [/^\/server-status(?:\/|$)/, '/server-status/*'],
   [/^\/actuator\/env(?:\/|$)/, '/actuator/env'],
-  [/^\/cgi-bin\//, '/cgi-bin/*']
+  [/^\/cgi-bin\//, '/cgi-bin/*'],
+  // Unified edge observes explicit decoy-route probes across managed hosts.
+  // The routes are telemetry-only here; no administrative pages are exposed.
+  [/^\/_system\/(?:console|api|environment|database|storage|deployments|debug|identity|health|backups)\/?$/, '/_system/honeypot']
 ];
 
 export function isObservedSecurityProbe(request) {
