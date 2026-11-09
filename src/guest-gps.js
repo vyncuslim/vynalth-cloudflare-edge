@@ -35,7 +35,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-penang-butterworth-session-status-v10";
+const GPS_POLICY_REVISION="gps-penang-butterworth-recovery-feedback-v11";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -425,16 +425,26 @@ async function verify(req,url,cfg,env,ctx,requestId){
  if(recheckDocument&&url.hostname===GPS_BRIDGE_HUB)
   headers.append("Set-Cookie",policyCookie(FRESH_BRIDGE_COOKIE,await mintFreshBridge(cfg,url.hostname),NAV_PROOF_TTL));
  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
- // Only after a successful OUTSIDE campus verdict: issue short-lived UX proof.
- if(env?.GPS_BUTTERWORTH_PROOF_ENABLED==="true" &&
-    inApproximateButterworth(lat,lon,accuracy)){
-  const cookie=await mintButterworthProof(req,cfg.s,url.hostname);
-  if(cookie)headers.append("Set-Cookie",cookie);
- }else if(getCookie(req,BUTTERWORTH_PROOF_COOKIE)){
+ // An OUTSIDE verdict alone is not evidence that the separate 30-minute
+ // Butterworth credential was offered or stored by the browser.
+ // This response reports only coarse eligibility, never precise coordinates.
+ let recoveryResult=null;
+ if(env?.GPS_BUTTERWORTH_PROOF_ENABLED==="true"){
+  if(inApproximateButterworth(lat,lon,accuracy)){
+   const cookie=await mintButterworthProof(req,cfg.s,url.hostname);
+   if(cookie){
+    headers.append("Set-Cookie",cookie);
+    recoveryResult={offered:true,reason:"issued",maxDurationSeconds:1800};
+   }else recoveryResult={offered:false,reason:"source-ip-unavailable",maxDurationSeconds:1800};
+  }else recoveryResult={offered:false,
+    reason:accuracy>100?"accuracy-over-100m":"outside-butterworth-recovery-area",
+    maxDurationSeconds:1800};
+ }else recoveryResult={offered:false,reason:"feature-disabled",maxDurationSeconds:1800};
+ if(recoveryResult.offered!==true && getCookie(req,BUTTERWORTH_PROOF_COOKIE))
   headers.append("Set-Cookie",policyCookie(BUTTERWORTH_PROOF_COOKIE,"",0));
- }
  const proof=recheckDocument?await visitProof(cfg,url.hostname,targetPath):null;
  return new Response(JSON.stringify({verified:true,classification:"outside",expiresInSeconds:SESSION_TTL,
+    butterworthRecovery:recoveryResult,
     ...(proof?{navigationTicket:proof}:{})}),{
    status:200,headers
  });
