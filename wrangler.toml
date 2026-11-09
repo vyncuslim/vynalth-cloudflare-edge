@@ -22,16 +22,14 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
 GPS_GATE_ENABLED = "true"
-# Browser GPS prompt is limited to a conservative Penang ISLAND candidate:
-# Malaysia + Penang state (MY-07) + recognized island city + plausible
-# Cloudflare IP-derived coordinates. Butterworth and the Seberang Perai
-# MAINLAND are in Penang STATE but must not see this optional GPS prompt.
-# Ambiguous/missing/contradictory IP geodata does not force GPS permission.
-# This is a UX selector only, never identity or accurate physical location
-# proof; mobile IPs/CGNAT/VPNs can still mislocate, while WAF/auth remain.
+# Browser GPS prompt applies across all Penang STATE (MY-07), including
+# Butterworth/Seberang Perai and the island, before campus geofence checks.
+# Cloudflare IP state only selects the consent prompt; browser GPS must
+# independently decide campus inside/outside. Unknown/contradictory region
+# data does not force GPS; mobile IP/CGNAT/VPN can mislocate. WAF/auth remain.
 GPS_PENANG_ONLY_ENABLED = "true"
 # Retain legacy country/timezone feature flag for rollback only. When Penang-
-# only mode is enabled, its timezone preflight does not run for site traffic.
+# state mode is enabled, its timezone preflight does not run for site traffic.
 GPS_REGION_TIMEZONE_ENABLED = "true"
 # Server-side Telegram notification for GPS 403, separate from visitor access.
 # Requires Telegram Bot and Chat ID configured as Worker secrets.
