@@ -7,7 +7,7 @@
  *   const decision = await env.VYNALTH_GPS_POLICY.fetch(signed);
  *
  * GPS_SERVICE_AUTH_SECRET must be present as the same secret on both Workers.
- * The state comes ONLY from Cloudflare request.cf, never from visitor headers.
+ * The state and city come ONLY from Cloudflare request.cf, never visitor headers.
  * Do not route public client requests to the policy Service Binding directly.
  */
 const PREFIX="x-vynalth-gps-service-";
@@ -32,9 +32,11 @@ export async function createSignedGpsPolicyRequest(original, env){
     ? validated(original.cf?.regionCode,/^[A-Za-z0-9-]*$/,16):"";
   const region=country==="MY"
     ? validated(original.cf?.region,/^[\p{L}\p{M} .-]*$/u,80):"";
+  const city=country==="MY"
+    ? validated(original.cf?.city,/^[\p{L}\p{M} .-]*$/u,80):"";
   const ts=String(Math.floor(Date.now()/1000));
-  const payload=["gps-service-v2",ts,original.method.toUpperCase(),
-    original.url,ip,country,code,region].join("\n");
+  const payload=["gps-service-v3",ts,original.method.toUpperCase(),
+    original.url,ip,country,code,region,city].join("\n");
   const key=await crypto.subtle.importKey("raw",ENCODER.encode(secret),
     {name:"HMAC",hash:"SHA-256"},false,["sign"]);
   const signature=Array.from(new Uint8Array(await crypto.subtle.sign(
@@ -43,12 +45,13 @@ export async function createSignedGpsPolicyRequest(original, env){
   // Never allow an incoming visitor to set a service authentication field.
   for(const name of [...headers.keys()])
     if(name.toLowerCase().startsWith(PREFIX))headers.delete(name);
-  headers.set(PREFIX+"v","2");
+  headers.set(PREFIX+"v","3");
   headers.set(PREFIX+"ts",ts);
   headers.set(PREFIX+"sig",signature);
   headers.set(PREFIX+"ip",ip);
   headers.set(PREFIX+"country",country);
   headers.set(PREFIX+"region-code",code);
   headers.set(PREFIX+"region",region);
+  headers.set(PREFIX+"city",city);
   return new Request(original,{headers});
 }
