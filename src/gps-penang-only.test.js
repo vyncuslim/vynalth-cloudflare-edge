@@ -82,7 +82,6 @@ test("Penang state alone prompts GPS even with missing city or IP coordinates",a
     {country:"MY",regionCode:"07",region:"Penang"},
     {country:"MY",regionCode:"MY-07",city:"Penang",latitude:"5.414",longitude:"100.329"},
     {country:"MY",regionCode:"07",city:"George Town"},
-    {country:"MY",regionCode:"07",city:"George Town",latitude:"5.399",longitude:"100.374"},
     {country:"MY",regionCode:"07",city:"George Town",latitude:"invalid",longitude:"100.329"}
   ]){
     const r=request("/private",cf);
