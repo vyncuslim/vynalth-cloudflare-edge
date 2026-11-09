@@ -61,7 +61,7 @@ test("Butterworth is exempt from GPS, even if coarse IP coordinates show Penang 
 });
 test("Other Penang mainland towns still require GPS",async()=>{
   for(const cf of [
-    {country:"MY",regionCode:"07",region:"Penang",city:"Seberang Perai",latitude:"5.389",longitude:"100.38"},
+    {country:"MY",regionCode:"07",region:"Penang",city:"Seberang Perai",latitude:"5.31",longitude:"100.43"},
     {country:"MY",regionCode:"07",city:"Bukit Mertajam",latitude:"5.363",longitude:"100.463"}
   ]){
     const r=request("/private",cf);
@@ -82,7 +82,6 @@ test("Penang state alone prompts GPS even with missing city or IP coordinates",a
     {country:"MY",regionCode:"07",region:"Penang"},
     {country:"MY",regionCode:"MY-07",city:"Penang",latitude:"5.414",longitude:"100.329"},
     {country:"MY",regionCode:"07",city:"George Town"},
-    {country:"MY",regionCode:"07",city:"George Town",latitude:"5.399",longitude:"100.374"},
     {country:"MY",regionCode:"07",city:"George Town",latitude:"invalid",longitude:"100.329"}
   ]){
     const r=request("/private",cf);
@@ -246,7 +245,7 @@ test("GPS UI waits for an explicit click and exits stalled permission requests",
 
 test("GPS status shows only trusted coarse IP city to diagnose location mistakes",async()=>{
  const meta={country:"MY",regionCode:"07",region:"Penang",
-   city:"Seberang Perai",latitude:"5.40",longitude:"100.38"};
+   city:"Seberang Perai",latitude:"5.31",longitude:"100.43"};
  const req=request("/__shield/gps/status",meta,{
    "X-City":"Butterworth","CF-City":"Butterworth","X-GPS-Lat":"5.4"
  });
@@ -276,4 +275,65 @@ test("GPS status never reflects untrusted city headers when Cloudflare city is a
  const data=await response.json();
  assert.equal(data.regionalPolicy.observedIpCity,null);
  assert.equal(data.regionalPolicy.gpsRequired,true);
+});
+
+test("Butterworth neighborhood aliases do not trigger browser GPS",async()=>{
+ for(const city of ["Bagan Ajam","Bagan Jermal","Mak Mandin","Raja Uda",
+   "Teluk Air Tawar","Sungai Puyu","Seberang Perai Utara","Bandar Butterworth"]){
+   const r=request("/private",{country:"MY",regionCode:"07",city});
+   assert.equal(gpsPenangOnlyDecision(r,ENV).reason,"butterworth-ip-locality-exempt",city);
+   assert.equal(await gate(r),null,city);
+ }
+});
+test("trusted Butterworth postal code resolves IP city mistakes without GPS",async()=>{
+ for(const postalCode of ["12000","12100","12300","13000","13020","13400"]){
+  const r=request("/private",{country:"MY",region:"Penang",regionCode:"07",city:"George Town",postalCode});
+  assert.equal(gpsPenangOnlyDecision(r,ENV).reason,"butterworth-ip-postcode-exempt",postalCode);
+  assert.equal(await gate(r),null,postalCode);
+ }
+ for(const postalCode of ["11000","11200","11900","13200","14000","13600","abcde"]){
+  const r=request("/private",{country:"MY",regionCode:"07",city:"Penang",postalCode});
+  assert.equal(gpsPenangOnlyDecision(r,ENV).requireGPS,true,postalCode);
+ }
+});
+test("original Cloudflare mainland location resolves generic Penang IP city",async()=>{
+ for(const city of [null,"Penang","Seberang Perai","George Town"]){
+  const r=request("/private",{country:"MY",region:"Penang",regionCode:"07",city,
+    latitude:"5.399",longitude:"100.378"});
+  assert.equal(gpsPenangOnlyDecision(r,ENV).reason,"butterworth-ip-mainland-box-exempt",String(city));
+  assert.equal(await gate(r),null,String(city));
+ }
+ for(const location of [
+  {latitude:"5.3677",longitude:"100.21995"},
+  {latitude:"5.4613",longitude:"100.284"},
+  {latitude:"5.41",longitude:"100.329"},
+  {latitude:"5.399",longitude:"not-a-number"},
+  {latitude:undefined,longitude:undefined},
+ ]){
+  const r=request("/private",{country:"MY",regionCode:"07",city:"Penang",...location});
+  assert.equal(gpsPenangOnlyDecision(r,ENV).requireGPS,true,JSON.stringify(location));
+ }
+});
+test("browser controlled headers do not forge Butterworth postcode or IP coordinates",async()=>{
+ const r=request("/private",{country:"MY",regionCode:"07",city:"George Town",
+   latitude:"5.41",longitude:"100.329",postalCode:"10000"},{
+   "CF-Postal-Code":"12000","X-Postal-Code":"12000",
+   "X-Geo-Latitude":"5.399","X-Geo-Longitude":"100.378"
+ });
+ assert.equal(gpsPenangOnlyDecision(r,ENV).requireGPS,true);
+ assert.equal((await gate(r)).status,403);
+ const johor=request("/private",{country:"MY",regionCode:"01",city:"Butterworth",
+   latitude:"5.399",longitude:"100.378",postalCode:"12000"});
+ assert.equal(gpsPenangOnlyDecision(johor,ENV).requireGPS,false);
+ assert.equal(gpsPenangOnlyDecision(johor,ENV).reason,"outside-penang-or-unknown-region");
+});
+test("signed legacy Service Binding cannot use receiving Worker's geo postcode or coordinates",()=>{
+ const r=request("/private",{country:"MY",regionCode:"07",city:"George Town",
+   postalCode:"12000",latitude:"5.399",longitude:"100.378"});
+ const v2=gpsPenangOnlyDecision(r,ENV,"MY","07","Penang");
+ assert.equal(v2.requireGPS,true);
+ const v3=gpsPenangOnlyDecision(r,ENV,"MY","07","Penang","George Town");
+ assert.equal(v3.requireGPS,true);
+ const signedAlias=gpsPenangOnlyDecision(r,ENV,"MY","07","Penang","Sungai Puyu");
+ assert.equal(signedAlias.reason,"butterworth-ip-locality-exempt");
 });

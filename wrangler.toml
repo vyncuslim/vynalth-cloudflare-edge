@@ -27,8 +27,8 @@ SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
 GPS_GATE_ENABLED = "true"
 # Browser GPS prompt covers Penang state (MY-07) EXCEPT Butterworth.
-# Trusted Cloudflare request.cf.city == Butterworth skips optional GPS;
-# other Penang towns including Seberang Perai still require campus GPS.
+# Trusted Cloudflare city/locality, narrow Butterworth postcode and coarse
+# mainland IP coordinate box can exempt Butterworth. Other Penang areas keep GPS.
 # This is an approximate IP-derived city exemption, NOT proof of location.
 # Separate WAF, School IP and origin authentication remain unaffected.
 # Upstream Service Binding calls need signed city metadata v3 to apply

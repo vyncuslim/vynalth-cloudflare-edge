@@ -55,3 +55,7 @@ The receiver strips all signed service headers after verification; no user-contr
 - A browser-supplied city header is not trusted, and the policy worker's own `request.cf.city` does not describe the original visitor.
 - IP-derived city may be inaccurate. Some Butterworth visitors may still be challenged if their IP geolocation resolves elsewhere; a campus user could appear to be in Butterworth via a VPN or ISP. **This exemption is not compatible with guaranteeing that all physically on-campus users are blocked.** Existing independent WAF, app auth and School IP restrictions still apply.
 - For geographically reliable exemption plus guaranteed campus enforcement, additional reliable signals and consent/alternative identity checks would be necessary. Do not label this city filter as precise geofencing.
+
+### Multi-signal repair
+
+The optional Butterworth exemption now accepts narrowly named Northern Seberang Perai localities (including Bagan Ajam, Mak Mandin and Sungai Puyu), trusted Cloudflare IP-derived Butterworth postcode ranges 12000-13099 and 13400-13499, or a narrow mainland IP coordinate box on the original edge request. Browser-supplied headers never qualify. These are coarse IP hints and not physical GPS, so erroneous IP mapping can still cause a prompt. Existing signed Service Binding v3 passes original city but not postcode or coarse coordinates; the direct edge has all three signals. Campus GPS rules and unrelated security controls are unaffected.
