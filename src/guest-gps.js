@@ -34,7 +34,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-island-city-bounds-v4";
+const GPS_POLICY_REVISION="gps-penang-state-campus-v5";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -382,7 +382,7 @@ async function verify(req,url,cfg,env,ctx,requestId){
   // Coarse fixes (over 100m) may allow access only when the full reported
   // uncertainty area is outside every campus buffer. The existing 5-minute
   // near-boundary concession remains limited to genuinely precise readings.
-  if(cfg.polygonMode!=="enforce"||accuracy>100)
+  if(env?.GPS_PENANG_ONLY_ENABLED==="true"||cfg.polygonMode!=="enforce"||accuracy>100)
    return reply(403,{error:"LOCATION_UNCERTAIN",blocked:true,retryable:true});
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
@@ -532,14 +532,13 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
     exemptAccountStatuses:["trust","contact","status"],preciseCoordinatesStoredInCookie:false,
     crossDomainCookieReading:false,defaultEnabled:false,
-    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-island-only":"legacy"});
+    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-state-only":"legacy"});
  }
 
  if(env?.GPS_GATE_ENABLED!=="true")return null;
- // Prefer friction-free navigation except for conservatively IP-identified
- // Penang ISLAND. Mainland Penang (Butterworth/Seberang Perai) does not
- // automatically receive a GPS prompt. Missing/ambiguous city fails open.
- // Independent WAF, School IP, origin auth and private-media policies remain.
+ // Penang STATE (including Butterworth and Seberang Perai) requests browser
+ // GPS consent before a campus geofence check. IP state is a prompt selector,
+ // not a campus verdict. Independent WAF, School IP, and auth remain.
  const penang=gpsPenangOnlyDecision(request,env,verifiedCountry,verifiedRegionCode,verifiedRegion);
  if(penang.enabled && !penang.requireGPS &&
     !url.pathname.startsWith("/__shield/gps/"))return null;
@@ -590,8 +589,8 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
    gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:penang.enabled
-    ? {enabled:true,mode:"penang-island-only",trigger:"cloudflare-ip-city-and-coarse-coordinates",
-       regionKnown:penang.reason==="penang-island-ip-evidence",
+    ? {enabled:true,mode:"penang-state-only",trigger:"cloudflare-ip-state-metadata",
+       regionKnown:penang.requireGPS,
        gpsRequired:penang.requireGPS,selectionReason:penang.reason,
        vpnDetection:"not-guaranteed",preciseGpsInferred:false}
     : {enabled:env?.GPS_REGION_TIMEZONE_ENABLED==="true",
@@ -608,7 +607,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  // Other WAF, School IP and identity controls still apply in src/index.js.
  if(env?.GPS_OUTSIDE_SESSION_FASTPASS==="true"&&
     await sessionVerdict(request,cfg,url.hostname)==="outside")return null;
- // Penang-only mode does not require browser timezone checks.
+ // Penang-state mode does not require browser timezone checks.
  if(!penang.enabled){
   const region=await gpsRegionalDecision(request,env,url,verifiedCountry);
   if(region.response)return region.response;
