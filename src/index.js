@@ -10,6 +10,9 @@ import { scheduleThreatTelemetry } from "./threat-telemetry.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
+import { adminApi } from "./school/admin-api.js";
+import { adminPage } from "./school/admin-page.js";
+import { studentIpReport, ipStatus } from "./school/student-report.js";
 
 const VYNALTH_APEX = "vynalthai.com";
 const VYNALTH_WWW = `www.${VYNALTH_APEX}`;
@@ -133,6 +136,27 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Legacy school management and voluntary report endpoints, opt-in only.
+    // Keep canonical paths so the existing UI JavaScript and CSRF checks work.
+    // Never expose these handlers on other product subdomains.
+    if (env?.SCHOOL_MANAGEMENT_INLINE_ENABLED === "true" &&
+        hostname === "vynalthai.com") {
+      const path = incomingUrl.pathname;
+      let schoolResponse = null;
+      if (path.startsWith("/admin/ip/api/")) {
+        schoolResponse = await adminApi(request, env, incomingUrl);
+      } else if (path === "/admin/ip" || path === "/admin/ip/app.js") {
+        schoolResponse = adminPage(request, incomingUrl);
+      } else if (path === "/ip-status") {
+        schoolResponse = ipStatus(request);
+      } else if (path === "/block-ip") {
+        schoolResponse = await studentIpReport(request, env, incomingUrl);
+      }
+      if (schoolResponse) {
+        return observedResponse(schoolResponse, request, incomingUrl, requestId, rootDomain);
+      }
     }
 
     // Authenticated Service Binding calls from vv are a policy check only.
