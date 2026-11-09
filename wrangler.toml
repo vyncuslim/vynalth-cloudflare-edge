@@ -20,6 +20,7 @@ workers_dev = true
 THREAT_INTEL_COLLECT_ENABLED = "true"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "false"
+SCHOOL_MANAGEMENT_INLINE_ENABLED = "false"
 MODE = "observe"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
