@@ -149,3 +149,37 @@ test("opt-in recovery page offers explicit browser location consent and does not
  const otherHost=await gate(request("vyncuslim.my","/__shield/gps/recover"));
  assert.equal(otherHost.status,404);
 });
+
+test("standard signed OUTSIDE session permits navigation even when Butterworth proof is absent",async()=>{
+ const verified=await verify(5.48,100.50,15);
+ assert.equal(verified.status,200);
+ const outsideCookie=cookieByName(verified,"__Host-vynalth-geo");
+ assert.ok(outsideCookie,"missing standard signed outside session");
+ assert.equal(cookieByName(verified,BUTTERWORTH_PROOF_COOKIE),null);
+ const statusResponse=await gate(request(HOST,"/__shield/gps/status","GET",{Cookie:outsideCookie}));
+ assert.equal(statusResponse.status,200);
+ const status=await statusResponse.json();
+ assert.equal(status.policyRevision,"gps-penang-butterworth-session-status-v10");
+ assert.equal(status.verified,true);
+ assert.equal(status.regionalPolicy.gpsRequired,true,"regional rule still applies");
+ assert.equal(status.regionalPolicy.browserProofActive,false);
+ assert.equal(status.regionalPolicy.butterworthRecovery.credentialStatus,"missing-cookie");
+ assert.deepEqual(status.signedSession,{
+  state:"outside",outsideFastpassActive:true,hostBound:true
+ });
+ assert.equal(status.navigationAssessment.protectedDocumentGpsPromptExpected,false);
+ assert.equal(await gate(request(HOST,"/private","GET",{Cookie:outsideCookie})),null);
+ const strict=await (await gate(request(HOST,"/__shield/gps/status","GET",
+   {Cookie:outsideCookie}),{...ENV,GPS_OUTSIDE_SESSION_FASTPASS:"false",GPS_RECHECK_EVERY_DOCUMENT:"true"})).json();
+ assert.equal(strict.signedSession.outsideFastpassActive,false);
+ assert.equal(strict.navigationAssessment.protectedDocumentGpsPromptExpected,true);
+});
+
+test("regional GPS requirement means a first-time protected visitor needs verification",async()=>{
+ const status=await (await gate(request(HOST,"/__shield/gps/status"))).json();
+ assert.equal(status.verified,false);
+ assert.equal(status.signedSession.state,"none");
+ assert.equal(status.signedSession.outsideFastpassActive,false);
+ assert.equal(status.navigationAssessment.protectedDocumentGpsPromptExpected,true);
+ assert.equal(status.navigationAssessment.previouslyRestricted,false);
+});
