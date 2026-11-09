@@ -36,8 +36,8 @@ test("v2 signed Penang STATE requires GPS even without island city evidence",asy
  assert.equal(a.region,"Penang");
  assert.equal(r.headers.get("x-vynalth-gps-service-v"),"2");
  const decision=await edge.fetch(r,ENV,{});
- assert.equal(decision.status,403); // signed state requires campus geofence consent
- assert.match(await decision.text(),/Precise location required/);
+ assert.equal(decision.status,302); // cross-domain request is sent to first-party GPS consent hub
+ assert.match(decision.headers.get("location")||"",/^https:\/\/vynalthai\.com\/__shield\/gps\//);
 });
 test("v2 signed Johor state returns authorized 204 to the same policy-only route",async()=>{
  const req=await createSignedGpsPolicyRequest(source("Johor","01"),ENV);
