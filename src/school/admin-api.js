@@ -174,7 +174,7 @@ export async function adminApi(request,env,url){
   if(endpoint==="session"&&request.method==="GET")return json(200,{
     authenticated:true,csrf:auth.csrf,expires:auth.expiry,currentIp:visitorIp(request),
     mode:mode(env),edgeVerified:false,
-    note:"KV blocklist changes require live MODE=enforce and verified Edge Service Binding on all target websites."
+    note:"KV blocklist changes require active runtime enforcement and verified Edge routes on the intended websites."
   });
   if(endpoint==="enforcement"&&request.method==="GET"){
     const state=await runtimeEnforcement(kv,env.MODE);
@@ -182,7 +182,7 @@ export async function adminApi(request,env,url){
       enabled:state.enabled,
       source:state.source,
       expiresAt:state.expiresAt,
-      appliesTo:"Policy Worker decisions on covered domains that actually call this service",
+      appliesTo:"Unified Edge Worker requests on covered domains with confirmed Cloudflare routes",
       edgeVerified:false,
       routeVerified:false,
       warning:"Cloudflare Edge routes and SCHOOL_POLICY_ENABLED must be verified independently."
