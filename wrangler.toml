@@ -34,6 +34,10 @@ GPS_GATE_ENABLED = "true"
 # Upstream Service Binding calls need signed city metadata v3 to apply
 # Butterworth's exemption; v1/v2 callers cannot assert the source city.
 GPS_PENANG_ONLY_ENABLED = "true"
+# Consented location recovery: 30-minute host/IP-bound proof ONLY after
+# a successful outside-campus result near approximate Butterworth urban area.
+# Does not trust Tasek Glugor IP city alone, or bypass School IP/WAF/auth.
+GPS_BUTTERWORTH_PROOF_ENABLED = "true"
 # Retain legacy country/timezone feature flag for rollback only. When Penang-
 # state mode is enabled, its timezone preflight does not run for site traffic.
 GPS_REGION_TIMEZONE_ENABLED = "true"
