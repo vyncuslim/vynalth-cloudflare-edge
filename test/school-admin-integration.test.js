@@ -67,7 +67,7 @@ test("black admin login page and JS load without mutating KV",async()=>{
   assert.match(html,/IP Access Control/);
   assert.match(html,/background:#030407/);
   assert.match(html,/\/admin\/ip\/app.js/);
-  assert.match(html,/script-src 'self'/);
+  assert.match(page.headers.get('Content-Security-Policy'),/script-src 'self'/);
   const script=await send(env,"/admin/ip/app.js");
   assert.equal(script.status,200);
   assert.match(await script.text(),/admin\/ip\/api\//);
