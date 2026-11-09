@@ -455,21 +455,31 @@ function publicBuildAsset(request,path){
  return (request.method==="GET"||request.method==="HEAD")&&
   /^\/assets\/[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9_-]{8,}\.(?:css|js|mjs|woff|woff2|ttf|otf)$/.test(path);
 }
-// Only published, anonymous informational pages on the Vynalth AI main
-// origin are exempt from this website's interactive GPS consent challenge.
+// GET/HEAD landing/document paths published as canonical URLs by the Vynalth
+// AI main-site sitemap remain available without the optional GPS challenge.
+// Sensitive audit-log routes are deliberately excluded even if mistakenly
+// present in an upstream sitemap. Keep this list in sync with reviewed public
+// routes; this is not an exemption for private APIs or authenticated data.
 // This does NOT bypass Cloudflare WAF, signed sessions, School IP Policy,
 // temporary IP denies, or any authenticated/private endpoint.
 const PUBLIC_APEX_INFORMATION_ROUTES = new Set([
-  '', 'legal', 'product', 'security/trust-center', 'security/bug-bounty',
-  'news/bug-bounty-program',
-  'legal/privacy', 'legal/biometric-data-notice', 'legal/terms',
-  'legal/cookies', 'legal/medical-disclaimer', 'legal/data-handling',
-  'legal/sub-processors', 'legal/dpa', 'legal/contact',
-  'legal/security', 'legal/acceptable-use', 'legal/ai-disclaimer',
-  'legal/abuse-policy', 'legal/account-blocking', 'legal/policy-framework',
-  'legal/vulnerability-disclosure', 'legal/bug-bounty',
-  'legal/appeals-and-complaints', 'legal/intellectual-property',
-  'legal/children-privacy', 'legal/open-source', 'legal/transparency'
+  '', 'legal', 'product', 'security/trust-center',
+  'security/bug-bounty', 'news/bug-bounty-program', 'legal/privacy', 'legal/biometric-data-notice',
+  'legal/terms', 'legal/cookies', 'legal/medical-disclaimer', 'legal/data-handling',
+  'legal/sub-processors', 'legal/dpa', 'legal/contact', 'legal/security',
+  'legal/acceptable-use', 'legal/ai-disclaimer', 'legal/abuse-policy', 'legal/account-blocking',
+  'legal/policy-framework', 'legal/vulnerability-disclosure', 'legal/bug-bounty', 'legal/appeals-and-complaints',
+  'legal/intellectual-property', 'legal/children-privacy', 'legal/open-source', 'legal/transparency',
+  'about', 'features', 'how-it-works', 'plans',
+  'research', 'sponsor', 'science', 'founder',
+  'docs', 'docs/supabase-integration', '3d-world', 'event-center',
+  'trust', 'developers', 'chain', 'bot',
+  'apps/health-sync', 'apps/food-scanner', 'apps/insurtech', 'contact',
+  'faq', 'status', 'design-lab', 'neuroshield',
+  'neuroshield/waf', 'ai-coach', 'security-challenge-2026', 'security/hall-of-fame',
+  'security/momentum-checkpoint', 'device-id', 'security/passwordless', 'security/recovery',
+  'security/docs', 'blog', 'news', 'changelog',
+  'media', 'support'
 ]);
 const PUBLIC_APEX_INFORMATION_PATHS = new Set(['/']);
 for (const route of PUBLIC_APEX_INFORMATION_ROUTES) {
