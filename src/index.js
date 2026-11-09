@@ -9,6 +9,7 @@ import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-ow
 import { scheduleThreatTelemetry } from "./threat-telemetry.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
+import { schoolGuard, coveredHost } from "./school/policy.js";
 
 const VYNALTH_APEX = "vynalthai.com";
 const VYNALTH_WWW = `www.${VYNALTH_APEX}`;
@@ -68,6 +69,20 @@ async function checkSchoolPolicy(request, env, rootDomain) {
   // mandatory security controls still apply independently.
   if (env?.SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED === "true" &&
       await shieldAccountExempt(request, env, rootDomain)) return null;
+  // Inline migration is opt-in; existing Service Binding remains the default.
+  if (env?.SCHOOL_POLICY_INLINE_ENABLED === "true") {
+    const url = new URL(request.url);
+    if (!coveredHost(url.hostname)) return null;
+    const ip = request.headers.get("CF-Connecting-IP");
+    if (!ip) return null;
+    const internal = new Request(url.toString(), {
+      method: request.method, headers: { "CF-Connecting-IP": ip }
+    });
+    const decision = await schoolGuard(internal, env, null, () =>
+      new Response(null, { status: 204, headers: { "X-School-Policy": "allow" } }));
+    return decision.status === 403 && decision.headers.get("X-School-Policy") === "blocked"
+      ? decision : null;
+  }
   if (!env?.SCHOOL_POLICY || typeof env.SCHOOL_POLICY.fetch !== "function") return null;
 
   // The upstream CF-Connecting-IP is authoritative for this edge request.
