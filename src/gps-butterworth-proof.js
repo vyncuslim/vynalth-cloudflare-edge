@@ -58,24 +58,30 @@ export async function mintButterworthProof(request,secret,host) {
  return BUTTERWORTH_PROOF_COOKIE+"="+exp+"."+nonce+"."+sig+
   "; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age="+BUTTERWORTH_PROOF_TTL;
 }
-export async function hasButterworthProof(request,env,host){
- if(env?.GPS_BUTTERWORTH_PROOF_ENABLED!=="true")return false;
+export async function inspectButterworthProof(request,env,host){
+ if(env?.GPS_BUTTERWORTH_PROOF_ENABLED!=="true")return {valid:false,status:"feature-disabled"};
  const ip=validSourceIp(request),secret=env?.GPS_GATE_SESSION_SECRET;
- if(!ip||typeof secret!=="string"||secret.length<32)return false;
+ if(!ip)return {valid:false,status:"source-ip-unavailable"};
+ if(typeof secret!=="string"||secret.length<32)return {valid:false,status:"signing-unavailable"};
  const pair=(request.headers.get("Cookie")||"").split(";").map(x=>x.trim())
    .find(x=>x.startsWith(BUTTERWORTH_PROOF_COOKIE+"="));
- if(!pair)return false;
+ if(!pair)return {valid:false,status:"missing-cookie"};
  const raw=pair.slice(BUTTERWORTH_PROOF_COOKIE.length+1);
- if(raw.length>190)return false;
+ if(raw.length>190)return {valid:false,status:"malformed-cookie"};
  const [exp,nonce,sig,...extra]=raw.split(".");
  if(extra.length||!/^[0-9]{10,12}$/.test(exp||"")||
-  !/^[A-Za-z0-9_-]{22}$/.test(nonce||""))return false;
+  !/^[A-Za-z0-9_-]{22}$/.test(nonce||""))return {valid:false,status:"malformed-cookie"};
  const now=Math.floor(Date.now()/1000),end=Number(exp);
- if(end<=now||end>now+BUTTERWORTH_PROOF_TTL)return false;
+ if(end<=now||end>now+BUTTERWORTH_PROOF_TTL)return {valid:false,status:"expired-cookie"};
  const signature=decode(sig);
- if(!signature||signature.length!==32)return false;
+ if(!signature||signature.length!==32)return {valid:false,status:"malformed-cookie"};
  try{
-  return await crypto.subtle.verify("HMAC",await key(secret),signature,
+  const valid=await crypto.subtle.verify("HMAC",await key(secret),signature,
     enc.encode(payload(exp,nonce,host,ip)));
- }catch{return false}
+  return {valid,status:valid?"valid":"invalid-or-network-changed"};
+ }catch{return {valid:false,status:"verification-failed"}}
+}
+// Coarse status only: never return raw IP, GPS coordinates, cookie, or signature.
+export async function hasButterworthProof(request,env,host){
+ return (await inspectButterworthProof(request,env,host)).valid;
 }
