@@ -29,7 +29,7 @@ const env = {
   GPS_CAMPUS_POLYGONS_JSON: JSON.stringify(sample),
   GPS_BOUNDARY_BUFFER_METERS: "30"
 };
-function verifyRequest(lat,lon,accuracy) {
+function verifyRequest(lat,lon,accuracy,policy=env) {
   const url = "https://vynalthai.com/__shield/gps/verify";
   const request = new Request(url, {
     method: "POST",
@@ -37,7 +37,7 @@ function verifyRequest(lat,lon,accuracy) {
               "Content-Type": "application/json"},
     body: JSON.stringify({lat,lon,accuracy})
   });
-  return guestGpsGate(request, env, new URL(url));
+  return guestGpsGate(request, policy, new URL(url));
 }
 test("A coarse fix well outside campus can pass conservatively", async () => {
   const response = await verifyRequest(5.38, 100.33, 1500);
@@ -67,4 +67,14 @@ test("Polygon classifier measures the uncertainty envelope rather than using a 1
   assert.equal(decideCampusPolygons(polys,5.461,100.286,1500,30),"UNCERTAIN");
   assert.equal(decideCampusPolygons(polys,5.461,100.281,1500,30),"INSIDE_UNCERTAIN");
   assert.equal(decideCampusPolygons(polys,5.38,100.33,MAX_GPS_ACCURACY_METERS+1,30),"INVALID");
+});
+
+test("Penang state mode never grants a near-campus uncertain access token", async () => {
+  // Synthetic GPS point outside the campus; uncertainty overlaps the 30 m buffer.
+  const response = await verifyRequest(5.461,100.28225,10,{
+    ...env, GPS_PENANG_ONLY_ENABLED:"true"
+  });
+  assert.equal(response.status,403);
+  assert.equal((await response.json()).error,"LOCATION_UNCERTAIN");
+  assert.equal(response.headers.get("set-cookie"),null);
 });
