@@ -3,6 +3,7 @@ import { GPS_HTML,GPS_CLIENT } from "./gps-verification-ui.js";
 import { scheduleGpsDenialAlert,telegramGpsStatus } from "./gps-telegram-alert.js";
 import { gpsRegionalDecision } from "./gps-regional-trigger.js";
 import { gpsPenangOnlyDecision } from "./gps-penang-only.js";
+import { BUTTERWORTH_PROOF_COOKIE, inApproximateButterworth, mintButterworthProof, hasButterworthProof } from "./gps-butterworth-proof.js";
 const GEO_HTML=GPS_HTML;
 const GEO_CLIENT=GPS_CLIENT;
 const DISCLAIMER_HTML="<!doctype html>\n<html lang=\"zh-CN\">\n<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\"><meta name=\"referrer\" content=\"no-referrer\">\n<title>GPS Verification Disclaimer · Vynalth AI</title>\n<style>\n:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#eaf1fc;background:#05070e}\nbody{padding:28px 17px;margin:0;background:radial-gradient(circle at 20% 0,#172840,transparent 60%),#05070e}\nmain{margin:auto;max-width:780px;background:#101827;border:1px solid #364563;border-radius:21px;padding:clamp(24px,4vw,42px)}\nheader{color:#98c8ff;font-size:12px;font-weight:800;letter-spacing:.1em}\nh1{font-size:clamp(30px,5vw,42px);margin:16px 0}\nh2{font-size:18px;color:#d6e7ff;margin:26px 0 10px}\np,li{color:#bbcbdf;line-height:1.8;font-size:14px}\na{color:#9cceff}aside{padding:14px;border:1px solid #465b81;border-radius:12px;background:#192b44}\n</style></head>\n<body><main><header>VYNALTH AI · LOCATION POLICY</header>\n<h1>声明 · Penafian · Disclaimer</h1>\n<aside>\n<strong>独立网站政策 / Dasar laman bebas / Independent website policy</strong>\n<p>此功能由 Vynalth AI 网站运营者提供，不属于 POWIIS 校方官方定位或访问系统。</p>\n<p>Fungsi ini bukan perkhidmatan rasmi POWIIS.</p>\n<p>This location requirement is not operated or endorsed by POWIIS.</p>\n</aside>\n<h2>1. 为什么请求位置 / Tujuan / Purpose</h2>\n<p>网页仅在访客点击授权按钮、并同意浏览器的位置权限后才请求地理位置，用于判断设备报告的位置是否位于网站运营者设置的校园地理围栏之内。精确位置并不能可靠证明某人的学校身份、账号身份或当前网络。</p>\n<p>Lokasi hanya diminta selepas persetujuan melalui pelayar, bagi semakan kawasan geografi. Lokasi bukan bukti identiti.</p>\n<p>After browser permission, the reported position is checked against an operator-defined campus area. Browser location can be inaccurate or spoofed.</p>\n<h2>2. 不提供位置 / Jika menolak / If you decline</h2>\n<p>访客可以拒绝授权，但启用此功能的网站可能因此不允许继续访问并展示访问限制页面。拒绝授权本身不会导致永久账号封锁。你可以修改浏览器权限后重新尝试。</p>\n<p>Anda boleh menolak; akses tetamu mungkin dihadkan, tetapi akaun tidak diharamkan secara kekal hanya kerana penolakan.</p>\n<p>You may refuse location access. When the gate is enabled, guest access may be restricted, but refusing does not permanently ban your account.</p>\n<h2>3. Cookie 与数据 / Kuki dan data / Cookies and data</h2>\n<p>验证时通过 HTTPS 将报告的经纬度及精度传送至本站 Worker，本功能不主动将精确 GPS 坐标写入 Cookie 或 KV。成功通过验证或处于限制区域时，本站可设置最长约 15 分钟、仅对本站有效的签名状态 Cookie。浏览器可在设置中删除 Cookie；各独立根域名无法直接读取其他域的 Cookie。</p>\n<p>Koordinat digunakan untuk keputusan permintaan sahaja dan tidak disimpan dalam kuki. Kuki status sementara terikat pada domain sendiri.</p>\n<p>Precise coordinates are used for the current verification and are not intentionally stored in persistent application data by this feature. Short-lived signed status cookies do not contain GPS coordinates. Standard server/network logs and browser behavior are governed by their own policies.</p>\n<h2>4. 豁免和错误 / Pengecualian dan ralat / Exemptions and mistakes</h2>\n<p>由服务器身份验证并确认状态为 <strong>trust</strong> 或 <strong>contact</strong> 的账号可豁免此项 GPS 检查。浏览器自身声明并不构成有效凭证。如判断有误、设备无法定位、位于边界或需要访问帮助，请联系网站管理员；可要求人工复核与删除相关记录。</p>\n<p>Status akaun trust/contact mesti disahkan oleh pelayan. Untuk semakan atau pemadaman, hubungi pentadbir laman.</p>\n<p>Authenticated trust/contact accounts are exempt once the website validates their status server-side. Contact the website operator to dispute a decision or request applicable data deletion.</p>\n<h2>5. 儿童及未成年人 / Pengguna bawah umur / Minors</h2>\n<p>学校访客可能包括未成年人。请勿在未经适当授权的情况下提交他人位置，亦不要通过其他设备代替他人授权。网站不会因为一次位置报告而永久封锁账号。</p>\n<p>Jangan kongsi lokasi orang lain tanpa persetujuan yang sewajarnya.</p>\n<p>Do not submit someone else's location without appropriate permission. This feature must be reviewed for applicable privacy requirements before production activation.</p>\n<p><a href=\"https://vynalthai.com/en/legal/privacy\" rel=\"noopener noreferrer\" referrerpolicy=\"no-referrer\">Vynalth AI Privacy Policy</a></p>\n<p><a href=\"/__shield/gps/verify-info\">查看位置验证信息 / View verification information</a></p>\n</main></body></html>";
@@ -34,7 +35,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-penang-butterworth-multisignal-v7";
+const GPS_POLICY_REVISION="gps-penang-butterworth-browser-proof-v8";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -145,6 +146,7 @@ export async function gpsOutsideOrLegacyExempt(request,env,host){
  if(!cfg)return false;
  if(await exempt(request,cfg,host))return true;
  if(await hasBlockVerdict(request,cfg,host))return false;
+ if(await hasButterworthProof(request,env,host))return true;
  // Nearby access is for ordinary pages only; do not extend it to private media.
  return (await sessionVerdict(request,cfg,host))==="outside";
 }
@@ -276,7 +278,8 @@ async function bridge(request,url,cfg,env){
  // An existing signed OUTSIDE hub session is already an approved proof.
  // INSIDE blocks win; near-boundary access continues to require fresh proof.
  if(await hasBlockVerdict(request,cfg,url.hostname))return blockedPage();
- const verdict=await sessionVerdict(request,cfg,url.hostname);
+ const verdict=(await hasButterworthProof(request,env,url.hostname))?"outside":
+   await sessionVerdict(request,cfg,url.hostname);
  if(env?.GPS_RECHECK_EVERY_DOCUMENT==="true"&&verdict&&
     !(env?.GPS_OUTSIDE_SESSION_FASTPASS==="true"&&verdict==="outside")&&
     !(await consumeFreshBridge(request,env,cfg,url.hostname)))
@@ -371,6 +374,8 @@ async function verify(req,url,cfg,env,ctx,requestId){
    headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,"",0));
   if(getCookie(req,BLOCK_COOKIE))
    headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  if(getCookie(req,BUTTERWORTH_PROOF_COOKIE))
+   headers.append("Set-Cookie",policyCookie(BUTTERWORTH_PROOF_COOKIE,"",0));
   scheduleGpsDenialAlert({env,request:req,url,event:"CAMPUS_BOUNDARY_UNCERTAIN",ctx,requestId});
   return new Response(JSON.stringify({
    error:"CAMPUS_BOUNDARY_UNCERTAIN",blocked:true,retryable:true
@@ -382,14 +387,21 @@ async function verify(req,url,cfg,env,ctx,requestId){
   // Coarse fixes (over 100m) may allow access only when the full reported
   // uncertainty area is outside every campus buffer. The existing 5-minute
   // near-boundary concession remains limited to genuinely precise readings.
-  if(env?.GPS_PENANG_ONLY_ENABLED==="true"||cfg.polygonMode!=="enforce"||accuracy>100)
-   return reply(403,{error:"LOCATION_UNCERTAIN",blocked:true,retryable:true});
+  if(env?.GPS_PENANG_ONLY_ENABLED==="true"||cfg.polygonMode!=="enforce"||accuracy>100){
+   const headers=new Headers(head);
+   headers.set("Content-Type","application/json; charset=utf-8");
+   if(getCookie(req,BUTTERWORTH_PROOF_COOKIE))
+    headers.append("Set-Cookie",policyCookie(BUTTERWORTH_PROOF_COOKIE,"",0));
+   return new Response(JSON.stringify({error:"LOCATION_UNCERTAIN",blocked:true,retryable:true}),{status:403,headers});
+  }
   const headers=new Headers(head);
   headers.set("Content-Type","application/json; charset=utf-8");
   headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,await verdictToken(cfg,url.hostname,"nearby"),300));
   if(recheckDocument&&url.hostname===GPS_BRIDGE_HUB)
    headers.append("Set-Cookie",policyCookie(FRESH_BRIDGE_COOKIE,await mintFreshBridge(cfg,url.hostname),NAV_PROOF_TTL));
   headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  if(getCookie(req,BUTTERWORTH_PROOF_COOKIE))
+   headers.append("Set-Cookie",policyCookie(BUTTERWORTH_PROOF_COOKIE,"",0));
   const proof=recheckDocument?await visitProof(cfg,url.hostname,targetPath):null;
   return new Response(JSON.stringify({verified:false,nearBoundary:true,classification:"near_outside",expiresInSeconds:300,
    ...(proof?{navigationTicket:proof}:{})}),{status:200,headers});
@@ -402,6 +414,8 @@ async function verify(req,url,cfg,env,ctx,requestId){
   headers.set("Content-Type","application/json; charset=utf-8");
   if(getCookie(req,SESSION_COOKIE))headers.append("Set-Cookie",policyCookie(SESSION_COOKIE,"",0));
   if(getCookie(req,BLOCK_COOKIE))headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+  if(getCookie(req,BUTTERWORTH_PROOF_COOKIE))
+   headers.append("Set-Cookie",policyCookie(BUTTERWORTH_PROOF_COOKIE,"",0));
   scheduleGpsDenialAlert({env,request:req,url,event:"CAMPUS_RESTRICTED",ctx,requestId});
   return new Response(JSON.stringify({error:"CAMPUS_RESTRICTED"}),{status:403,headers});
  }
@@ -411,6 +425,14 @@ async function verify(req,url,cfg,env,ctx,requestId){
  if(recheckDocument&&url.hostname===GPS_BRIDGE_HUB)
   headers.append("Set-Cookie",policyCookie(FRESH_BRIDGE_COOKIE,await mintFreshBridge(cfg,url.hostname),NAV_PROOF_TTL));
  headers.append("Set-Cookie",policyCookie(BLOCK_COOKIE,"",0));
+ // Only after a successful OUTSIDE campus verdict: issue short-lived UX proof.
+ if(env?.GPS_BUTTERWORTH_PROOF_ENABLED==="true" &&
+    inApproximateButterworth(lat,lon,accuracy)){
+  const cookie=await mintButterworthProof(req,cfg.s,url.hostname);
+  if(cookie)headers.append("Set-Cookie",cookie);
+ }else if(getCookie(req,BUTTERWORTH_PROOF_COOKIE)){
+  headers.append("Set-Cookie",policyCookie(BUTTERWORTH_PROOF_COOKIE,"",0));
+ }
  const proof=recheckDocument?await visitProof(cfg,url.hostname,targetPath):null;
  return new Response(JSON.stringify({verified:true,classification:"outside",expiresInSeconds:SESSION_TTL,
     ...(proof?{navigationTicket:proof}:{})}),{
@@ -550,9 +572,12 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  // IP city metadata identifies Butterworth. This optional city exemption is
  // best-effort only; IP city cannot prove real physical location.
  const penang=gpsPenangOnlyDecision(request,env,verifiedCountry,verifiedRegionCode,verifiedRegion,verifiedCity);
- if(penang.enabled && !penang.requireGPS &&
-    !url.pathname.startsWith("/__shield/gps/"))return null;
  const cfg=config(env);
+ const browserProof=!!cfg && penang.enabled && penang.requireGPS &&
+    await hasButterworthProof(request,env,url.hostname) &&
+    !(await hasBlockVerdict(request,cfg,url.hostname));
+ if(((penang.enabled && !penang.requireGPS)||browserProof) &&
+    !url.pathname.startsWith("/__shield/gps/"))return null;
  // An explicitly enabled GPS gate must never quietly become permissive
  // because a signing key or geofence config was missing or malformed.
  if(!cfg&&!skip(url.pathname,request,url.hostname)){
@@ -579,7 +604,10 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
   const returnPath=url.searchParams.get("return"),state=url.searchParams.get("state");
   if(!allowedTarget(targetHost)||!safeRelativePath(returnPath)||!validState(state))
    return reply(400,{error:"INVALID_RECHECK_DESTINATION"});
-  return page(); // Always offer a new explicit geolocation attempt.
+  // A recent signed Butterworth proof can use existing cross-domain handoff.
+  if(await hasButterworthProof(request,env,url.hostname) &&
+     !(await hasBlockVerdict(request,cfg,url.hostname)))return bridge(request,url,cfg,env);
+  return page();
  }
  if(url.pathname==="/__shield/gps/link"){
   if(request.method!=="GET"||!allowedTarget(url.hostname))return reply(404,{error:"NOT_FOUND"});
@@ -594,14 +622,16 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  if(url.pathname==="/__shield/gps/verify")return verify(request,url,cfg,env,ctx,requestId);
  if(url.pathname==="/__shield/gps/status"&&request.method==="GET")
   return reply(200,{enabled:true,configurationAvailable:true,
-    enforcing:penang.requireGPS,
+    enforcing:penang.requireGPS && !browserProof,
    telegramAlerts:telegramGpsStatus(env),
    gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:penang.enabled
     ? {enabled:true,mode:"penang-state-except-butterworth",trigger:"cloudflare-ip-state-city-metadata",
        regionKnown:penang.reason.startsWith("penang-state-")||penang.reason.startsWith("butterworth-"),
-       gpsRequired:penang.requireGPS,selectionReason:penang.reason,
+       gpsRequired:penang.requireGPS && !browserProof,
+       selectionReason:browserProof?"butterworth-browser-proof-exempt":penang.reason,
+       browserProofActive:browserProof,
        // The visitor can see the coarse city reported by Cloudflare to diagnose
        // mistaken Butterworth classifications, without revealing the IP or GPS.
        observedIpCity:(()=>{
@@ -614,8 +644,8 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
     : {enabled:env?.GPS_REGION_TIMEZONE_ENABLED==="true",
        malaysiaIpOrTimezone:true,vpnDetection:"not-guaranteed"},
    policyRevision:GPS_POLICY_REVISION,
-   verified:await permitted(request,cfg,url.hostname),
-   exempt:await exempt(request,cfg,url.hostname)});
+   verified:(await permitted(request,cfg,url.hostname))||browserProof,
+   exempt:(await exempt(request,cfg,url.hostname))||browserProof});
  if(skip(url.pathname,request,url.hostname))return null;
  // Existing trusted server-verified account states bypass this GPS policy.
  if(await exempt(request,cfg,url.hostname))return null;
