@@ -243,3 +243,37 @@ test("GPS UI waits for an explicit click and exits stalled permission requests",
   assert.doesNotMatch(GPS_CLIENT,/queueMicrotask\(autoRequest\)/);
   assert.doesNotMatch(GPS_CLIENT,/visibilitychange.*autoRequest/);
 });
+
+test("GPS status shows only trusted coarse IP city to diagnose location mistakes",async()=>{
+ const meta={country:"MY",regionCode:"07",region:"Penang",
+   city:"Seberang Perai",latitude:"5.40",longitude:"100.38"};
+ const req=request("/__shield/gps/status",meta,{
+   "X-City":"Butterworth","CF-City":"Butterworth","X-GPS-Lat":"5.4"
+ });
+ const response=await gate(req);
+ assert.equal(response.status,200);
+ const data=await response.json();
+ assert.equal(data.regionalPolicy.observedIpCity,"Seberang Perai");
+ assert.equal(data.regionalPolicy.citySource,"cloudflare-original-request");
+ assert.equal(data.regionalPolicy.gpsRequired,true);
+ assert.equal(data.regionalPolicy.regionKnown,true);
+ assert.equal(JSON.stringify(data).includes("5.40"),false);
+ assert.equal(JSON.stringify(data).includes("198.51.100.12"),false);
+ assert.match(response.headers.get("Cache-Control"),/no-store/);
+ const butterworth=await gate(request("/__shield/gps/status",
+   {country:"MY",regionCode:"07",city:"Butterworth"}));
+ const allowed=await butterworth.json();
+ assert.equal(allowed.regionalPolicy.observedIpCity,"Butterworth");
+ assert.equal(allowed.regionalPolicy.gpsRequired,false);
+ assert.equal(allowed.regionalPolicy.regionKnown,true);
+});
+test("GPS status never reflects untrusted city headers when Cloudflare city is absent",async()=>{
+ const r=request("/__shield/gps/status",{country:"MY",regionCode:"07"},{
+   "X-City":"Butterworth","CF-City":"Butterworth"
+ });
+ const response=await gate(r);
+ assert.equal(response.status,200);
+ const data=await response.json();
+ assert.equal(data.regionalPolicy.observedIpCity,null);
+ assert.equal(data.regionalPolicy.gpsRequired,true);
+});
