@@ -61,7 +61,7 @@ test("Butterworth is exempt from GPS, even if coarse IP coordinates show Penang 
 });
 test("Other Penang mainland towns still require GPS",async()=>{
   for(const cf of [
-    {country:"MY",regionCode:"07",region:"Penang",city:"Seberang Perai",latitude:"5.389",longitude:"100.38"},
+    {country:"MY",regionCode:"07",region:"Penang",city:"Seberang Perai",latitude:"5.31",longitude:"100.43"},
     {country:"MY",regionCode:"07",city:"Bukit Mertajam",latitude:"5.363",longitude:"100.463"}
   ]){
     const r=request("/private",cf);
@@ -245,7 +245,7 @@ test("GPS UI waits for an explicit click and exits stalled permission requests",
 
 test("GPS status shows only trusted coarse IP city to diagnose location mistakes",async()=>{
  const meta={country:"MY",regionCode:"07",region:"Penang",
-   city:"Seberang Perai",latitude:"5.40",longitude:"100.38"};
+   city:"Seberang Perai",latitude:"5.31",longitude:"100.43"};
  const req=request("/__shield/gps/status",meta,{
    "X-City":"Butterworth","CF-City":"Butterworth","X-GPS-Lat":"5.4"
  });
