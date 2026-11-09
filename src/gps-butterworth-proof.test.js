@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import { guestGpsGate, gpsOutsideOrLegacyExempt } from "./guest-gps.js";
 import { BUTTERWORTH_PROOF_COOKIE, BUTTERWORTH_PROOF_TTL,
-  inApproximateButterworth, hasButterworthProof } from "./gps-butterworth-proof.js";
+  inApproximateButterworth, hasButterworthProof, inspectButterworthProof } from "./gps-butterworth-proof.js";
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const HOST="vynalthai.com";
 const IP="8.8.8.8";
@@ -106,4 +106,46 @@ test("Tasek Glugor browser proof allows a short-lived hub recheck without new GP
  assert.match(response.headers.get("Location"),/^https:\/\/vyncuslim\.my\/__shield\/gps\/import\?/);
  const control=await gate(request(HOST,p));
  assert.equal(control.status,403,"without the proof a recheck must ask for geolocation");
+});
+
+test("diagnostics distinguish no cookie, invalid network, expiry, and feature disabled without exposing IP",async()=>{
+ const empty=await gate(request(HOST,"/__shield/gps/status"));
+ const emptyJson=await empty.json();
+ assert.deepEqual(emptyJson.regionalPolicy.butterworthRecovery,{
+  enabled:true,credentialStatus:"missing-cookie",
+  verifyPath:"/__shield/gps/recover",maxDurationSeconds:1800
+ });
+ assert.doesNotMatch(JSON.stringify(emptyJson),/8\\.8\\.8\\.8/);
+ const res=await verify(5.405,100.382);
+ const proof=cookieByName(res,BUTTERWORTH_PROOF_COOKIE);
+ const good=await inspectButterworthProof(request(HOST,"/private","GET",{Cookie:proof}),ENV,HOST);
+ assert.deepEqual(good,{valid:true,status:"valid"});
+ const otherIp=await inspectButterworthProof(
+  request(HOST,"/private","GET",{Cookie:proof},undefined,"1.1.1.1"),ENV,HOST);
+ assert.deepEqual(otherIp,{valid:false,status:"invalid-or-network-changed"});
+ const disabled=await inspectButterworthProof(
+  request(HOST,"/private","GET",{Cookie:proof}),
+  {...ENV,GPS_BUTTERWORTH_PROOF_ENABLED:"false"},HOST);
+ assert.deepEqual(disabled,{valid:false,status:"feature-disabled"});
+ const malformed=await inspectButterworthProof(
+  request(HOST,"/private","GET",{Cookie:BUTTERWORTH_PROOF_COOKIE+"=nonsense"}),ENV,HOST);
+ assert.deepEqual(malformed,{valid:false,status:"malformed-cookie"});
+ const expiredParts=proof.split("=")[1].split(".");
+ const expired=[String(Math.floor(Date.now()/1000)-1),expiredParts[1],expiredParts[2]].join(".");
+ const exp=await inspectButterworthProof(request(HOST,"/private","GET",{
+  Cookie:BUTTERWORTH_PROOF_COOKIE+"="+expired
+ }),ENV,HOST);
+ assert.deepEqual(exp,{valid:false,status:"expired-cookie"});
+});
+test("opt-in recovery page offers explicit browser location consent and does not automatically grant access",async()=>{
+ const page=await gate(request(HOST,"/__shield/gps/recover"));
+ assert.equal(page.status,403);
+ assert.match(await page.text(),/Precise location required/);
+ const js=await gate(request(HOST,"/__shield/gps/client.js"));
+ assert.equal(js.status,200);
+ const body=await js.text();
+ assert.ok(body.includes("/__shield/gps/recover"));
+ assert.ok(body.includes("new URL(location.pathname==="));
+ const otherHost=await gate(request("vyncuslim.my","/__shield/gps/recover"));
+ assert.equal(otherHost.status,404);
 });
