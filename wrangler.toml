@@ -38,6 +38,10 @@ SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"
 # insecure device cookie is issued.
 EDGE_DEVICE_ID_ENABLED = "true"
 EDGE_DEVICE_ALLOW_DERIVED_KEY = "true"
+# Automatic availability: no anonymous cross-site linkage. Each account-linked
+# browser still requires a first-party, explicit, one-time consent code.
+# Set this variable to "false" for an immediate operator-controlled rollback.
+DEVICE_FEDERATION_ENABLED = "true"
 MODE = "observe"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
