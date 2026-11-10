@@ -237,7 +237,7 @@ const PAGES = new Map(
       '<div class="productbar"><b>Home</b>',staticNavigation(NAVIGATION[kind] || []),'</div>',
       '<header><div><h1>', esc(brand), "</h1><p>",
       kind === "login" ? "Account access portal" :
-        kind === "database" ? "Database management interface" :
+        kind === "database" ? "Database Administration" :
         "System management interface",
       '</p></div><div class="mark">',
       kind === "database" ? "pma" : kind === "backup" ? "BK" :

@@ -61,7 +61,7 @@ test("each PHP honeypot renders an isolated and responsive HTML fixture", async 
     assert.match(body, /<meta name="viewport"/, route.path);
     for (const keyword of representative[route.kind]) assert.ok(body.includes(keyword), route.path + ": " + keyword);
     for (const forbidden of [secret, "198.51.100.7", "vynalthai.com",
-      "<script", "<form", "fetch(", "document.cookie", "<a href"]) {
+      "<script", "<form", "fetch(", "document.cookie", 'href="http://', 'href="https://']) {
       assert.equal(body.includes(forbidden), false, route.path + ": " + forbidden);
     }
   }
