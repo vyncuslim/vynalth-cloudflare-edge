@@ -9,6 +9,7 @@ import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-ow
 import { scheduleThreatTelemetry } from "./threat-telemetry.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
+import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
 import { adminPage } from "./school/admin-page.js";
@@ -259,6 +260,13 @@ export default {
       return observedResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
     }
 
+    // Read-only, first-party signed Device ID endpoint. It is not account
+    // authentication and cannot bypass WAF, School IP, or sensitive APIs.
+    const deviceStatus = await handleEdgeDeviceEndpoint(request, env, incomingUrl);
+    if (deviceStatus) {
+      return observedResponse(deviceStatus, request, incomingUrl, requestId, rootDomain);
+    }
+
     // GPS and Cookie Consent are independent modules in ONE existing Worker.
     // Signed canonical SSO trust/contact/status is exempt from this GPS
     // challenge, but does not bypass unrelated WAF or mandatory auth.
@@ -361,8 +369,14 @@ export default {
         headers: safeHeaders
       });
     }
+    // Attach a separate, host-only signed browser ID to eligible HTML
+    // documents only; redirects, static assets and authenticated app cookies
+    // are preserved. Other roots cannot replay each other's credentials.
+    const finalResponse = await addEdgeDeviceToDocumentResponse(
+      request, originResponse, env, incomingUrl,
+    );
     return observedResponse(
-      originResponse,
+      finalResponse,
       request,
       incomingUrl,
       requestId,
