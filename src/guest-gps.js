@@ -11,6 +11,12 @@ const SESSION_COOKIE="__Host-vynalth-geo";
 const STATUS_COOKIE="__Host-vynalth-status";
 const BLOCK_COOKIE="__Host-vynalth-geo-block";
 const HANDOFF_STATE_COOKIE="__Host-vynalth-geo-handoff";
+// A stable single-slot handoff cookie is overwritten by parallel tab requests.
+// New visits use a unique __Host- cookie name derived from random state.
+const HANDOFF_STATE_COOKIE_TTL=600;
+function handoffStateCookieName(state){
+ return HANDOFF_STATE_COOKIE+"-"+state.slice(0,16);
+}
 const FRESH_BRIDGE_COOKIE="__Host-vynalth-gps-fresh";
 const GPS_BRIDGE_HUB="vynalthai.com";
 const GPS_BRIDGE_ROOTS=Object.freeze([
@@ -35,7 +41,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-penang-butterworth-consented-proof-v12";
+const GPS_POLICY_REVISION="gps-handoff-concurrency-v13";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -156,6 +162,31 @@ function safeRelativePath(path){
    !path.startsWith("/__shield/gps/");
 }
 function validState(v){return typeof v==="string"&&/^[A-Za-z0-9_-]{32}$/.test(v)}
+function hasMatchingHandoffState(req,state){
+ if(!validState(state))return false;
+ // Support older in-flight redirects using the legacy single-slot cookie.
+ // A different tab's state never counts as authorization for this ticket.
+ return getCookie(req,handoffStateCookieName(state))===state||
+   getCookie(req,HANDOFF_STATE_COOKIE)===state;
+}
+function handoffRecovery(req,path){
+ // This is not an authorization fallback. A failed state binding must not
+ // generate an outside/inside cookie or accept the transfer ticket.
+ if(!isBrowserDocument(req))return reply(403,{error:"HANDOFF_STATE_MISMATCH",retriable:true});
+ const safePath=safeRelativePath(path)?path:"/";
+ const href=safePath.replaceAll("&","&amp;").replaceAll('"',"&quot;")
+   .replaceAll("<","&lt;").replaceAll(">","&gt;");
+ const html='<!doctype html><html lang="en"><head><meta charset="utf-8">'+
+  '<meta name="viewport" content="width=device-width,initial-scale=1">'+
+  '<title>Retry secure verification | Vynalth AI</title></head>'+
+  '<body style="font-family:system-ui;max-width:560px;margin:8vh auto;padding:24px;background:#111827;color:#fff">'+
+  '<h1>Verification session changed</h1><p>Another tab or an expired browser cookie may have interrupted this GPS handoff. No access was granted.</p>'+
+  '<p>验证会话已改变。请重新打开原网页完成验证，或确认浏览器允许此网站使用 Cookie。</p>'+
+  '<a style="color:#9ed4ff" href="'+href+'">Retry from original page / 重新验证</a></body></html>';
+ return new Response(html,{status:409,headers:{...head,
+  "Content-Type":"text/html; charset=utf-8","X-Frame-Options":"DENY",
+  "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"}});
+}
 // Signed, path-bound, short-lived, one-navigation proof. Store ONLY a random
 // replay marker (never GPS coordinates) in the existing bound Worker KV.
 function cleanVisitPath(url){
@@ -260,7 +291,7 @@ function beginHandoff(url,recheck=false){
  dest.searchParams.set("return",path);
  dest.searchParams.set("state",state);
  return redirect(dest.toString(),{
-  "Set-Cookie":policyCookie(HANDOFF_STATE_COOKIE,state,120),
+  "Set-Cookie":policyCookie(handoffStateCookieName(state),state,HANDOFF_STATE_COOKIE_TTL),
   "Referrer-Policy":"no-referrer"
  });
 }
@@ -297,7 +328,7 @@ async function importHandoff(request,url,cfg,env){
    return reply(404,{error:"NOT_FOUND"});
  const path=url.searchParams.get("return"),state=url.searchParams.get("state");
  if(!safeRelativePath(path)||!validState(state))return reply(400,{error:"INVALID_RETURN_PATH"});
- if(getCookie(request,HANDOFF_STATE_COOKIE)!==state)return reply(403,{error:"HANDOFF_STATE_MISMATCH"});
+ if(!hasMatchingHandoffState(request,state))return handoffRecovery(request,path);
  const verdict=await validateHandoff(cfg,url.hostname,path,state,url.searchParams.get("ticket"));
  if(!verdict)return reply(403,{error:"INVALID_OR_EXPIRED_HANDOFF"});
  // Legacy signed inside tickets never set a blocking cookie on this host.
@@ -317,7 +348,11 @@ async function importHandoff(request,url,cfg,env){
  headers.set("Location",proof?appendVisitProof(path,proof):path);
  headers.append("Set-Cookie",policyCookie(name,value,verdict==="nearby"?300:SESSION_TTL));
  headers.append("Set-Cookie",policyCookie(old,"",0));
- headers.append("Set-Cookie",policyCookie(HANDOFF_STATE_COOKIE,"",0));
+ headers.append("Set-Cookie",policyCookie(handoffStateCookieName(state),"",0));
+ // Expire the matching legacy handoff cookie, but never invalidate a newer
+ // independent visit by clearing an unrelated tab's state.
+ if(getCookie(request,HANDOFF_STATE_COOKIE)===state)
+  headers.append("Set-Cookie",policyCookie(HANDOFF_STATE_COOKIE,"",0));
  return new Response(null,{status:302,headers});
 }
 
