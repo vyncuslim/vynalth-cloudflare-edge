@@ -14,6 +14,7 @@ import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
+import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
 import { adminPage } from "./school/admin-page.js";
@@ -281,6 +282,16 @@ export default {
       return observedResponse(temporaryDenial,request,incomingUrl,requestId,rootDomain);
     }
 
+    // The canonical backend's service-only federation exchange must not
+    // be mistaken for a human browser needing GPS consent. Exempt ONLY
+    // exact /claim and /status POST calls with a valid, fresh host-bound
+    // HMAC proof. Cloudflare WAF and temporary-IP policy still apply.
+    if (await verifyFederationServiceRelay(request,env,incomingUrl)) {
+      const internalOriginRequest=await signedVisitorOriginRequest(request,env);
+      const internalOriginResponse=await fetch(internalOriginRequest);
+      return observedResponse(internalOriginResponse,request,incomingUrl,requestId,rootDomain);
+    }
+
     // Owner's 10-minute access portal is served by the Worker before the GPS
     // challenge, but after existing temporary IP restrictions. It never
     // creates an application admin/SSO session or bypasses School Policy.
@@ -315,6 +326,13 @@ export default {
     const consentDecision = await handleUniversalConsent(request, env, incomingUrl, rootDomain);
     if (consentDecision) {
       return observedResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
+    }
+
+    // Host-scoped, explicit-consent linking page. Runs only if optional
+    // federation is enabled, and cannot bypass existing Cloudflare WAF.
+    const deviceLinkPage = await handleDomainDeviceFederation(request,env,incomingUrl);
+    if (deviceLinkPage) {
+      return observedResponse(deviceLinkPage,request,incomingUrl,requestId,rootDomain);
     }
 
     // Read-only, first-party signed Device ID endpoint. It is not account

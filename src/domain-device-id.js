@@ -138,6 +138,50 @@ export function buildEdgeDeviceCookie(token) {
     'HttpOnly','Secure','SameSite=Lax','Priority=High',
   ].join('; ');
 }
+
+const GLOBAL_COOKIE_NAME='__Host-vyn_global_device';
+const GLOBAL_TOKEN_VERSION='g1';
+const GLOBAL_LIFETIME_SECONDS=90*86400;
+const GLOBAL_REFRESH_SECONDS=30*86400;
+
+// The global cookie is a display/association proof only; never a security
+// authorization token. The canonical server must also approve active linkage.
+export async function createGlobalDeviceCookie(host,localId,globalId,env,nowMs=Date.now()) {
+  const scope=edgeDeviceScope(host),material=signingMaterial(env);
+  if(!scope||!material||!uuidPattern.test(localId)||!uuidPattern.test(globalId))return null;
+  const ts=Math.floor(nowMs/1000);
+  const payload=[GLOBAL_TOKEN_VERSION,globalId.toLowerCase(),localId.toLowerCase(),ts].join('.');
+  const proof=await mac(material,scope.host,payload);
+  return [
+    GLOBAL_COOKIE_NAME+'='+encodeURIComponent(payload+'.'+proof),
+    'Path=/','Max-Age='+GLOBAL_LIFETIME_SECONDS,
+    'HttpOnly','Secure','SameSite=Lax','Priority=High',
+  ].join('; ');
+}
+export async function readGlobalDeviceCookie(request,env,localDeviceId,nowMs=Date.now()) {
+  const scope=edgeDeviceScope(new URL(request.url).hostname);
+  const material=signingMaterial(env);
+  if(!scope||!material||!uuidPattern.test(localDeviceId))return null;
+  const token=parseCookie(request.headers.get('cookie'),GLOBAL_COOKIE_NAME);
+  if(token.length>520)return null;
+  const parts=token.split('.');
+  if(parts.length!==5||parts[0]!==GLOBAL_TOKEN_VERSION
+      ||!uuidPattern.test(parts[1])||parts[2]!==localDeviceId.toLowerCase()
+      ||!/^\d{10}$/.test(parts[3]))return null;
+  const ts=Number(parts[3]),now=Math.floor(nowMs/1000);
+  if(ts>now+300||now-ts>GLOBAL_LIFETIME_SECONDS)return null;
+  const proof=decodeBytes(parts[4]);
+  if(!proof)return null;
+  const key=await signingKey(material,scope.host);
+  const valid=await crypto.subtle.verify('HMAC',key,proof,
+    textEncoder.encode(parts.slice(0,4).join('.')));
+  return valid?{
+    globalDeviceId:parts[1].toLowerCase(),
+    localDeviceId:parts[2].toLowerCase(),
+    shouldRefresh:now-ts>=GLOBAL_REFRESH_SECONDS,
+  }:null;
+}
+
 function secureResponseHeaders() {
   return {
     'Content-Type':'application/json; charset=utf-8',
@@ -177,21 +221,43 @@ export async function handleEdgeDeviceEndpoint(request, env, url) {
       status:503,headers:secureResponseHeaders(),
     });
   }
+  // The caller must both hold a valid local signed ID and retain an
+  // explicit account link in the canonical database. A stale or revoked
+  // global cookie is never accepted merely because its MAC is valid.
+  let activeGlobal=null;
+  let refreshedGlobalCookie=null;
+  if ((state.state==='valid'||state.state==='rotated') && request.method==='GET') {
+    const candidate=await readGlobalDeviceCookie(request,env,state.deviceId);
+    if (candidate) {
+      // Loaded dynamically to avoid a circular dependency. Verification is
+      // server-to-server with a short-lived signed Worker assertion.
+      const { verifyActiveFederation }=await import('./domain-device-federation.js');
+      if(await verifyActiveFederation(env,scope.host,state.deviceId,candidate.globalDeviceId)) {
+        activeGlobal=candidate.globalDeviceId;
+        if(candidate.shouldRefresh)refreshedGlobalCookie=await createGlobalDeviceCookie(
+          scope.host,state.deviceId,activeGlobal,env);
+      }
+    }
+  }
   const body = request.method === 'HEAD' ? null : JSON.stringify({
     enabled:true,
     scope:'host-only',
     host:scope.host,
     rootDomain:scope.root,
-    deviceId:state.deviceId,
+    deviceId:activeGlobal||state.deviceId,
+    siteDeviceId:state.deviceId,
+    globalDeviceId:activeGlobal,
     signedAndVerified:state.state==='valid'||state.state==='rotated',
     credentialState:state.state,
     lifetimeDays:90,
-    accountLinked:false,
+    accountLinked:Boolean(activeGlobal),
     warning:'A browser credential is not a hardware ID or account identity.',
   });
-  const response = new Response(body,{status:200,headers:secureResponseHeaders()});
-  return state.shouldSetCookie && request.method==='GET'
-    ? withCookie(response,buildEdgeDeviceCookie(state.token)) : response;
+  let response = new Response(body,{status:200,headers:secureResponseHeaders()});
+  if (state.shouldSetCookie && request.method==='GET')
+    response=withCookie(response,buildEdgeDeviceCookie(state.token));
+  if (refreshedGlobalCookie) response=withCookie(response,refreshedGlobalCookie);
+  return response;
 }
 export async function addEdgeDeviceToDocumentResponse(request,response,env,url) {
   if (request.method !== 'GET' || response.status !== 200 || url.protocol !== 'https:') return response;
