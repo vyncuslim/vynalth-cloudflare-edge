@@ -1,3 +1,4 @@
+import { PHPINFO_STATIC_HTML } from "./phpinfo-honeypot.js";
 /**
  * Fixed-path PHP scanner decoys for managed Cloudflare Worker routes.
  *
@@ -170,23 +171,88 @@ function renderContent(kind) {
       return "";
   }
 }
+// Distinct, responsive skins for a believable but completely inert interface.
+// Every text and item is a static, fictional fixture. No request reflection.
+const EXTRA_STYLE = [
+ ".appbar{background:#26374e;color:#fff;padding:11px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.84rem}",
+ ".appbar b{letter-spacing:.03em}.appbar em{font-style:normal;color:#a9bcd2;font-size:.8rem}",
+ ".workspace{display:grid;grid-template-columns:230px minmax(0,1fr);align-items:start;gap:15px;margin-top:16px}",
+ ".side{background:#fff;border:1px solid #dce1e8;border-radius:4px;overflow:hidden;box-shadow:0 2px 7px #1c294007}",
+ ".side .sidehead{background:#eef2f8;font-weight:700;color:#3b5072;padding:13px;border-bottom:1px solid #dce1e8;font-size:.84rem}",
+ ".side span{display:block;padding:10px 13px;border-bottom:1px solid #f0f2f6;font-size:.82rem;overflow-wrap:anywhere}",
+ ".side span.current{background:#eaf0fa;color:#1f4c82;border-left:3px solid var(--accent);font-weight:700}",
+ ".main-area{min-width:0}.main-area section:first-child{margin-top:0}",
+ ".productbar{padding:13px 20px;background:#fff;border-bottom:1px solid #dce1e8;color:#5f6d7b;display:flex;gap:18px;flex-wrap:wrap;font-size:.82rem}",
+ ".productbar b{color:#314864}",
+ ".hint{color:#5e6d81;background:#f4f6fa;padding:10px 15px;border:1px solid #dde3eb;margin-top:13px;font-size:.84rem}",
+ ".fine{font-size:.8rem;color:#667587}",
+ ".theme-database{--accent:#d99128}.theme-database .appbar{background:#263649}",
+ ".theme-database .mark{border:0;color:#d48723;font-size:1.35rem;font-style:italic}",
+ ".theme-database .side .sidehead{background:#edf0f5}",
+ ".theme-login{--accent:#456397}.theme-login .workspace{display:block}",
+ ".theme-login .side{display:none}.theme-login .main-area{max-width:560px;margin:auto}",
+ ".theme-login header{max-width:800px;margin:auto}.theme-login .tabs{justify-content:center}",
+ ".theme-login .appbar{background:#29415c}",
+ ".theme-backup{--accent:#615b99}.theme-files{--accent:#346985}",
+ "@media(max-width:720px){.workspace{grid-template-columns:1fr}.side{display:none}.appbar{padding:11px 13px}.productbar{padding:10px 13px}}",
+].join("");
+
+const SIDEBARS = Object.freeze({
+  diagnostics:["Overview","Runtime","Process Manager","Error Log","Environment"],
+  database:["localhost","information_schema","mysql","performance_schema","app_core","app_cache"],
+  config:["General","Database","Cache","Sessions","Mail","Logging"],
+  files:["/var/www/html","assets/","cache/","logs/","index.php","config.php"],
+  backup:["Backup history","Scheduled jobs","Storage targets","Retention policy","Restore"],
+  login:[],
+});
+const NAVIGATION = Object.freeze({
+  diagnostics:["Overview","Metrics","Checks","Logs"],
+  login:["Administration","Account","Support"],
+  database:["Databases","SQL","Status","User accounts","Export","Import","Settings"],
+  config:["Environment","Services","Extensions","Diagnostics"],
+  files:["Home","Files","Permissions","Settings"],
+  backup:["Overview","Schedules","Snapshots","Restore"],
+});
+function staticNavigation(items) {
+  return items.map(x=>"<span>"+esc(x)+"</span>").join("");
+}
 const PAGES = new Map(
   Object.keys(TITLES).map(kind => {
-    const body = [
+    // Reuse the fuller classic phpinfo document across all PHP info aliases.
+    if(kind === "php") return [kind, PHPINFO_STATIC_HTML];
+    const brand = kind === "database" ? "phpMyAdmin" :
+      kind === "login" ? "Administration" :
+      kind === "files" ? "Web File Manager" :
+      kind === "backup" ? "Backup Console" : TITLES[kind];
+    const side = SIDEBARS[kind] || [];
+    const chrome = [
       "<!doctype html><html lang=\"en\"><head>",
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
       '<meta name="robots" content="noindex,nofollow,noarchive">',
-      "<title>", esc(TITLES[kind]), "</title>",
-      "<style>:root{--accent:", THEMES[kind], "}", STYLE, "</style></head><body><main>",
-      "<header><div><h1>", esc(TITLES[kind]), "</h1>",
-      "<p>System management interface</p></div><div class=\"mark\">",
-      kind === "php" ? "php" : kind === "database" ? "DB" : "SYS",
-      "</div></header>",
-      '<div class="tabs"><span>Overview</span><span>Configuration</span><span>Diagnostics</span></div>',
-      renderContent(kind),
-      "<footer>System information</footer></main></body></html>",
+      "<title>", esc(brand), "</title>",
+      '<style>:root{--accent:', THEMES[kind],
+      "}", STYLE, EXTRA_STYLE, "</style></head>",
+      '<body class="theme-',esc(kind),'"><main>',
+      '<div class="appbar"><b>',esc(brand),'</b><em>Server: localhost</em></div>',
+      '<div class="productbar"><b>Home</b>',staticNavigation(NAVIGATION[kind] || []),'</div>',
+      '<header><div><h1>', esc(brand), "</h1><p>",
+      kind === "login" ? "Account access portal" :
+        kind === "database" ? "Database management interface" :
+        "System management interface",
+      '</p></div><div class="mark">',
+      kind === "database" ? "pma" : kind === "backup" ? "BK" :
+        kind === "files" ? "FM" : "SYS",
+      '</div></header><div class="workspace">',
+      '<aside class="side"><div class="sidehead">',
+      kind === "database" ? "Databases" :
+        kind === "files" ? "Directory tree" : "Navigation",
+      '</div>', side.map((x,i)=>
+        '<span'+(i===0?' class="current"':'')+'>'+esc(x)+'</span>').join(""),
+      '</aside><div class="main-area">',renderContent(kind),
+      '<div class="hint">Status: <b>Read only</b> · Interactive operations unavailable.</div>',
+      '</div></div><footer>System information</footer></main></body></html>',
     ].join("");
-    return [kind, body];
+    return [kind,chrome];
   })
 );
 

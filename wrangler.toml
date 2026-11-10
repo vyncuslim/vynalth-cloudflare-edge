@@ -18,6 +18,12 @@ workers_dev = true
 # 2026-10-31: enable following successful fix for route conflict code 10020.
 # Require real database proof before claiming production ingestion success.
 THREAT_INTEL_COLLECT_ENABLED = "true"
+# Axiom direct honeypot intake (separate from the existing origin collector).
+# Requires a scoped AXIOM_INGEST_TOKEN Worker secret before enabling.
+# No raw IP, Cookie, query, User Agent, GPS, credentials or bodies are sent.
+# Actor ID, if enabled, is a daily HMAC of edge-observed network IP.
+# No security enforcement is based on a single honeypot hit.
+AXIOM_HONEYPOT_INGEST_ENABLED = "false"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "true"
 SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"

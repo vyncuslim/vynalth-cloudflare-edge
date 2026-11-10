@@ -42,8 +42,19 @@ function issueFor(request, response, env=null) {
       status, description: "Client/request error or access denial observed; may be expected, not a verified incident" };
   }
   if(env?.EDGE_TELEGRAM_NOTIFY_ALL_REQUESTS==="true" && status>=200 && status<400){
+    let expectedRedirect=false;
+    if(status===301){
+      try{
+        const from=new URL(request.url);
+        const to=new URL(response.headers.get("Location")||"",from);
+        expectedRedirect=from.hostname==="www.vynalthai.com" &&
+          to.hostname==="vynalthai.com" && to.pathname===from.pathname;
+      }catch{ /* malformed Location is not a verified canonical redirect */ }
+    }
     return {code:"HTTP_REQUEST",severity:"Info",status,
-      description:"A request completed at the Cloudflare edge Worker"};
+      description:expectedRedirect?
+        "Expected www-to-apex canonical redirect; no intrusion evidence":
+        "A request completed at the Cloudflare edge Worker"};
   }
   return null;
 }

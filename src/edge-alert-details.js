@@ -56,10 +56,9 @@ function tokenSummary(request,url){
 }
 function bodySummary(request){
  const contentType=request.headers.get("Content-Type");
- // Content-Type parameters can contain multipart boundaries or secrets.
- // Send only a syntactically safe media type, never its parameters.
+ // Never report MIME parameters (multipart boundaries may include secrets).
  const media=contentType?.split(";")[0]?.trim().toLowerCase()||"";
- const safeType=/^[a-z0-9!# const safeType=contentType?safeText(contentType,80):"unspecified";^_.+-]+\/[a-z0-9!# const safeType=contentType?safeText(contentType,80):"unspecified";^_.+-]+$/.test(media)?
+ const safeType=/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(media)?
   media:"unspecified";
  const len=request.headers.get("Content-Length");
  const hasBody=len!==null?Number(len)>0:
@@ -82,6 +81,9 @@ export function formatEdgeSecurityAlert({request,url,response,issue,requestId,re
  const edgeObserved=plausibleIp(rawIp)&&!!request.cf;
  const ip=edgeObserved?rawIp:"Unknown";
  const hasIp=ip!=="Unknown";
+ // Cloudflare supplies this shared address for cross-zone Worker subrequests;
+ // it is not the real requestor's IP and must never be called visitor-verified.
+ const crossZone=hasIp&&ip.toLowerCase()==="2a06:98c0:3600::103";
  const ua=request.headers.get("User-Agent");
  const elapsed=Number.isFinite(responseTimeMs)&&responseTimeMs>=0?
   String(Math.round(responseTimeMs)):"Unknown (not instrumented)";
@@ -93,7 +95,9 @@ export function formatEdgeSecurityAlert({request,url,response,issue,requestId,re
   "=============================",
   "Type: "+safeText(issue?.code||"HTTP_REQUEST",40),
   "Severity: "+safeText((issue?.severity||"Info").toUpperCase(),15),
-  "IP: "+(hasIp?ip+" (Cloudflare edge observed; origin verification not checked)":"Unknown (NOT VERIFIED)"),
+  "IP: "+(hasIp?ip+(crossZone?
+    " (Cloudflare cross-zone Worker proxy; visitor IP unknown)":
+    " (Cloudflare edge observed; origin verification not checked)"):"Unknown (NOT VERIFIED)"),
   "Path: "+redactedPath(url),
   "Message: "+safeText(note,220),
   "Details:",
@@ -102,9 +106,15 @@ export function formatEdgeSecurityAlert({request,url,response,issue,requestId,re
   " • Method: "+safeText(request.method,12),
   " • Status Code: "+response.status,
   " • Response Time Ms: "+elapsed+" (measured at Cloudflare Worker)",
-  " • Ip Verified: "+(hasIp?"true (edge metadata only; not origin HMAC verified)":"false"),
-  " • Ip Source: "+(hasIp?"cloudflare_cf_connecting_ip":"unavailable"),
-  " • Ip Verification Reason: "+(hasIp?"cloudflare_runtime_request_cf_present":"no_confirmed_edge_ip"),
+  " • Ip Verified: "+(crossZone?
+    "false (shared Cloudflare Worker IP; not a visitor)":hasIp?
+    "true (edge metadata only; not origin HMAC verified)":"false"),
+  " • Ip Source: "+(crossZone?"cloudflare_cross_zone_worker_ip":
+    hasIp?"cloudflare_cf_connecting_ip":"unavailable"),
+  " • Ip Verification Reason: "+(crossZone?"cross_zone_worker_proxy_not_visitor":
+    hasIp?"cloudflare_runtime_request_cf_present":"no_confirmed_edge_ip"),
+  " • Visitor Attribution: "+(crossZone?"unknown (Cloudflare Worker intermediary)":
+    hasIp?"edge-observed network only; user identity unverified":"unknown"),
   " • Network Peer IP: Unknown (proxy peer may not be the visitor)",
   " • Device Id: Unknown (not authenticated at this edge)",
   " • Claimed Device Id: "+claimedDeviceId(request),
@@ -113,12 +123,15 @@ export function formatEdgeSecurityAlert({request,url,response,issue,requestId,re
   " • Cookie: "+(request.headers.has("Cookie")?"Present [REDACTED]":"None"),
   " • Token: "+tokenSummary(request,url),
   " • Body: "+bodySummary(request),
-  " • Country: "+(cf.country==="Unknown"?"Unknown":
-     cf.country+" (Cloudflare edge; approximate)"),
-  " • Location: "+location(cf.country,cf.region),
+  " • Country: "+(crossZone?"Unknown (Worker proxy; visitor origin unavailable)":
+    cf.country==="Unknown"?"Unknown":cf.country+" (Cloudflare edge; approximate)"),
+  " • Location: "+(crossZone?"Unknown (shared Worker IP cannot establish visitor location)":
+    location(cf.country,cf.region)),
   " • Proxy Location: Unknown (not a verified visitor location)",
   " • GPS: Not verified or provided; precise GPS never inferred",
   " • User Agent: "+(ua?safeText(ua,160):"Unknown"),
+  " • Verified Bot: "+(request.cf?.botManagement?.verifiedBot===true?
+    "true (Cloudflare bot metadata)":"not established"),
   " • Suspicious Bot: "+(isProbe?
     "Unverified; sensitive-path probing pattern detected":
     "Not established (no verified bot classification)"),
