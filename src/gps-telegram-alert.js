@@ -71,9 +71,9 @@ async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl}){
  try{
   const [recentGlobal,recentUser]=await Promise.all([kv.get(globalKey),kv.get(userKey)]);
   if(recentGlobal||recentUser)return {state:"throttled"};
-  // Cloudflare KV is eventually consistent. This is best-effort flood
-  // control, not a distributed atomic lock.
-  await kv.put(globalKey,"1",{expirationTtl:GLOBAL_COOLDOWN_SECONDS});
+  // Cloudflare KV is eventually consistent. Do NOT set cooldown before
+  // confirmed delivery: a rejected or unreachable Telegram call must remain
+  // eligible for the next real GPS event.
   const token=env.GPS_TELEGRAM_BOT_TOKEN||env.TELEGRAM_BOT_TOKEN;
   const chat=env.GPS_TELEGRAM_CHAT_ID||env.TELEGRAM_CHAT_ID||env.ADMIN_TELEGRAM_CHAT_ID;
   const response=await fetchImpl("https://api.telegram.org/bot"+token+"/sendMessage",{
@@ -88,7 +88,25 @@ async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl}){
    console.warn("[GPS TELEGRAM] delivery rejected",response.status);
    return {state:"rejected"};
   }
-  await kv.put(userKey,"1",{expirationTtl:PER_CLIENT_COOLDOWN_SECONDS});
+  // HTTP 200 alone is insufficient evidence of a successful sendMessage.
+  // Telegram's Bot API must explicitly acknowledge with ok=true and a
+  // message_id. Do not log the token-bearing URL or message payload.
+  const ack=await response.json().catch(()=>null);
+  if(ack?.ok!==true||!Number.isInteger(ack?.result?.message_id)){
+   console.warn("[GPS TELEGRAM] delivery acknowledgment missing");
+   return {state:"unconfirmed"};
+  }
+  // Mark cooldown only *after* a confirmed Telegram acknowledgment.
+  // KV write failures may increase duplicates but must not turn a confirmed
+  // send into an unconfirmed event. KV is not an atomic distributed lock.
+  try{
+   await Promise.all([
+    kv.put(globalKey,"1",{expirationTtl:GLOBAL_COOLDOWN_SECONDS}),
+    kv.put(userKey,"1",{expirationTtl:PER_CLIENT_COOLDOWN_SECONDS})
+   ]);
+  }catch{
+   console.warn("[GPS TELEGRAM] delivered, cooldown storage unavailable");
+  }
   return {state:"sent"};
  }catch(err){
   // Never log fetch errors or URL strings; Telegram Bot URL includes token.
