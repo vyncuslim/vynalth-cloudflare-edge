@@ -39,6 +39,44 @@ export async function signedFederationAssertion(env,host,deviceId,codeOrGlobal,a
   const payload=[kind,host.toLowerCase(),deviceId.toLowerCase(),digest,ts].join('|');
   return {ts,proof:await signature(String(env.VISITOR_IP_SIGNING_SECRET),payload)};
 }
+
+/**
+ * Only authenticated, domain-scoped HMAC calls may bypass the browser-only
+ * GPS preflight when proxying canonical /claim and /status to the backend.
+ * Never exempt any other URL, method, user request or invalid signature.
+ */
+export async function verifyFederationServiceRelay(request,env,url,nowMs=Date.now()){
+  if(url.hostname!=='vynalthai.com'||request.method!=='POST'||!enabled(env))return false;
+  const path=url.pathname;
+  if(path!=='/api/security/device/federation/claim'
+    && path!=='/api/security/device/federation/status')return false;
+  if(Number(request.headers.get('Content-Length')||0)>2500)return false;
+  let data;
+  try {
+    const raw=await request.clone().text();
+    if(raw.length>2500)return false;
+    data=JSON.parse(raw);
+  } catch{return false;}
+  const host=String(data?.host||'').toLowerCase(),local=String(data?.localDeviceId||'').toLowerCase();
+  const ts=Number(data?.ts),proof=String(data?.proof||'');
+  const action=path.endsWith('/claim')?'claim':'status';
+  const val=action==='claim'?String(data?.code||''):String(data?.globalDeviceId||'');
+  if(!edgeDeviceScope(host)||!UUID.test(local)
+      ||(action==='claim'&&!CODE.test(val))
+      ||(action==='status'&&!UUID.test(val))
+      ||!Number.isSafeInteger(ts)||Math.abs(Math.floor(nowMs/1000)-ts)>90
+      ||!/^[A-Za-z0-9_-]{43}$/.test(proof))return false;
+  const digest=action==='claim'
+    ?hex(await crypto.subtle.digest('SHA-256',textEncoder.encode(val)))
+    :val.toLowerCase();
+  const payload=[action==='claim'?'f1':'f2',host,local,digest,ts].join('|');
+  const signed=Uint8Array.from(atob(proof.replace(/-/g,'+').replace(/_/g,'/')
+    +'='.repeat((4-proof.length%4)%4)),c=>c.charCodeAt(0));
+  if(b64url(signed)!==proof)return false;
+  const key=await federationKey(String(env.VISITOR_IP_SIGNING_SECRET));
+  return crypto.subtle.verify('HMAC',key,signed,textEncoder.encode(payload));
+}
+
 async function callCentral(env,path,body) {
   const res=await fetch(CENTRAL_ORIGIN+path,{
     method:'POST',redirect:'error',credentials:'omit',
