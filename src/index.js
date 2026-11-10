@@ -11,6 +11,7 @@ import { handlePhpInfoHoneypot } from "./phpinfo-honeypot.js";
 import { isPhpInfoHoneypotPath } from "./phpinfo-honeypot.js";
 import { handlePhpHoneypot, matchPhpHoneypot } from "./php-honeypots.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
+import { scheduleEdgeAccessLogs } from "./dual-access-logs.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
@@ -137,9 +138,14 @@ export default {
     // notification outages cannot delay or change the user's HTTP response.
     const observedResponse = (...args) => {
       const result = edgeResponse(...args);
+      const responseTimeMs = Math.max(0, Date.now() - startedAtMs);
       scheduleEdgeTelegramAlert({
         env, ctx, request, url: incomingUrl, response: result, requestId,
-        responseTimeMs:Math.max(0,Date.now()-startedAtMs)
+        responseTimeMs
+      });
+      scheduleEdgeAccessLogs({
+        env, ctx, request, url: incomingUrl, response: result, requestId,
+        responseTimeMs
       });
       return result;
     };
