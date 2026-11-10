@@ -11,7 +11,7 @@ import { handlePhpInfoHoneypot } from "./phpinfo-honeypot.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
-import { handleDomainDeviceFederation } from "./domain-device-federation.js";
+import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
 import { adminPage } from "./school/admin-page.js";
@@ -266,6 +266,16 @@ export default {
     const temporaryDenial = temporaryIpBlockResponse(request,incomingUrl);
     if (temporaryDenial && !(await shieldAccountExempt(request,env,rootDomain))) {
       return observedResponse(temporaryDenial,request,incomingUrl,requestId,rootDomain);
+    }
+
+    // The canonical backend's service-only federation exchange must not
+    // be mistaken for a human browser needing GPS consent. Exempt ONLY
+    // exact /claim and /status POST calls with a valid, fresh host-bound
+    // HMAC proof. Cloudflare WAF and temporary-IP policy still apply.
+    if (await verifyFederationServiceRelay(request,env,incomingUrl)) {
+      const internalOriginRequest=await signedVisitorOriginRequest(request,env);
+      const internalOriginResponse=await fetch(internalOriginRequest);
+      return observedResponse(internalOriginResponse,request,incomingUrl,requestId,rootDomain);
     }
 
     // Owner's 10-minute access portal is served by the Worker before the GPS
