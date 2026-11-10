@@ -61,7 +61,10 @@ function decode(input){
  if(!/^[A-Za-z0-9_-]{43}$/.test(input||""))return null;
  try{
   const s=input.replace(/-/g,"+").replace(/_/g,"/");
-  return Uint8Array.from(atob(s+"=".repeat((4-s.length%4)%4)),x=>x.charCodeAt(0));
+  const bytes=Uint8Array.from(atob(s+"=".repeat((4-s.length%4)%4)),x=>x.charCodeAt(0));
+  // Disallow noncanonical Base64URL aliases of the exact same signature.
+  // The final 43rd character of a 256-bit HMAC has unused bits.
+  return b64(bytes)===input?bytes:null;
  }catch{return null}
 }
 async function key(secret){
