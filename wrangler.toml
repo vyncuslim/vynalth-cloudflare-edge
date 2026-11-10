@@ -24,6 +24,12 @@ THREAT_INTEL_COLLECT_ENABLED = "true"
 # PostHog project phc_ token and regional HTTPS OTLP endpoint are secrets/config.
 # Do not commit tokens. This never sees WAF-preblocked or un-routed requests.
 EDGE_DUAL_LOGS_ENABLED = "false"
+# Vercel team-level JSON drain bridge. An isolated Cloudflare endpoint can
+# receive signed batches from ALL team projects once a Vercel Drain is configured.
+# Disabled until a dedicated signing secret and two ingest tokens exist.
+# The Worker handles it directly; never proxy to Vercel or recursively log it.
+VERCEL_LOG_DRAIN_ENABLED = "false"
+
 POSTHOG_LOGS_ENDPOINT = "https://us.i.posthog.com/i/v1/logs"
 
 # Axiom direct honeypot intake (separate from the existing origin collector).
