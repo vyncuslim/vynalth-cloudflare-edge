@@ -4,6 +4,7 @@ import { webcrypto } from "node:crypto";
 import { Script } from "node:vm";
 import { readFileSync } from "node:fs";
 import { guestGpsGate,gpsOutsideOrLegacyExempt } from "./guest-gps.js";
+import { GPS_CLIENT } from "./gps-verification-ui.js";
 
 const cryptoApi=globalThis.crypto || webcrypto;
 if(!globalThis.crypto)globalThis.crypto=cryptoApi;
@@ -685,12 +686,12 @@ test("GPS status advertises active boundary-side policy revision without coordin
  assert.equal(data.enabled,true);
  assert.equal(data.configurationAvailable,true);
  assert.equal(data.enforcing,true);
- assert.equal(data.policyRevision,"gps-handoff-concurrency-v13");
+ assert.equal(data.policyRevision,"gps-chat-reverify-v14");
  assert.equal(JSON.stringify(data).includes("latitude"),false);
  const invalid=await invoke(req("/__shield/gps/status"),{...cfg,GPS_GATE_SESSION_SECRET:undefined});
  assert.equal(invalid.status,503);
  const bad=await invalid.json();
- assert.equal(bad.policyRevision,"gps-handoff-concurrency-v13");
+ assert.equal(bad.policyRevision,"gps-chat-reverify-v14");
  assert.equal(bad.configurationAvailable,false);
 });
 
@@ -1108,4 +1109,32 @@ test("state cookie loss gets a useful retry page without granting an outside ses
  assert.equal(other.status,403);
  assert.equal((await other.json()).error,"HANDOFF_STATE_MISMATCH");
  assert.equal(other.headers.getSetCookie().length,0);
+});
+
+test("explicit first-party chat GPS reverify opens consent page and validates return URL",async()=>{
+ const chatId="e4136673-4062-4ec5-afcb-7f04fc62105a";
+ for(const target of ["/c","/c/"+chatId,"/cn/c/"+chatId]){
+  const link="https://vynalthai.com/__shield/gps/chat-reverify?return="+encodeURIComponent(target);
+  const response=await invoke(new Request(link,{headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}}));
+  assert.equal(response.status,200,target);
+  assert.match(response.headers.get("Content-Type"),/text\/html/);
+  assert.match(response.headers.get("Cache-Control"),/no-store/);
+  const html=await response.text();
+  assert.match(html,/Allow location & verify/);
+  assert.doesNotMatch(html,/autoRequest\(\)/);
+ }
+ for(const unsafe of ["/api/ai/chat","//evil.example","/admin","https://evil.example/x","/__shield/gps/recover"]){
+  const response=await invoke(new Request("https://vynalthai.com/__shield/gps/chat-reverify?return="+encodeURIComponent(unsafe)));
+  assert.equal(response.status,400,unsafe);
+ }
+ assert.equal((await invoke(new Request("https://vyncuslim.com/__shield/gps/chat-reverify"))).status,404);
+ assert.equal((await invoke(new Request("https://vynalthai.com/__shield/gps/chat-reverify",{method:"POST"}))).status,404);
+});
+test("chat GPS browser script requests server verification for original chat path",()=>{
+ assert.doesNotThrow(()=>new Script(GPS_CLIENT));
+ assert.match(GPS_CLIENT,/location\.pathname==="\/__shield\/gps\/chat-reverify"/);
+ assert.match(GPS_CLIENT,/new URLSearchParams\(location\.search\)\.get\("return"\)/);
+ assert.match(GPS_CLIENT,/returnPath:location\.pathname==="\/__shield\/gps\/chat-reverify"/);
+ assert.match(GPS_CLIENT,/const target=new URL\(chatTarget/);
+ assert.doesNotMatch(GPS_CLIENT,/queueMicrotask\(autoRequest\)/);
 });
