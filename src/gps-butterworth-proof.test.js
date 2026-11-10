@@ -164,7 +164,7 @@ test("standard signed OUTSIDE session permits navigation even when Butterworth p
  const statusResponse=await gate(request(HOST,"/__shield/gps/status","GET",{Cookie:outsideCookie}));
  assert.equal(statusResponse.status,200);
  const status=await statusResponse.json();
- assert.equal(status.policyRevision,"gps-penang-butterworth-consented-proof-v12");
+ assert.equal(status.policyRevision,"gps-handoff-concurrency-v13");
  assert.equal(status.verified,true);
  assert.equal(status.regionalPolicy.gpsRequired,true,"regional rule still applies");
  assert.equal(status.regionalPolicy.browserProofActive,false);
