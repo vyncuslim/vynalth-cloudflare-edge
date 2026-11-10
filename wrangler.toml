@@ -18,6 +18,14 @@ workers_dev = true
 # 2026-10-31: enable following successful fix for route conflict code 10020.
 # Require real database proof before claiming production ingestion success.
 THREAT_INTEL_COLLECT_ENABLED = "true"
+# Sitewide Axiom + PostHog HTTP response log mirroring for traffic that
+# actually traverses THIS Worker. Default OFF until both secrets are configured.
+# The Axiom access token must be ingest-only for vynalth-access-logs; the
+# PostHog project phc_ token and regional HTTPS OTLP endpoint are secrets/config.
+# Do not commit tokens. This never sees WAF-preblocked or un-routed requests.
+EDGE_DUAL_LOGS_ENABLED = "false"
+POSTHOG_LOGS_ENDPOINT = "https://us.i.posthog.com/i/v1/logs"
+
 # Axiom direct honeypot intake (separate from the existing origin collector).
 # Requires a scoped AXIOM_INGEST_TOKEN Worker secret before enabling.
 # No raw IP, Cookie, query, User Agent, GPS, credentials or bodies are sent.
