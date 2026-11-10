@@ -1,5 +1,6 @@
 import { getRootDomain } from './managed-domains.js';
 import { isPhpInfoHoneypotPath } from './phpinfo-honeypot.js';
+import { matchPhpHoneypot } from './php-honeypots.js';
 
 // Opt-in collection of narrow security-probe observations reaching this Worker.
 // This is NOT a Cloudflare WAF log stream or evidence of a confirmed intrusion.
@@ -29,7 +30,8 @@ const PATH_PROBES = [
 export function isObservedSecurityProbe(request) {
   if (!request) return false;
   const url = new URL(request.url);
-  if (isPhpInfoHoneypotPath(url.pathname)) return DECOY_METHODS.has(request.method);
+  if (isPhpInfoHoneypotPath(url.pathname) ||
+      matchPhpHoneypot(url.pathname)) return DECOY_METHODS.has(request.method);
   if (!ACCEPTED_METHODS.has(request.method)) return false;
   if (url.pathname === '/api/security/ingest') return false;
   return PATH_PROBES.some(([pattern]) => pattern.test(url.pathname));
@@ -45,8 +47,10 @@ export function scheduleThreatTelemetry(request, env, ctx, requestId, status = n
   if (!getRootDomain(url.hostname)) return false;
 
   // Never send an IP, cookies, query strings, body, UA, GPS or visitor identity.
-  const isPhpDecoy = isPhpInfoHoneypotPath(url.pathname);
-  const probeTemplate = isPhpDecoy ? '/api/phpinfo.php' :
+  const matchedPhp = matchPhpHoneypot(url.pathname);
+  const isPhpDecoy = isPhpInfoHoneypotPath(url.pathname) || Boolean(matchedPhp);
+  const probeTemplate = isPhpInfoHoneypotPath(url.pathname) ? '/api/phpinfo.php' :
+    matchedPhp ? matchedPhp.path :
     PATH_PROBES.find(([pattern]) => pattern.test(url.pathname))?.[1];
   if (!probeTemplate) return false;
   const event = {

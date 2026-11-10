@@ -8,6 +8,8 @@ import { verifyGpsServiceCall } from "./gps-service-policy.js";
 import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-owner-access.js";
 import { scheduleThreatTelemetry } from "./threat-telemetry.js";
 import { handlePhpInfoHoneypot } from "./phpinfo-honeypot.js";
+import { isPhpInfoHoneypotPath } from "./phpinfo-honeypot.js";
+import { handlePhpHoneypot, matchPhpHoneypot } from "./php-honeypots.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
@@ -169,21 +171,24 @@ export default {
       }), request, incomingUrl, requestId, rootDomain);
     }
 
-    // Isolated, non-executable phpinfo decoy on every managed domain.
-    // It never reaches the origin, reads live configuration, or bypasses WAF.
-    // Threat ingestion and Telegram delivery stay separate and best-effort.
-    const phpInfoDecoy = handlePhpInfoHoneypot(request, incomingUrl);
-    if (phpInfoDecoy) {
+    // Static, allowlisted PHP decoys run at the edge before GPS and origin.
+    // No PHP interpreter, credential collection, dynamic data or filesystem.
+    // WAF remains upstream; no changes to normal application .php routes.
+    const phpDecoy = handlePhpInfoHoneypot(request, incomingUrl) ||
+      handlePhpHoneypot(request, incomingUrl);
+    if (phpDecoy) {
+      const decoyKind = isPhpInfoHoneypotPath(incomingUrl.pathname)
+        ? "phpinfo" : (matchPhpHoneypot(incomingUrl.pathname)?.kind || "php");
       console.info("[EDGE HONEYPOT]", JSON.stringify({
         event: "HONEYPOT_TRIGGER",
-        category: "phpinfo",
+        category: decoyKind,
         host: hostname,
         method: request.method,
-        status: phpInfoDecoy.status,
+        status: phpDecoy.status,
         requestId,
       }));
-      scheduleThreatTelemetry(request, env, ctx, requestId, phpInfoDecoy.status);
-      return observedResponse(phpInfoDecoy, request, incomingUrl, requestId, rootDomain);
+      scheduleThreatTelemetry(request, env, ctx, requestId, phpDecoy.status);
+      return observedResponse(phpDecoy, request, incomingUrl, requestId, rootDomain);
     }
 
     // Legacy school management and voluntary report endpoints, opt-in only.
