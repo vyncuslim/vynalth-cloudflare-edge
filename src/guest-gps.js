@@ -41,7 +41,7 @@ function isBrowserDocument(request){
 }
 
 const SESSION_TTL=900;
-const GPS_POLICY_REVISION="gps-handoff-concurrency-v13";
+const GPS_POLICY_REVISION="gps-chat-reverify-v14";
 const NAV_PROOF_PARAM="__vynalth_gps_visit";
 const NAV_PROOF_TTL=60;
 const NAV_PROOF_USED_TTL=120;
@@ -162,6 +162,11 @@ function safeRelativePath(path){
    !path.startsWith("/__shield/gps/");
 }
 function validState(v){return typeof v==="string"&&/^[A-Za-z0-9_-]{32}$/.test(v)}
+function validChatReturnPath(path){
+ // Only the first-party chat shell: no arbitrary redirect destinations.
+ return safeRelativePath(path)&&
+   /^\/(?:(?:en|cn|ms)\/)?c(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?\/?$/i.test(path);
+}
 function hasMatchingHandoffState(req,state){
  if(!validState(state))return false;
  // Support older in-flight redirects using the legacy single-slot cookie.
@@ -498,7 +503,7 @@ async function verify(req,url,cfg,env,ctx,requestId){
    status:200,headers
  });
 }
-function page(){return new Response(GEO_HTML,{status:403,headers:{...head,"Content-Type":"text/html; charset=utf-8","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}})}
+function page(status=403){return new Response(GEO_HTML,{status,headers:{...head,"Content-Type":"text/html; charset=utf-8","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}})}
 function disclaimerPage(){
  return new Response(DISCLAIMER_HTML,{status:200,headers:{...head,"Content-Type":"text/html; charset=utf-8",
   "X-Frame-Options":"DENY",
@@ -652,6 +657,15 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
   return reply(503,{error:"GPS_GATE_CONFIGURATION_UNAVAILABLE",blocked:true});
  }
  if(!cfg)return null;
+ // /c/:id deliberately permits public HTML/POST without GPS. An explicit
+ // first-party consent page is needed for re-verifying a failed chat API turn.
+ if(url.pathname==="/__shield/gps/chat-reverify"){
+  if(request.method!=="GET"||url.hostname!==GPS_BRIDGE_HUB)
+   return reply(404,{error:"NOT_FOUND"});
+  const destination=url.searchParams.get("return")||"/c";
+  if(!validChatReturnPath(destination))return reply(400,{error:"INVALID_CHAT_RETURN_PATH"});
+  return page(200);
+ }
  if(url.pathname==="/__shield/gps/region-check"||
     url.pathname==="/__shield/gps/region-client.js"){
   const region=await gpsRegionalDecision(request,env,url,verifiedCountry);

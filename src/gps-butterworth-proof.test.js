@@ -150,7 +150,7 @@ test("opt-in recovery page offers explicit browser location consent and does not
  assert.equal(js.status,200);
  const body=await js.text();
  assert.ok(body.includes("/__shield/gps/recover"));
- assert.ok(body.includes("new URL(location.pathname==="));
+ assert.ok(body.includes("const target=new URL(chatTarget||"));
  const otherHost=await gate(request("vyncuslim.my","/__shield/gps/recover"));
  assert.equal(otherHost.status,404);
 });
@@ -164,7 +164,7 @@ test("standard signed OUTSIDE session permits navigation even when Butterworth p
  const statusResponse=await gate(request(HOST,"/__shield/gps/status","GET",{Cookie:outsideCookie}));
  assert.equal(statusResponse.status,200);
  const status=await statusResponse.json();
- assert.equal(status.policyRevision,"gps-handoff-concurrency-v13");
+ assert.equal(status.policyRevision,"gps-chat-reverify-v14");
  assert.equal(status.verified,true);
  assert.equal(status.regionalPolicy.gpsRequired,true,"regional rule still applies");
  assert.equal(status.regionalPolicy.browserProofActive,false);
