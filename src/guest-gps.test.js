@@ -712,7 +712,7 @@ test("actual GPS boundary 403 hands Telegram notification to waitUntil without c
  const priorFetch=globalThis.fetch;
  globalThis.fetch=async (url,options)=>{
   messages.push(JSON.parse(options.body).text);
-  return new Response(JSON.stringify({ok:true}),{status:200});
+  return new Response(JSON.stringify({ok:true,result:{message_id:723}}),{status:200});
  };
  try{
   const denied=await guestGpsGate(request,env,new URL(request.url),
