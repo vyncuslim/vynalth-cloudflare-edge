@@ -25,7 +25,7 @@ function setup(){
  const ctx={waitUntil:p=>tasks.push(p)};
  const fetchImpl=async(url,options)=>{
   sent.push({url,options});
-  return new Response(JSON.stringify({ok:true}),{status:200});
+  return new Response(JSON.stringify({ok:true,result:{message_id:723}}),{status:200});
  };
  const request=new Request("https://vynalthai.com/__shield/gps/verify?secret=discard",{
   headers:{"CF-Connecting-IP":"198.51.100.45",
@@ -87,4 +87,53 @@ test("Telegram outage never changes access response; missing config is a no-op",
  assert.equal(tasks.length,0);
  scheduleGpsDenialAlert({...args,env:{...args.env,GPS_TELEGRAM_ALERTS_ENABLED:"false"},event:"CAMPUS_RESTRICTED"});
  assert.equal(tasks.length,0);
+});
+
+test("Telegram HTTP 200 with ok=false or no message_id never suppresses a later delivery",async()=>{
+ const {args,tasks,kv}=setup();
+ let attempts=0;
+ const sender=async()=>{
+  attempts++;
+  if(attempts===1)return new Response(JSON.stringify({ok:false,description:"denied"}),{status:200});
+  if(attempts===2)return new Response(JSON.stringify({ok:true}),{status:200});
+  return new Response(JSON.stringify({ok:true,result:{message_id:88}}),{status:200});
+ };
+ for(let index=0;index<3;index++){
+  scheduleGpsDenialAlert({...args,fetchImpl:sender,event:"CAMPUS_RESTRICTED"});
+  await flush(tasks);
+  if(index<2)assert.equal(kv.map.size,0,"failed/unconfirmed alerts cannot create cooldown");
+ }
+ assert.equal(attempts,3,"third event retries immediately after invalid acks");
+ assert.ok([...kv.map.keys()].some(k=>k.includes("global")),"cooldown should follow acknowledged send");
+ scheduleGpsDenialAlert({...args,fetchImpl:sender,event:"CAMPUS_RESTRICTED"});
+ await flush(tasks);
+ assert.equal(attempts,3,"successfully acknowledged send is deduplicated");
+});
+test("Telegram HTTP 503 never creates a delivery cooldown",async()=>{
+ const {args,tasks,kv}=setup();
+ const failure=async()=>new Response(JSON.stringify({ok:false}),{status:503});
+ scheduleGpsDenialAlert({...args,fetchImpl:failure,event:"CAMPUS_RESTRICTED"});
+ await flush(tasks);
+ assert.equal(kv.map.size,0);
+ let sends=0;
+ scheduleGpsDenialAlert({...args,fetchImpl:async()=>{
+  sends++;
+  return new Response(JSON.stringify({ok:true,result:{message_id:42}}),{status:200});
+ },event:"CAMPUS_RESTRICTED"});
+ await flush(tasks);
+ assert.equal(sends,1);
+});
+test("acknowledged delivery is not mislabeled failed when KV cooldown write fails",async()=>{
+ const {args,tasks}=setup();
+ const env={...args.env,CONSENT_KV:{
+  async get(){return null;},
+  async put(){throw Error("Storage temporary failure");}
+ }};
+ let sends=0;
+ scheduleGpsDenialAlert({...args,env,event:"CAMPUS_RESTRICTED",fetchImpl:async()=>{
+  sends++;
+  return new Response(JSON.stringify({ok:true,result:{message_id:51}}),{status:200});
+ }});
+ await flush(tasks);
+ assert.equal(sends,1);
 });
