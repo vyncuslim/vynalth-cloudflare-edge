@@ -150,7 +150,7 @@ test("opt-in recovery page offers explicit browser location consent and does not
  assert.equal(js.status,200);
  const body=await js.text();
  assert.ok(body.includes("/__shield/gps/recover"));
- assert.ok(body.includes("new URL(location.pathname==="));
+ assert.ok(body.includes("const target=new URL(chatTarget||"));
  const otherHost=await gate(request("vyncuslim.my","/__shield/gps/recover"));
  assert.equal(otherHost.status,404);
 });
