@@ -27,25 +27,10 @@ export function edgeTelegramStatus(env) {
   return { enabled, configured };
 }
 
-function hostLabel(host) {
-  return /^[a-z0-9.-]{1,160}$/.test(host) ? host : "unavailable";
-}
-
-function routeFamily(path) {
-  if (/^\/api\/ai\//.test(path)) return "/api/ai/*";
-  if (/^\/api\/auth\//.test(path)) return "/api/auth/*";
-  if (/^\/api\/security\//.test(path)) return "/api/security/*";
-  if (/^\/api\//.test(path)) return "/api/*";
-  if (/^\/__shield\/gps\//.test(path)) return "/__shield/gps/*";
-  if (/^\/__vynalth\//.test(path)) return "/__vynalth/*";
-  if (/^\/assets\//.test(path)) return "/assets/*";
-  return "/web/*";
-}
-
 function issueFor(request, response, env=null) {
   const status = response.status;
   if (status >= 500 && status <= 599) {
-    return { code: "HTTP_5XX", severity: status >= 502 ? "Critical" : "High",
+    return { code: "HTTP_5XX", severity: "High",
       status, description: "Server/edge error observed" };
   }
   if (isObservedSecurityProbe(request)) {
@@ -68,16 +53,9 @@ export function classifyEdgeAlert(request, response, env=null) {
   return issueFor(request, response, env);
 }
 
-function safeRef(id) {
-  return /^[a-zA-Z0-9_-]{8,64}$/.test(String(id || "")) ? id : "unavailable";
-}
-
 async function dispatch({ env, request, url, response, requestId, responseTimeMs, fetchImpl }) {
   const issue = issueFor(request, response, env);
   if (!issue) return { state: "ignored" };
-
-  const host = hostLabel(url.hostname.toLowerCase());
-  const family = routeFamily(url.pathname);
 
   try {
     const token = env.EDGE_TELEGRAM_BOT_TOKEN || env.TELEGRAM_BOT_TOKEN;
