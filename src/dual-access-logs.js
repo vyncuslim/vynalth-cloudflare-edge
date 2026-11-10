@@ -55,8 +55,12 @@ function otlpValue(value) {
   return { stringValue: String(value) }
 }
 export function toPostHogOtlp(event) {
-  const severityNumber = event.status_code >= 500 ? 17 : event.status_code >= 400 ? 13 : 9
-  const severityText = event.status_code >= 500 ? 'ERROR' : event.status_code >= 400 ? 'WARN' : 'INFO'
+  const severeLog = event.log_level === 'fatal' || event.log_level === 'error'
+  const warningLog = event.log_level === 'warning'
+  const severityNumber = event.log_level === 'fatal' ? 21 : severeLog || event.status_code >= 500
+    ? 17 : warningLog || event.status_code >= 400 ? 13 : 9
+  const severityText = severityNumber === 21 ? 'FATAL' : severityNumber === 17
+    ? 'ERROR' : severityNumber === 13 ? 'WARN' : 'INFO'
   const attributes = Object.entries(event)
     .filter(([key,value]) => value !== null && key !== '_time')
     .map(([key,value]) => ({ key, value: otlpValue(value) }))
