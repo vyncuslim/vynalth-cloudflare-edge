@@ -7,6 +7,7 @@ import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
 import { verifyGpsServiceCall } from "./gps-service-policy.js";
 import { handleTemporaryOwnerAccess,hasTemporaryOwnerPass } from "./temporary-owner-access.js";
 import { scheduleThreatTelemetry } from "./threat-telemetry.js";
+import { handlePhpInfoHoneypot } from "./phpinfo-honeypot.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
@@ -166,6 +167,23 @@ export default {
           "X-Vynalth-Security-Action": "block-wordpress-installer-probe",
         },
       }), request, incomingUrl, requestId, rootDomain);
+    }
+
+    // Isolated, non-executable phpinfo decoy on every managed domain.
+    // It never reaches the origin, reads live configuration, or bypasses WAF.
+    // Threat ingestion and Telegram delivery stay separate and best-effort.
+    const phpInfoDecoy = handlePhpInfoHoneypot(request, incomingUrl);
+    if (phpInfoDecoy) {
+      console.info("[EDGE HONEYPOT]", JSON.stringify({
+        event: "HONEYPOT_TRIGGER",
+        category: "phpinfo",
+        host: hostname,
+        method: request.method,
+        status: phpInfoDecoy.status,
+        requestId,
+      }));
+      scheduleThreatTelemetry(request, env, ctx, requestId, phpInfoDecoy.status);
+      return observedResponse(phpInfoDecoy, request, incomingUrl, requestId, rootDomain);
     }
 
     // Legacy school management and voluntary report endpoints, opt-in only.

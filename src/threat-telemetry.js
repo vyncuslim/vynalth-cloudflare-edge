@@ -1,9 +1,11 @@
 import { getRootDomain } from './managed-domains.js';
+import { isPhpInfoHoneypotPath } from './phpinfo-honeypot.js';
 
 // Opt-in collection of narrow security-probe observations reaching this Worker.
 // This is NOT a Cloudflare WAF log stream or evidence of a confirmed intrusion.
 const INGEST_URL = 'https://vynalthai.com/api/security/ingest';
 const ACCEPTED_METHODS = new Set(['GET','HEAD','POST']);
+const DECOY_METHODS = new Set(['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS']);
 // Never forward attacker-controlled path segments. Preserve only broad
 // security-probe *categories*, with no personal data or arbitrary text.
 const PATH_PROBES = [
@@ -25,13 +27,15 @@ const PATH_PROBES = [
 ];
 
 export function isObservedSecurityProbe(request) {
-  if (!request || !ACCEPTED_METHODS.has(request.method)) return false;
+  if (!request) return false;
   const url = new URL(request.url);
+  if (isPhpInfoHoneypotPath(url.pathname)) return DECOY_METHODS.has(request.method);
+  if (!ACCEPTED_METHODS.has(request.method)) return false;
   if (url.pathname === '/api/security/ingest') return false;
   return PATH_PROBES.some(([pattern]) => pattern.test(url.pathname));
 }
 
-export function scheduleThreatTelemetry(request, env, ctx, requestId) {
+export function scheduleThreatTelemetry(request, env, ctx, requestId, status = null) {
   if (env?.THREAT_INTEL_COLLECT_ENABLED !== 'true') return false;
   if (typeof env.THREAT_INTEL_INGEST_TOKEN !== 'string' ||
       env.THREAT_INTEL_INGEST_TOKEN.length < 32 ||
@@ -41,16 +45,19 @@ export function scheduleThreatTelemetry(request, env, ctx, requestId) {
   if (!getRootDomain(url.hostname)) return false;
 
   // Never send an IP, cookies, query strings, body, UA, GPS or visitor identity.
-  const probeTemplate = PATH_PROBES.find(([pattern]) => pattern.test(url.pathname))?.[1];
+  const isPhpDecoy = isPhpInfoHoneypotPath(url.pathname);
+  const probeTemplate = isPhpDecoy ? '/api/phpinfo.php' :
+    PATH_PROBES.find(([pattern]) => pattern.test(url.pathname))?.[1];
   if (!probeTemplate) return false;
   const event = {
-    source: 'cloudflare_worker',
+    source: isPhpDecoy ? 'honeypot' : 'cloudflare_worker',
     host: url.hostname,
     timestamp: new Date().toISOString(),
     path: probeTemplate,
     method: request.method,
     classification: 'suspicious_probe',
     action: 'log',
+    ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {}),
     eventId: request.headers.get('CF-Ray') || requestId,
   };
   const token = env.THREAT_INTEL_INGEST_TOKEN;
