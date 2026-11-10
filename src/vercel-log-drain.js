@@ -1,4 +1,5 @@
 import { toPostHogOtlp, routeFamily } from './dual-access-logs.js'
+import { getRootDomain } from './managed-domains.js'
 const AXIOM_ACCESS_ENDPOINT = 'https://us-east-1.aws.edge.axiom.co/v1/ingest/vynalth-access-logs'
 const REGION_ENDPOINTS = new Set([
   'https://us.i.posthog.com/i/v1/logs',
@@ -70,6 +71,8 @@ export function sanitizeVercelDrainRecord(raw) {
     typeof raw.proxy?.path==='string' ? raw.proxy.path : null
   const route=routeFamily(rawPath?rawPath.split('?')[0]:null)
   const name='vercel-'+project.toLowerCase()
+  const observedHost=safeText(raw.host,/^[a-z0-9.-]+$/i,253)
+  const managedRoot=observedHost ? getRootDomain(observedHost.toLowerCase()) : null
   // Do not forward message, proxy.clientIp, JA3/JA4, userAgent, referral,
   // raw path, query parameters, environment secrets or application payload.
   return {
@@ -79,8 +82,8 @@ export function sanitizeVercelDrainRecord(raw) {
     source:'vercel_log_drain',
     service:name,
     environment: raw.environment==='production'?'production':'preview',
-    host:'', // no unvalidated hostname metadata
-    root_domain:'',
+    host:managedRoot ? observedHost.toLowerCase() : '',
+    root_domain:managedRoot || '',
     path:route,
     http_method:typeof raw.proxy?.method==='string' &&
       /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(raw.proxy.method)
