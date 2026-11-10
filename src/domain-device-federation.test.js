@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handleDomainDeviceFederation, signedFederationAssertion } from './domain-device-federation.js';
+import { handleDomainDeviceFederation, signedFederationAssertion, verifyFederationServiceRelay } from './domain-device-federation.js';
 import { handleEdgeDeviceEndpoint } from './domain-device-id.js';
 
 const host='vyncuslim.si';
@@ -110,4 +110,20 @@ test('signed proof is bound to action, host, local browser ID and consent code',
   assert.match(b.proof,/^[A-Za-z0-9_-]{43}$/);
   assert.notEqual(a.proof,b.proof);
   assert.equal(await signedFederationAssertion({},host,localId,code),null);
+});
+
+
+test('only fresh signed canonical Worker service traffic can bypass GPS browser preflight',async()=>{
+  const id='e6245f16-a262-45e0-9477-af1459f651ce';
+  const a=await signedFederationAssertion(env,host,id,globalDeviceId,'status');
+  const target='https://vynalthai.com/api/security/device/federation/status';
+  const body={host,localDeviceId:id,globalDeviceId,...a};
+  const valid=new Request(target,{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify(body)});
+  assert.equal(await verifyFederationServiceRelay(valid,env,new URL(target)),true);
+  const forged=new Request(target,{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({...body,host:'zokivo.xyz'})});
+  assert.equal(await verifyFederationServiceRelay(forged,env,new URL(target)),false);
+  assert.equal(await verifyFederationServiceRelay(valid,{},new URL(target)),false);
+  assert.equal(await verifyFederationServiceRelay(valid,env,new URL('https://vyncuslim.si/api/security/device/federation/status')),false);
 });
