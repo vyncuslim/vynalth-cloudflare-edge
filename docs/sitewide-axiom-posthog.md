@@ -52,7 +52,14 @@ See `vyncuslim/somnoai-digital-sleep-lab-backend` for the canonical server-side 
 
 For platform-side logs:
 - Cloudflare WAF / HTTP logpush must be routed separately to a private sanitized collector.
-- Vercel Log Drains require authorized team configuration; do not post raw Vercel drain JSON directly to the OTLP endpoint.
+- This Worker now includes a signed **Vercel team Log Drain bridge** at `https://vynalthai.com/__observability/vercel-drain`, disabled by default.
+- Vercel Team Settings > Drains: create a Log Drain with schema `log.v1`, JSON encoding, selected production projects, destination URL above, and a new 32+ character signature secret. Store the same secret only as Cloudflare Worker secret `VERCEL_LOG_DRAIN_SIGNING_SECRET`.
+- Set `VERCEL_LOG_DRAIN_ENABLED=true` only after a staging test; for now it is deliberately `false`.
+- The drain verifies Vercel's `x-vercel-signature` HMAC-SHA1 over the **raw request body** before parsing; malformed or unsigned requests are denied.
+- Only a strict allowlist is forwarded; the drain discards untrusted log message text, full URLs, proxy client IPs and user agents. Do not send raw Vercel Drain JSON directly to either OTLP endpoint.
+- Each signed JSON batch must contain 1-1000 records and be under 2 MiB; larger batches require adjusting Vercel's drain or deploying a durable queue.
+- For each batch, both Axiom and PostHog must acknowledge ingestion before the Worker returns HTTP 200. On failure it returns HTTP 503 so Vercel can retry; successful partial deliveries may be duplicated, so analysis must use `event_id`.
+- The bridge is **not yet deployed or configured in Vercel**. The connected Vercel drain listing returned HTTP 404, and environment variable mutations returned HTTP 403; we cannot claim active Vercel delivery from this code alone.
 - Oracle Ubuntu should run a protected OpenTelemetry Collector with allowlisted system/service events, persistent queues, and two independent OTLP exporters.
 
 This PR does not change routing, access control, existing alert policies, or running Oracle services.
