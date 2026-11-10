@@ -125,13 +125,15 @@ export default {
     const hostname = incomingUrl.hostname.toLowerCase();
     const rootDomain = getRootDomain(hostname);
     const requestId = crypto.randomUUID();
+    const startedAtMs = Date.now();
     // Every response from this Worker is inspected, including edge-generated
     // failures and origin 5xx. Telegram dispatch runs in waitUntil(), so
     // notification outages cannot delay or change the user's HTTP response.
     const observedResponse = (...args) => {
       const result = edgeResponse(...args);
       scheduleEdgeTelegramAlert({
-        env, ctx, request, url: incomingUrl, response: result, requestId
+        env, ctx, request, url: incomingUrl, response: result, requestId,
+        responseTimeMs:Math.max(0,Date.now()-startedAtMs)
       });
       return result;
     };
