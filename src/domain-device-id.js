@@ -109,10 +109,13 @@ export async function verifyEdgeDevice(request, env, nowMs = Date.now()) {
     const now = Math.floor(nowMs / 1000);
     if (issued > 0 && issued <= now + CLOCK_SKEW_SECONDS && now - issued <= DEVICE_TTL_SECONDS) {
       const signed = [VERSION,parts[1].toLowerCase(),parts[2]].join('.');
-      // crypto.subtle.verify performs constant-time signature verification.
-      const expected = await mac(material, scope.host, signed);
+      // Verify the canonical MAC bytes using WebCrypto, rather than a
+      // potentially timing-variable JavaScript string comparison.
       const actual = decodeBytes(parts[3]);
-      if (actual && expected === parts[3]) {
+      const key = await signingKey(material, scope.host);
+      if (actual && await crypto.subtle.verify(
+        'HMAC', key, actual, textEncoder.encode(signed),
+      )) {
         const refresh = now - issued >= REFRESH_SECONDS;
         const token = refresh ? await signEdgeDevice(parts[1].toLowerCase(), scope.host, material, now) : raw;
         return { state:refresh?'rotated':'valid',deviceId:parts[1].toLowerCase(),
