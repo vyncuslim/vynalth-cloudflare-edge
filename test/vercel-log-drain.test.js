@@ -18,6 +18,7 @@ const original={
   deploymentId:'dpl_testing',
   projectId:'prj_test12345',
   projectName:'vynchapp',
+  host:'vynalthai.com',
   source:'lambda',
   timestamp:Date.now(),
   level:'error',
@@ -54,6 +55,8 @@ test('source sanitization strips raw IP, user-agent, messages and query paths',(
   assert.equal(clean.service,'vercel-vynchapp')
   assert.equal(clean.status_code,500)
   assert.equal(clean.path,'/api/*')
+  assert.equal(clean.host,'vynalthai.com')
+  assert.equal(clean.root_domain,'vynalthai.com')
   assert.equal(clean.event_id,'vercel:'+original.id)
   for(const s of ['192.0.2.44','top-secret','private-UA','private body',
     '/api/private/account/123','https://private.example']) {
@@ -77,6 +80,7 @@ test('signed drain forwards only sanitized data to both Axiom and PostHog',async
   }
   assert.ok(JSON.stringify(sent[0]).includes('vercel:'+original.id))
   assert.ok(JSON.stringify(sent[1]).includes('vercel:'+original.id))
+  assert.equal(sent[1].body.resourceLogs[0].scopeLogs[0].logRecords[0].severityNumber,17)
 })
 
 test('disabled drain, missing credentials and forged signature fail closed',async()=>{
