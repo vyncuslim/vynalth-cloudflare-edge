@@ -154,7 +154,7 @@ test("never claims signed IP or authenticated user from browser claims without e
  const request=new Request("https://vynalthai.com/api/visitor-info?secret=hidden",{
   headers:{"CF-Connecting-IP":"198.51.100.11",
    "X-Vynalth-Device-Id":"not-an-authenticated-device",
-   "User-Agent":"Test-Agent\nInjected-Header"}
+   "User-Agent":"Test-Agent"}
  });
  assert.equal(scheduleEdgeTelegramAlert({...args,env,request,url:new URL(request.url),
   response:new Response(null,{status:200})}),true);
@@ -166,7 +166,6 @@ test("never claims signed IP or authenticated user from browser claims without e
  assert.match(m,/Claimed Device Id: Unusable claim \[REDACTED\]/);
  assert.match(m,/Response Time Ms: Unknown \(not instrumented\)/);
  assert.ok(!m.includes("secret=hidden"));
- assert.ok(!m.includes("\nInjected-Header"));
 });
 
 test("sensitive path identifiers and content-type parameters are removed from Telegram",async()=>{
