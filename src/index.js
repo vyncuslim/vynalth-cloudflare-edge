@@ -11,6 +11,7 @@ import { handlePhpInfoHoneypot } from "./phpinfo-honeypot.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
+import { handleDomainDeviceFederation } from "./domain-device-federation.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
 import { adminPage } from "./school/admin-page.js";
@@ -301,6 +302,13 @@ export default {
     const consentDecision = await handleUniversalConsent(request, env, incomingUrl, rootDomain);
     if (consentDecision) {
       return observedResponse(consentDecision, request, incomingUrl, requestId, rootDomain);
+    }
+
+    // Host-scoped, explicit-consent linking page. Runs only if optional
+    // federation is enabled, and cannot bypass existing Cloudflare WAF.
+    const deviceLinkPage = await handleDomainDeviceFederation(request,env,incomingUrl);
+    if (deviceLinkPage) {
+      return observedResponse(deviceLinkPage,request,incomingUrl,requestId,rootDomain);
     }
 
     // Read-only, first-party signed Device ID endpoint. It is not account
