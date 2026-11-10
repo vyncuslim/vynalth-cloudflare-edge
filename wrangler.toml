@@ -52,6 +52,8 @@ GPS_TELEGRAM_ALERTS_ENABLED = "true"
 # Telegram rate limits and outages still constrain actual delivery; add durable queue before promising 100%.
 # Does not see WAF-preblocked requests, browser errors or unproxied domains.
 EDGE_TELEGRAM_ALERTS_ENABLED = "true"
+# Send an INFO notification for 2xx/3xx too. High traffic can hit Telegram rate limits.
+EDGE_TELEGRAM_NOTIFY_ALL_REQUESTS = "true"
 # Fresh GPS is required on first access, after the signed outside cookie
 # expires, and whenever the location is inside or near a campus boundary.
 GPS_RECHECK_EVERY_DOCUMENT = "true"
