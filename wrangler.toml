@@ -21,6 +21,17 @@ THREAT_INTEL_COLLECT_ENABLED = "true"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "true"
 SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"
+# First-party, host-scoped signed browser credentials for Vynalth-managed
+# domains. Does not auto-link users or cookies between different root domains.
+# Main vynalthai.com retains the existing backend __Host-vyn_device.
+# Redirect-only roots never issue a duplicate cookie.
+# Preferred: configure EDGE_DEVICE_ID_SIGNING_SECRET via wrangler secret.
+# Compatibility: derive an isolated edge-device MAC key from the already
+# configured VISITOR_IP_SIGNING_SECRET, never reuse its actual signing key.
+# If neither ≥32-byte secret exists, new endpoint returns 503 and no
+# insecure device cookie is issued.
+EDGE_DEVICE_ID_ENABLED = "true"
+EDGE_DEVICE_ALLOW_DERIVED_KEY = "true"
 MODE = "observe"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
