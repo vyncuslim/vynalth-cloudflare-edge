@@ -21,7 +21,7 @@ function b64url(bytes){
 async function federationKey(secret) {
   const raw=await crypto.subtle.digest('SHA-256',
     textEncoder.encode('vynalth-device-federation-proof:v1:'+secret));
-  return crypto.subtle.importKey('raw',raw,{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  return crypto.subtle.importKey('raw',raw,{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
 }
 async function signature(secret,message) {
   const key=await federationKey(secret);
