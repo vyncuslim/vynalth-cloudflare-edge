@@ -46,7 +46,7 @@ async function initialGuestRedirect(host,path="/about"){
  }));
  assert.equal(response.status,302,host);
  const stateCookie=response.headers.getSetCookie()
-   .find(x=>x.startsWith("__Host-vynalth-geo-handoff="));
+   .find(x=>x.startsWith("__Host-vynalth-geo-handoff-"));
  assert.ok(stateCookie,host);
  return {response,stateCookie:stateCookie.split(";")[0],
   hubUrl:response.headers.get("Location")};
@@ -243,7 +243,7 @@ test("signed anonymous hub transfer is bound to recipient first-party state Cook
  }));
  assert.equal(imported.status,302);
  assert.equal(imported.headers.get("Location"),"/hello");
- assert.ok(imported.headers.getSetCookie().some(c=>c.startsWith("__Host-vynalth-geo-handoff=")&&c.includes("Max-Age=0")));
+ assert.ok(imported.headers.getSetCookie().some(c=>c.startsWith("__Host-vynalth-geo-handoff-")&&c.includes("Max-Age=0")));
  const siteCookie=imported.headers.getSetCookie()
    .find(x=>x.startsWith("__Host-vynalth-geo=")).split(";")[0];
  assert.equal(await invoke(req("/hello","GET",{Cookie:siteCookie})),null);
@@ -647,7 +647,7 @@ test("sibling domain completes fresh cross-domain GPS recheck with exactly one t
  assert.equal(bridgeResponse.status,302);
  assert.equal((await invoke(new Request(bridge.toString(),{headers:{Cookie:hubCookie}}),env)).status,403,
    "Fresh bridge grant can only be used once");
- const targetState=first.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo-handoff=")).split(";")[0];
+ const targetState=first.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo-handoff-")).split(";")[0];
  const imported=await invoke(new Request(bridgeResponse.headers.get("Location"),{headers:{Cookie:targetState}}),env);
  assert.equal(imported.status,302);
  const destination=imported.headers.get("Location");
@@ -1046,4 +1046,66 @@ test("all reviewed sitemap landing pages are GPS-exempt on the main apex only",a
  const write=await invoke(new Request("https://vynalthai.com/en/about",{
    method:"POST",headers:{Accept:"application/json"}}),policy);
  assert.ok(write instanceof Response,"POST must remain protected");
+});
+
+test("parallel GPS handoffs keep independent first-party cookies and both complete",async()=>{
+ const first=await initialGuestRedirect("vyncuslim.com","/one");
+ const second=await initialGuestRedirect("vyncuslim.com","/two");
+ assert.notEqual(first.stateCookie.split("=")[0],second.stateCookie.split("=")[0]);
+ const cookies=[first.stateCookie,second.stateCookie].join("; ");
+ const verified=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
+  method:"POST",headers:{Origin:"https://vynalthai.com","Sec-Fetch-Site":"same-origin","Content-Type":"application/json"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:10})
+ }));
+ assert.equal(verified.status,200);
+ const hubCookie=verified.headers.getSetCookie()
+  .find(c=>c.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const bridgeA=await invoke(new Request(first.hubUrl,{headers:{Cookie:hubCookie}}));
+ const bridgeB=await invoke(new Request(second.hubUrl,{headers:{Cookie:hubCookie}}));
+ assert.equal(bridgeA.status,302);
+ assert.equal(bridgeB.status,302);
+ const importA=await invoke(new Request(bridgeA.headers.get("Location"),{headers:{Cookie:cookies}}));
+ assert.equal(importA.status,302);
+ assert.equal(importA.headers.get("Location"),"/one");
+ const clearedA=importA.headers.getSetCookie().filter(c=>c.includes("Max-Age=0")&&c.startsWith("__Host-vynalth-geo-handoff-"));
+ assert.equal(clearedA.length,1);
+ assert.equal(clearedA[0].split("=")[0],first.stateCookie.split("=")[0]);
+ assert.notEqual(clearedA[0].split("=")[0],second.stateCookie.split("=")[0]);
+ const importB=await invoke(new Request(bridgeB.headers.get("Location"),{headers:{Cookie:second.stateCookie}}));
+ assert.equal(importB.status,302);
+ assert.equal(importB.headers.get("Location"),"/two");
+});
+test("legacy single-slot handoff remains accepted only with exact matching state",async()=>{
+ const first=await initialGuestRedirect("vyncuslim.com","/legacy");
+ const value=first.stateCookie.split("=")[1];
+ const verified=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
+  method:"POST",headers:{Origin:"https://vynalthai.com","Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:15})
+ }));
+ const hubCookie=verified.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const bridge=await invoke(new Request(first.hubUrl,{headers:{Cookie:hubCookie}}));
+ const legacy="__Host-vynalth-geo-handoff="+value;
+ const imported=await invoke(new Request(bridge.headers.get("Location"),{headers:{Cookie:legacy}}));
+ assert.equal(imported.status,302);
+ assert.ok(imported.headers.getSetCookie().some(v=>v.startsWith("__Host-vynalth-geo-handoff=")&&v.includes("Max-Age=0")));
+});
+test("state cookie loss gets a useful retry page without granting an outside session",async()=>{
+ const first=await initialGuestRedirect("vyncuslim.com","/recovery");
+ const verified=await invoke(new Request("https://vynalthai.com/__shield/gps/verify",{
+  method:"POST",headers:{Origin:"https://vynalthai.com","Content-Type":"application/json","Sec-Fetch-Site":"same-origin"},
+  body:JSON.stringify({lat:5.4,lon:100.25,accuracy:15})
+ }));
+ const hubCookie=verified.headers.getSetCookie().find(v=>v.startsWith("__Host-vynalth-geo=")).split(";")[0];
+ const bridge=await invoke(new Request(first.hubUrl,{headers:{Cookie:hubCookie}}));
+ const target=bridge.headers.get("Location");
+ const absent=await invoke(new Request(target,{headers:{Accept:"text/html","Sec-Fetch-Dest":"document"}}));
+ assert.equal(absent.status,409);
+ assert.match(absent.headers.get("Content-Type"),/text\/html/);
+ assert.match(await absent.text(),/Retry from original page/);
+ assert.equal(absent.headers.getSetCookie().length,0);
+ const wrong=await initialGuestRedirect("vyncuslim.com","/different");
+ const other=await invoke(new Request(target,{headers:{Cookie:wrong.stateCookie}}));
+ assert.equal(other.status,403);
+ assert.equal((await other.json()).error,"HANDOFF_STATE_MISMATCH");
+ assert.equal(other.headers.getSetCookie().length,0);
 });
