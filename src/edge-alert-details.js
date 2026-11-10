@@ -56,7 +56,11 @@ function tokenSummary(request,url){
 }
 function bodySummary(request){
  const contentType=request.headers.get("Content-Type");
- const safeType=contentType?safeText(contentType,80):"unspecified";
+ // Content-Type parameters can contain multipart boundaries or secrets.
+ // Send only a syntactically safe media type, never its parameters.
+ const media=contentType?.split(";")[0]?.trim().toLowerCase()||"";
+ const safeType=/^[a-z0-9!# const safeType=contentType?safeText(contentType,80):"unspecified";^_.+-]+\/[a-z0-9!# const safeType=contentType?safeText(contentType,80):"unspecified";^_.+-]+$/.test(media)?
+  media:"unspecified";
  const len=request.headers.get("Content-Length");
  const hasBody=len!==null?Number(len)>0:
   !["GET","HEAD"].includes(request.method)?"unknown":false;
@@ -83,8 +87,7 @@ export function formatEdgeSecurityAlert({request,url,response,issue,requestId,re
   String(Math.round(responseTimeMs)):"Unknown (not instrumented)";
  const note=issue?.description||"Request processed by the Cloudflare edge Worker";
  const isProbe=issue?.code==="SUSPICIOUS_PROBE";
- const header=issue?.severity==="Info"?"ℹ️ Vynalth AI Security Alert":
-  "🚨 Vynalth AI Security Alert";
+ const header="🚨 Vynalth AI Security Alert";
  return [
   header,
   "=============================",
