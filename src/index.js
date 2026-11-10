@@ -143,6 +143,31 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
+    // Immediately deny WordPress installation endpoint probes on every
+    // managed hostname routed to this Worker, before GPS, origin requests,
+    // app redirects or authentication handlers. NEVER block the observed
+    // 2a06:98c0:3600::103: it is a shared Cloudflare cross-zone Worker IP.
+    // Preserve security telemetry and per-request Telegram notifications.
+    let normalizedProbePath = incomingUrl.pathname;
+    try {
+      normalizedProbePath = decodeURIComponent(normalizedProbePath);
+    } catch {
+      // An invalid escape sequence is not treated as an installer match.
+    }
+    normalizedProbePath = normalizedProbePath.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+    if (/^\/wp-admin\/install\.php\/?$/i.test(normalizedProbePath)) {
+      scheduleThreatTelemetry(request, env, ctx, requestId);
+      return observedResponse(new Response("Forbidden", {
+        status: 403,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Robots-Tag": "noindex, nofollow",
+          "X-Vynalth-Security-Action": "block-wordpress-installer-probe",
+        },
+      }), request, incomingUrl, requestId, rootDomain);
+    }
+
     // Legacy school management and voluntary report endpoints, opt-in only.
     // Keep canonical paths so the existing UI JavaScript and CSRF checks work.
     // Never expose these handlers on other product subdomains.
