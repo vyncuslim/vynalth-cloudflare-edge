@@ -9,9 +9,12 @@ const textEncoder=new TextEncoder();
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CODE=/^[A-Za-z0-9_-]{43}$/;
 
+// Automatic only when the existing signed visitor trust root exists.
+// Explicit "false" is an emergency stop; it never forces a user link.
 function enabled(env) {
-  return env?.DEVICE_FEDERATION_ENABLED==='true'
-    && String(env?.VISITOR_IP_SIGNING_SECRET||'').length>=32;
+  return env?.DEVICE_FEDERATION_ENABLED !== 'false'
+    && env?.EDGE_DEVICE_ID_ENABLED === 'true'
+    && String(env?.VISITOR_IP_SIGNING_SECRET||'').length >= 32;
 }
 function hex(bytes) {return [...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function b64url(bytes){

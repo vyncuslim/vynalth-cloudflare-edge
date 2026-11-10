@@ -127,3 +127,19 @@ test('only fresh signed canonical Worker service traffic can bypass GPS browser 
   assert.equal(await verifyFederationServiceRelay(valid,{},new URL(target)),false);
   assert.equal(await verifyFederationServiceRelay(valid,env,new URL('https://vyncuslim.si/api/security/device/federation/status')),false);
 });
+
+
+test('federation auto-activates with a signed device and a valid trust root, with emergency-off override',async()=>{
+  const activeEnv={...env};
+  delete activeEnv.DEVICE_FEDERATION_ENABLED;
+  const ready=await handleDomainDeviceFederation(new Request(uri),activeEnv,new URL(uri));
+  assert.equal(ready.status,200);
+  assert.match(await ready.text(),/Unified Device ID/);
+  const stopped=await handleDomainDeviceFederation(
+    new Request(uri),{...activeEnv,DEVICE_FEDERATION_ENABLED:'false'},new URL(uri));
+  assert.equal(stopped.status,503);
+  const missingKey=await handleDomainDeviceFederation(new Request(uri),{
+    ...activeEnv,VISITOR_IP_SIGNING_SECRET:'',
+  },new URL(uri));
+  assert.equal(missingKey.status,503);
+});
