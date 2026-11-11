@@ -11,6 +11,8 @@ import { handlePhpInfoHoneypot } from "./phpinfo-honeypot.js";
 import { isPhpInfoHoneypotPath } from "./phpinfo-honeypot.js";
 import { handlePhpHoneypot, matchPhpHoneypot } from "./php-honeypots.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
+import { scheduleEdgeAccessLogs } from "./dual-access-logs.js";
+import { handleVercelDrain } from "./vercel-log-drain.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
@@ -137,15 +139,28 @@ export default {
     // notification outages cannot delay or change the user's HTTP response.
     const observedResponse = (...args) => {
       const result = edgeResponse(...args);
+      const responseTimeMs = Math.max(0, Date.now() - startedAtMs);
       scheduleEdgeTelegramAlert({
         env, ctx, request, url: incomingUrl, response: result, requestId,
-        responseTimeMs:Math.max(0,Date.now()-startedAtMs)
+        responseTimeMs
+      });
+      scheduleEdgeAccessLogs({
+        env, ctx, request, url: incomingUrl, response: result, requestId,
+        responseTimeMs
       });
       return result;
     };
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Vercel Log Drains terminate at Cloudflare, not the Vercel origin.
+    // Never create a log of this drain request itself: that would cause
+    // infinite Vercel drain delivery recursion. A valid HMAC is mandatory.
+    if (hostname === "vynalthai.com" &&
+        incomingUrl.pathname === "/__observability/vercel-drain") {
+      return handleVercelDrain(request, env);
     }
 
     // Immediately deny WordPress installation endpoint probes on every
