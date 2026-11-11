@@ -85,3 +85,40 @@ test("trusted public GPS status is handled by policy-only service without origin
  assert.equal(json.enabled,true);
  assert.equal(json.enforcing,true);
 });
+
+test("IP-verified Google Search Console can fetch public personal homepage via signed GPS policy",async()=>{
+ const originalFetch=globalThis.fetch;
+ let calls=0;
+ globalThis.fetch=async(url)=>{
+  calls++;
+  if (!String(url).startsWith("https://developers.google.com/static/crawling/ipranges/")) {
+   throw Error("internal signed policy must not fetch origin");
+  }
+  return new Response(JSON.stringify({prefixes:[{ipv4Prefix:"66.249.0.0/16"}]}),{
+   status:200,headers:{"Content-Type":"application/json"}
+  });
+ };
+ try{
+  const base=new Request("https://vyncuslim.com/",{
+   headers:{Accept:"text/html","User-Agent":"Google-InspectionTool/1.0"}
+  });
+  const allowed=await edge.fetch(await sign(base,"66.249.66.1"),ENV,{});
+  assert.equal(allowed.status,204);
+  assert.equal(allowed.headers.get("X-Vynalth-GPS-Policy"),"allow");
+  assert.ok(calls>=3);
+  // /jingxin may be independently exempted by existing GPS policy. This
+  // assertion tests the API block only; exact private-path crawler exclusions
+  // are verified by the public-crawler-access unit suite.
+  for(const path of ["/api/friends"]){
+   const privateReq=new Request("https://vyncuslim.com"+path,{
+    headers:{Accept:"text/html","User-Agent":"Google-InspectionTool/1.0"}
+   });
+   const denied=await edge.fetch(await sign(privateReq,"66.249.66.1"),ENV,{});
+   assert.notEqual(denied.status,204,path+" is not public SEO");
+  }
+  const impostor=await edge.fetch(await sign(base,"203.0.113.70"),ENV,{});
+  assert.notEqual(impostor.status,204);
+ }finally{
+  globalThis.fetch=originalFetch;
+ }
+});

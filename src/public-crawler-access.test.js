@@ -80,6 +80,26 @@ test("only Google source-IP-verified search GET pages are exempt", async () => {
   }), ranges), false, "Country cannot forge identity");
 });
 
+test("vyncuslim personal-site public SEO routes allow only verified Google", async () => {
+  for (const host of ["vyncuslim.com", "www.vyncuslim.com"]) {
+    for (const path of ["/", "/robots.txt", "/sitemap.xml", "/achievements",
+      "/story", "/web-design", "/styles.css", "/script.js", "/favicon.svg"]) {
+      assert.equal(await isVerifiedGooglePublicCrawler(request(path, { host }), ranges),
+        true, host + path);
+    }
+    for (const path of ["/jingxin", "/api/friends", "/min-na", "/qing-annie-luo",
+      "/api/v1/profile", "/jingxin/admin", "/__shield/gps/verify",
+      "/assets/jingxin-memory-hq.avif", "/.env"]) {
+      assert.equal(await isVerifiedGooglePublicCrawler(request(path, { host }), ranges),
+        false, "Must never bypass GPS for private or unreviewed routes: " + host + path);
+    }
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/", { host, ip: "203.0.113.75" }), ranges), false);
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/", { host, ua: "Googlebot/2.1", ip: "203.0.113.75" }), ranges), false);
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/", { host, method: "POST" }), ranges), false);
+  }
+  assert.equal(await isVerifiedGooglePublicCrawler(request("/", {host:"friends.vyncuslim.com"}), ranges),false);
+});
+
 test("Google IP list failure fails closed", async () => {
   assert.equal(await isVerifiedGooglePublicCrawler(request("/"), async () => {throw Error("offline");}),false);
   assert.equal(await isVerifiedGooglePublicCrawler(request("/"), async () => []),false);
