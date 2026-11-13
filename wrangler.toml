@@ -56,8 +56,10 @@ EDGE_DEVICE_ALLOW_DERIVED_KEY = "true"
 # browser still requires a first-party, explicit, one-time consent code.
 # Set this variable to "false" for an immediate operator-controlled rollback.
 DEVICE_FEDERATION_ENABLED = "true"
-# SAFETY: activate only after backend+frontend live E2E and route verification.
-GLOBAL_DEVICE_CONTROL_ENABLED = "false"
+# Consent-linked-only enforcement: main/frontend/backend releases ready; zero active links at activation.
+# Signed local + global cookie, verified live DB mapping and fail-closed policy required.
+# Anonymous and unlinked requests remain unchanged. Emergency rollback: set "false".
+GLOBAL_DEVICE_CONTROL_ENABLED = "true"
 MODE = "observe"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
