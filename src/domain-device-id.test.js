@@ -27,19 +27,20 @@ function extract(response){
     .match(/__Host-vyn_edge_device=([^;]+)/)?.[1] || '';
 }
 
-test('exactly 10 fleet roots are configured, three redirects do not issue a second ID',()=>{
-  assert.equal(DEVICE_ROOT_DOMAINS.length,10);
+test('managed fleet roots, redirects and independent hosted subdomains are scoped correctly',()=>{
+  assert.equal(DEVICE_ROOT_DOMAINS.length,11);
   assert.deepEqual([...REDIRECT_ONLY_ROOTS].sort(),
-    ['sleepsomno.com','vitamindai.online','vynli.xyz'].sort());
+    ['vitamindai.online','vynli.xyz'].sort());
   for(const host of DEVICE_ROOT_DOMAINS){
     const s=edgeDeviceScope(host);
-    if (REDIRECT_ONLY_ROOTS.includes(host)||host==='vynalthai.com') assert.equal(s,null,host);
+    if (REDIRECT_ONLY_ROOTS.includes(host)||host==='vynalthai.com'||host==='sleepsomno.com') assert.equal(s,null,host);
     else assert.equal(s?.root,host);
   }
   assert.equal(edgeDeviceScope('www.vynalthai.com'),null);
   assert.equal(edgeDeviceScope('search.vynalthai.com')?.root,'vynalthai.com');
   assert.equal(edgeDeviceScope('vynalthai.com.attacker.tld'),null);
-  assert.equal(edgeDeviceScope('powiismunc.com'),null);
+  assert.equal(edgeDeviceScope('powiismunc.com')?.root,'powiismunc.com');
+  assert.equal(edgeDeviceScope('vyncuslim.sleepsomno.com')?.root,'sleepsomno.com');
 });
 test('missing configuration remains passive; no unsigned Device ID',async()=>{
   const req=request();
