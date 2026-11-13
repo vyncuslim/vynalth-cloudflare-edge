@@ -90,6 +90,8 @@ test('a valid site-signed browser can claim a one-time consent code and retain a
     const status=await handleEdgeDeviceEndpoint(statusReq,env,new URL(statusReq.url));
     const json=await status.json();
     assert.equal(json.accountLinked,true);
+    assert.equal(json.scope,'account-linked-global');
+    assert.equal(json.globalControlEnforcementActive,false);
     assert.equal(json.deviceId,globalDeviceId);
     assert.equal(json.globalDeviceId,globalDeviceId);
     assert.notEqual(json.siteDeviceId,globalDeviceId);
