@@ -50,6 +50,12 @@ test('signed linked device observes central block and fails closed only for link
     assert.equal(blocked.status,403);
     assert.equal(JSON.parse(await blocked.text()).error,'GLOBAL_DEVICE_BLOCKED');
     assert.equal(calls,1);
+    const privateAsset=new Request('https://'+host+'/private/report.pdf',{headers:{cookie}});
+    assert.equal((await checkFederatedDeviceAccess(privateAsset,env,new URL(privateAsset.url))).status,403);
+    const secretPhoto=new Request('https://'+host+'/media/private-photo.webp',{headers:{cookie}});
+    assert.equal((await checkFederatedDeviceAccess(secretPhoto,env,new URL(secretPhoto.url))).status,403);
+    const publicBuild=new Request('https://'+host+'/assets/app.js',{headers:{cookie}});
+    assert.equal(await checkFederatedDeviceAccess(publicBuild,env,new URL(publicBuild.url)),null);
     globalThis.fetch=async()=>Response.json({success:true,active:false,policy:null});
     assert.equal(await checkFederatedDeviceAccess(request,env,new URL(url)),null);
     globalThis.fetch=async()=>new Response(null,{status:503});
