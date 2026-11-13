@@ -7,8 +7,10 @@ import { edgeDeviceScope, verifyEdgeDevice, readGlobalDeviceCookie } from './dom
 import { signedFederationAssertion } from './domain-device-federation.js';
 
 const STATUS_URL = 'https://vynalthai.com/api/security/device/federation/status';
-const EXEMPT = /^\/(?:__vynalth\/device(?:\/|$)|__vynalth\/consent(?:\/|$)|\.well-known\/|robots\.txt$|sitemap(?:-index)?\.xml$|favicon\.ico$|(?:en|cn|ms)\/(?:privacy|terms|contact|security\/device-link)(?:\/|$))/i;
-const ASSET = /\.(?:css|js|mjs|png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|otf|map|mp4|webm|pdf)(?:$|\/)/i;
+const EXEMPT = /^\/(?:recover(?:\/|$)|block-ip(?:\/|$)|status(?:\/|$)|__vynalth\/device(?:\/|$)|__vynalth\/consent(?:\/|$)|\.well-known\/|robots\.txt$|sitemap(?:-index)?\.xml$|favicon\.ico$|(?:en|cn|ms)\/(?:privacy|terms|contact|security\/device-link)(?:\/|$))/i;
+// Only plainly public build assets are exempt. Do not bypass device blocks
+// on private images, PDFs, downloads or user-controlled file extensions.
+const ASSET = /^\/(?:_next\/static\/|assets\/|_assets\/|static\/)/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function denial(status, code, retryAfterSeconds) {
