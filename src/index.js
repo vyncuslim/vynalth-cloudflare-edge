@@ -17,6 +17,7 @@ import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
+import { checkFederatedDeviceAccess } from "./global-device-policy.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
 import { adminPage } from "./school/admin-page.js";
@@ -355,6 +356,13 @@ export default {
     const deviceStatus = await handleEdgeDeviceEndpoint(request, env, incomingUrl);
     if (deviceStatus) {
       return observedResponse(deviceStatus, request, incomingUrl, requestId, rootDomain);
+    }
+
+    // Resolve centrally authorized global browser access restrictions before
+    // GPS and origin forwarding. This does not inspect IPs or anonymous IDs.
+    const federatedDenial = await checkFederatedDeviceAccess(request, env, incomingUrl);
+    if (federatedDenial) {
+      return observedResponse(federatedDenial, request, incomingUrl, requestId, rootDomain);
     }
 
     // GPS and Cookie Consent are independent modules in ONE existing Worker.
