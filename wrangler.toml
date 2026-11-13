@@ -56,6 +56,8 @@ EDGE_DEVICE_ALLOW_DERIVED_KEY = "true"
 # browser still requires a first-party, explicit, one-time consent code.
 # Set this variable to "false" for an immediate operator-controlled rollback.
 DEVICE_FEDERATION_ENABLED = "true"
+# Apply central policies only after the backend status endpoint is deployed.
+GLOBAL_DEVICE_CONTROL_ENABLED = "true"
 MODE = "observe"
 CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
