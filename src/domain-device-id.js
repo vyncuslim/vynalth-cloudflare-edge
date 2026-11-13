@@ -21,9 +21,10 @@ export const DEVICE_ROOT_DOMAINS = Object.freeze([
   'vynlink.xyz',
   'vynli.xyz',
   'zokivo.xyz',
+  'powiismunc.com',
 ]);
 export const REDIRECT_ONLY_ROOTS = Object.freeze([
-  'sleepsomno.com', 'vitamindai.online', 'vynli.xyz',
+  'vitamindai.online', 'vynli.xyz',
 ]);
 const DEVICE_COOKIE_NAME = '__Host-vyn_edge_device';
 const DEVICE_ENDPOINT = '/__vynalth/device';
@@ -40,6 +41,9 @@ export function edgeDeviceScope(hostname) {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   const root = getRootDomain(host);
   if (!root || !DEVICE_ROOT_DOMAINS.includes(root) || REDIRECT_ONLY_ROOTS.includes(root)) return null;
+  // The historic .com root redirects, but an independently hosted personal
+  // subdomain can legitimately retain a separate first-party browser cookie.
+  if (root === 'sleepsomno.com' && (host === root || host === 'www.'+root)) return null;
   // The original central backend already issues __Host-vyn_device on this host.
   // Do not create a second unrelated Device ID on its canonical apex.
   if (host === 'vynalthai.com' || host === 'www.vynalthai.com') return null;

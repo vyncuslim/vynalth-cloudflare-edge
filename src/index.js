@@ -17,6 +17,7 @@ import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
+import { checkFederatedDeviceAccess } from "./global-device-policy.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
 import { adminPage } from "./school/admin-page.js";
@@ -305,6 +306,14 @@ export default {
       const internalOriginRequest=await signedVisitorOriginRequest(request,env);
       const internalOriginResponse=await fetch(internalOriginRequest);
       return observedResponse(internalOriginResponse,request,incomingUrl,requestId,rootDomain);
+    }
+
+    // Enforce active central Global Device ID policy before private media,
+    // application handlers, GPS and ordinary origin forwarding.
+    // Recovery/legal/consent routes remain accessible for appeal and privacy.
+    const federatedDenial = await checkFederatedDeviceAccess(request, env, incomingUrl);
+    if (federatedDenial) {
+      return observedResponse(federatedDenial, request, incomingUrl, requestId, rootDomain);
     }
 
     // Owner's 10-minute access portal is served by the Worker before the GPS
