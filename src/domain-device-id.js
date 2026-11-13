@@ -245,7 +245,8 @@ export async function handleEdgeDeviceEndpoint(request, env, url) {
   }
   const body = request.method === 'HEAD' ? null : JSON.stringify({
     enabled:true,
-    scope:'host-only',
+    scope:activeGlobal?'account-linked-global':'host-only',
+    globalControlEnforcementActive:env?.GLOBAL_DEVICE_CONTROL_ENABLED==='true',
     host:scope.host,
     rootDomain:scope.root,
     deviceId:activeGlobal||state.deviceId,
