@@ -308,6 +308,14 @@ export default {
       return observedResponse(internalOriginResponse,request,incomingUrl,requestId,rootDomain);
     }
 
+    // Enforce active central Global Device ID policy before private media,
+    // application handlers, GPS and ordinary origin forwarding.
+    // Recovery/legal/consent routes remain accessible for appeal and privacy.
+    const federatedDenial = await checkFederatedDeviceAccess(request, env, incomingUrl);
+    if (federatedDenial) {
+      return observedResponse(federatedDenial, request, incomingUrl, requestId, rootDomain);
+    }
+
     // Owner's 10-minute access portal is served by the Worker before the GPS
     // challenge, but after existing temporary IP restrictions. It never
     // creates an application admin/SSO session or bypasses School Policy.
@@ -356,13 +364,6 @@ export default {
     const deviceStatus = await handleEdgeDeviceEndpoint(request, env, incomingUrl);
     if (deviceStatus) {
       return observedResponse(deviceStatus, request, incomingUrl, requestId, rootDomain);
-    }
-
-    // Resolve centrally authorized global browser access restrictions before
-    // GPS and origin forwarding. This does not inspect IPs or anonymous IDs.
-    const federatedDenial = await checkFederatedDeviceAccess(request, env, incomingUrl);
-    if (federatedDenial) {
-      return observedResponse(federatedDenial, request, incomingUrl, requestId, rootDomain);
     }
 
     // GPS and Cookie Consent are independent modules in ONE existing Worker.
