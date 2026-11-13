@@ -16,6 +16,7 @@ import { handleVercelDrain } from "./vercel-log-drain.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
+import { applyVpnPageGradient } from "./vpn-page-gradient.js";
 import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
 import { checkFederatedDeviceAccess } from "./global-device-policy.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
@@ -474,8 +475,12 @@ export default {
     const finalResponse = await addEdgeDeviceToDocumentResponse(
       request, originResponse, env, incomingUrl,
     );
+    // Only vpn.page.vynalthai.com HTML documents receive their full-page
+    // gradient experiment. Preserve all existing origin APIs, installers,
+    // redirects, signed device cookies and other hostnames byte-for-byte.
+    const themedResponse = applyVpnPageGradient(finalResponse, request, incomingUrl);
     return observedResponse(
-      finalResponse,
+      themedResponse,
       request,
       incomingUrl,
       requestId,
