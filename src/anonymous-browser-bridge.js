@@ -19,6 +19,8 @@ const CENTRAL_ORIGIN='https://'+CENTRAL;
 const TARGETS=new Set(['vynlink.xyz','zokivo.xyz']);
 const NONCE_COOKIE='__Host-vyn_browser_bridge_state';
 const CSRF_COOKIE='__Host-vyn_browser_bridge_csrf';
+const AUTO_COOKIE='__Host-vyn_browser_bridge_auto';
+const AUTO_TTL=15*60;
 const OPT_OUT_COOKIE='__Secure-vyn_browser_bridge_optout';
 const GRANT_TTL=300;
 const LINK_TTL=90*86400;
@@ -91,6 +93,24 @@ async function verified(token,material,kind,nowMs=Date.now()){
     ||(kind==='grant'&&!UUID.test(String(data.global||''))))return null;
   return data;
 }
+// A short-lived, explicit opt-in for BOTH named first-party products, not a
+// permanent cross-site identification permission. It never authorizes login.
+async function approvedAutoConsent(request,material,centralId,nowMs=Date.now()){
+  const token=autoCookie(request);
+  if(!CODE.test(token))return false;
+  const [body,proof]=token.split('.');
+  const bytes=unpack(body),signature=unpack(proof);
+  if(!bytes||!signature||signature.length!==32)return false;
+  const ok=await crypto.subtle.verify('HMAC',await key(material),signature,encoder.encode(body));
+  if(!ok)return false;
+  let data;
+  try{data=JSON.parse(new TextDecoder().decode(bytes));}catch{return false;}
+  const now=Math.floor(nowMs/1000);
+  return data?.kind==='auto-consent-v1'
+    &&data.centralId===centralId
+    &&Number.isSafeInteger(data.ts)
+    &&data.ts<=now+60&&now-data.ts<=AUTO_TTL;
+}
 function secureCookieValue(request,name){
   const list=String(request.headers.get('cookie')||'').split(';').map(x=>x.trim())
     .filter(x=>x.startsWith(name+'='));
@@ -99,6 +119,7 @@ function secureCookieValue(request,name){
 }
 function nonceCookie(request){return secureCookieValue(request,NONCE_COOKIE);}
 function csrfCookie(request){return secureCookieValue(request,CSRF_COOKIE);}
+function autoCookie(request){return secureCookieValue(request,AUTO_COOKIE);}
 function csrfValid(request,values){
   const token=String(values?.get('csrf')||'');
   return NONCE.test(token)&&token===csrfCookie(request);
@@ -118,6 +139,11 @@ function clearCsrf(response){
 }
 function csrfSessionCookie(value){
   return CSRF_COOKIE+'='+value+'; Path=/; Max-Age=300; Secure; HttpOnly; SameSite=Lax';
+}
+async function setAutoConsent(response,centralId,material){
+  const payload=await signed({kind:'auto-consent-v1',centralId,ts:Math.floor(Date.now()/1000)},material);
+  return setCookie(response,AUTO_COOKIE+'='+payload+
+    '; Path=/; Max-Age='+AUTO_TTL+'; Secure; HttpOnly; SameSite=Lax');
 }
 function revokeCookie(host){
   return OPT_OUT_COOKIE+'=1; Domain='+host+'; Path=/; Max-Age='+LINK_TTL
@@ -214,7 +240,7 @@ export async function handleAnonymousBrowserBridge(request,env,url){
     }});
   }
   if(url.pathname!==PATH&&url.pathname!==PATH+'/complete'&&url.pathname!==PATH+'/script.js'
-     &&url.pathname!==PATH+'/unlink')return null;
+     &&url.pathname!==PATH+'/auto-next.js'&&url.pathname!==PATH+'/unlink')return null;
   if(!secret(env)||!storage(env))return failure('服务未配置，关联未启用。',503);
   const material=secret(env);
 
@@ -228,23 +254,52 @@ export async function handleAnonymousBrowserBridge(request,env,url){
     }});
   }
 
+  if(target&&url.pathname===PATH+'/auto-next.js'){
+    if(request.method!=='GET')return failure('不支持此请求。',405);
+    // Runs ONLY on the success page after an explicit auto-all approval.
+    // No cookies/IDs are read by this JS. No automatic redirect on homepages.
+    const js="(()=>{const next=location.hostname==='vynlink.xyz'?'zokivo.xyz':location.hostname==='zokivo.xyz'?'vynlink.xyz':null;if(!next)return;location.assign('https://'+next+'/__vynalth/browser/bridge?auto=1');})();";
+    return new Response(js,{status:200,headers:{
+      'Content-Type':'text/javascript; charset=utf-8',
+      'Cache-Control':'public, max-age=3600',
+      'X-Content-Type-Options':'nosniff',
+      'Cross-Origin-Resource-Policy':'same-origin',
+      'X-Robots-Tag':'noindex',
+    }});
+  }
+
   if(central&&url.pathname===PATH){
     if(request.method==='GET'){
       const data=await verified(url.searchParams.get('request'),material,'request');
       if(!data)return failure('请求已过期或签名无效，请从原网站重新开始。',403);
       const state=await getRootBrowserIdentity(request,env);
       if(state.state==='disabled')return failure('中央浏览器签名服务不可用。',503);
+      // The visitor already explicitly approved both products earlier in
+      // THIS browser profile, and this is the follow-on of that same flow.
+      if(data.autoContinue===true
+        &&(state.state==='valid'||state.state==='rotated')
+        &&await approvedAutoConsent(request,material,state.id)){
+        const grant=await signed({
+          kind:'grant',host:data.host,local:data.local,nonce:data.nonce,
+          global:state.id,ts:Math.floor(Date.now()/1000),
+        },material);
+        return redirect('https://'+data.host+PATH+'/complete#grant='+grant);
+      }
       const csrf=nonce();
       const reply=html('授权共享匿名 Browser ID',
         '<p>你正在选择把本浏览器在 <strong>'+data.host
         +'</strong> 的匿名 ID 与 Vynalth AI 中央 Browser ID 关联。</p>'
         +'<p>不需要登录。两个域名各自保留 Cookie；不读取硬件、不读取 IP，'
         +'也不会在其他浏览器中自动识别你。你可在原网站解除关联。</p>'
+        +'<p><strong>自动关联两个网站：</strong>你可以一次授权，'
+        +'随后系统会依次打开 VynLink 和 ZoKivo 的第一方页面完成关联。'
+        +'这仅适用于当前浏览器资料，浏览器可能阻止跳转或清除 Cookie。</p>'
         +'<form method="post" action="'+PATH+'">'
         +'<input type="hidden" name="request" value="'+url.searchParams.get('request')+'">'
         +'<input type="hidden" name="csrf" value="'+csrf+'">'
         +'<input type="hidden" name="consent" value="yes">'
-        +'<button type="submit">我同意关联这个浏览器</button></form>'
+        +'<button type="submit" name="auto_all" value="yes">一次授权，自动关联两个网站</button> '
+        +'<button type="submit">仅关联当前网站</button></form>'
         +'<p><small>不点击则不会关联。授权凭证五分钟内有效。</small></p>');
       return setCookie(setIdentityCookie(reply,state),csrfSessionCookie(csrf));
     }
@@ -257,19 +312,30 @@ export async function handleAnonymousBrowserBridge(request,env,url){
     const centralId=await getRootBrowserIdentity(request,env);
     if(centralId.state!=='valid'&&centralId.state!=='rotated')
       return failure('请重新打开中央授权页面，保存第一方浏览器 Cookie。',428);
+    const all=values?.get('auto_all')==='yes';
+    const other=all?(stateRequest.host==='vynlink.xyz'?'zokivo.xyz':'vynlink.xyz'):null;
     const grant=await signed({
       kind:'grant',host:stateRequest.host,local:stateRequest.local,
-      nonce:stateRequest.nonce,global:centralId.id,ts:Math.floor(Date.now()/1000)
+      nonce:stateRequest.nonce,global:centralId.id,ts:Math.floor(Date.now()/1000),
+      next:other,
     },material);
-    return clearCsrf(redirect('https://'+stateRequest.host+PATH+'/complete#grant='+grant));
+    let response=clearCsrf(redirect('https://'+stateRequest.host+PATH+'/complete#grant='+grant));
+    if(all)response=await setAutoConsent(response,centralId.id,material);
+    return response;
   }
 
   if(target&&url.pathname===PATH&&request.method==='GET'){
+    // The explicit local opt-out takes precedence over a still-live central
+    // opt-in. Never auto-relink a browser that revoked this site's alias.
+    if(url.searchParams.get('auto')==='1'&&locallyRevoked(request))
+      return failure('本站已解除关联，请手动重新授权后才能再次连接。',409);
     const state=await getRootBrowserIdentity(request,env);
     if(state.state==='disabled')return failure('本站匿名浏览器 ID 暂不可用。',503);
     const challenge=nonce();
     const issued=await signed({kind:'request',host:url.hostname,
-      local:state.id,nonce:challenge,ts:Math.floor(Date.now()/1000)},material);
+      local:state.id,nonce:challenge,ts:Math.floor(Date.now()/1000),
+      autoContinue:url.searchParams.get('auto')==='1',
+    },material);
     let response=redirect(CENTRAL_ORIGIN+PATH+'?request='+encodeURIComponent(issued));
     response=setIdentityCookie(response,state);
     return setCookie(response,NONCE_COOKIE+'='+challenge
@@ -298,11 +364,15 @@ export async function handleAnonymousBrowserBridge(request,env,url){
         global:grant.global,host:url.hostname,consent:true,linkedAt:Date.now(),
       }),{expirationTtl:LINK_TTL});
     }catch{return failure('关联储存不可用。',503);}
+    const next=grant.next;
+    const autoNext=next&&TARGETS.has(next)&&next!==url.hostname;
     return setCookie(clearNonce(html('匿名 Browser ID 已关联',
       '<p>✅ <strong>'+url.hostname+'</strong> 已通过中央授权关联。</p>'
+      +(autoNext?'<p>你已明确同意自动关联两个网站。正在跳转至另一个网站完成安全关联。</p>':'')
       +'<p>返回本站时，将可查询同一个统一 Browser ID。</p>'
       +'<p><a class="button" href="/">返回网站</a></p>'
-      +'<p><small>本关联不是硬件身份验证，也不会改变现有设备封锁策略。</small></p>')),clearRevokeCookie(url.hostname));
+      +'<p><small>本关联不是硬件身份验证，也不会改变现有设备封锁策略。</small></p>'
+      +(autoNext?'<script src="'+PATH+'/auto-next.js" defer></script>':''))),clearRevokeCookie(url.hostname));
   }
 
   if(target&&url.pathname===PATH+'/unlink'){
