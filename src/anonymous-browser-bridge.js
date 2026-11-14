@@ -299,7 +299,7 @@ export async function handleAnonymousBrowserBridge(request,env,url){
         +'<input type="hidden" name="csrf" value="'+csrf+'">'
         +'<input type="hidden" name="consent" value="yes">'
         +'<button type="submit" name="auto_all" value="yes">一次授权，自动关联两个网站</button> '
-        +'<button type="submit">仅关联当前网站</button></form>'
+        +'<button type="submit">我同意关联这个浏览器</button></form>'
         +'<p><small>不点击则不会关联。授权凭证五分钟内有效。</small></p>');
       return setCookie(setIdentityCookie(reply,state),csrfSessionCookie(csrf));
     }
