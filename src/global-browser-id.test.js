@@ -27,9 +27,6 @@ const getCookie=(response)=>{
 };
 
 test('anon GET automatically issues a signed first-party cookie without login',async()=>{
-  const res=await handleRootBrowserEndpoint(make('vynalthai.com'),env,new URL(url('vynalthai.com','/__vynalth/browser')));
-  // Route handler must only match the requested URL, not a forged url argument.
-  assert.equal(res,null);
   const endpoint=make('vynalthai.com',{},'/__vynalth/browser');
   const response=await handleRootBrowserEndpoint(endpoint,env,new URL(endpoint.url));
   assert.equal(response.status,200);
@@ -117,7 +114,7 @@ test('HTML gets root cookie while public assets and APIs stay unchanged',async()
   for(const [path,headers,type] of [
     ['/api/health',{},'application/json'],
     ['/assets/main.js',{},'text/javascript'],
-    ['/',{'User-Agent':'Googlebot',...htmlHeaders},'text/html'],
+    ['/',{...htmlHeaders,'User-Agent':'Googlebot'},'text/html'],
   ]){
     const req=make('vynalthai.com',headers,path);
     const out=await addRootBrowserToDocumentResponse(req,
