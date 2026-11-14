@@ -172,6 +172,9 @@ export async function handleAnonymousBrowserBridge(request,env,url){
   const target=TARGETS.has(url.hostname);
   if(!central&&!target)return null;
   if(url.pathname===PATH+'/health'){
+    if(request.method!=='GET')return new Response(JSON.stringify({error:'METHOD_NOT_ALLOWED'}),{
+      status:405,headers:{'Content-Type':'application/json','Cache-Control':'no-store','Allow':'GET'}
+    });
     const enabled=Boolean(secret(env)&&storage(env));
     return new Response(JSON.stringify({
       service:'vynalth-anonymous-browser-bridge',
