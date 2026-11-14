@@ -163,7 +163,7 @@ export async function handleAnonymousBrowserBridge(request,env,url){
 
   if(target&&url.pathname===PATH+'/script.js'){
     if(request.method!=='GET')return failure('不支持此请求。',405);
-    const js="(()=>{try{const m=/^#grant=([A-Za-z0-9_-]{24,900}\\\\.[A-Za-z0-9_-]{43})$/.exec(location.hash);if(!m)return;history.replaceState(null,'',location.pathname+location.search);const f=document.getElementById('bridge-form');if(!f)return;f.elements.namedItem('grant').value=m[1];f.requestSubmit();}catch{}})();";
+    const js="(()=>{try{const m=/^#grant=([A-Za-z0-9_-]{24,900}\\.[A-Za-z0-9_-]{43})$/.exec(location.hash);if(!m)return;history.replaceState(null,'',location.pathname+location.search);const f=document.getElementById('bridge-form');if(!f)return;f.elements.namedItem('grant').value=m[1];f.requestSubmit();}catch{}})();";
     return new Response(js,{status:200,headers:{
       'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'public, max-age=3600',
       'X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin',
