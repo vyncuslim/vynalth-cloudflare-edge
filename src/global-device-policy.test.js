@@ -62,3 +62,63 @@ test('signed linked device observes central block and fails closed only for link
     assert.equal((await checkFederatedDeviceAccess(request,env,new URL(url))).status,503);
   } finally { globalThis.fetch=original; }
 });
+
+
+test('shared campus NAT does not merge devices or spread a linked-device block', async () => {
+  // TEST-NET address: do not check in an actual student's or campus's IP.
+  const sharedNetwork = {
+    'cf-connecting-ip': '192.0.2.82',
+    'x-ipinfo-residential-proxy': 'true',
+    'user-agent': 'CampusBrowser/1.0',
+  };
+  const a = await verifyEdgeDevice(new Request(url, { headers: sharedNetwork }), env);
+  const b = await verifyEdgeDevice(new Request(url, { headers: sharedNetwork }), env);
+  assert.notEqual(a.deviceId, b.deviceId, 'one public IP must not identify a browser');
+  const aCookie = buildEdgeDeviceCookie(a.token).split(';')[0];
+  const bCookie = buildEdgeDeviceCookie(b.token).split(';')[0];
+  const linkedCookie = await createGlobalDeviceCookie(host, a.deviceId, globalId, env);
+  const globalProof = linkedCookie.split(';')[0];
+  const requestA = new Request(url, { headers: {
+    ...sharedNetwork, cookie: aCookie + '; ' + globalProof,
+  } });
+  const requestB = new Request(url, { headers: {
+    ...sharedNetwork, cookie: bCookie,
+  } });
+  const mismatchedProof = new Request(url, { headers: {
+    ...sharedNetwork, cookie: bCookie + '; ' + globalProof,
+  } });
+  const original = globalThis.fetch;
+  let lookups = 0;
+  globalThis.fetch = async (_url, init) => {
+    lookups++;
+    const claim = JSON.parse(init.body);
+    assert.equal(claim.localDeviceId, a.deviceId);
+    assert.equal(claim.globalDeviceId, globalId);
+    return Response.json({ success: true, active: true, policy: { mode: 'block' } });
+  };
+  try {
+    const denied = await checkFederatedDeviceAccess(requestA, env, new URL(url));
+    assert.equal(denied?.status, 403);
+    assert.equal(await checkFederatedDeviceAccess(requestB, env, new URL(url)), null,
+      'unrelated campus browsers must not inherit a global block');
+    assert.equal(await checkFederatedDeviceAccess(mismatchedProof, env, new URL(url)), null,
+      'a global association cookie is bound to its own host-local device');
+    assert.equal(lookups, 1, 'do not query the blocked global ID for other browsers');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('same host-signed browser survives Wi-Fi to mobile-network rotation', async () => {
+  const issued = await verifyEdgeDevice(new Request(url, {
+    headers: { 'cf-connecting-ip': '192.0.2.82' },
+  }), env);
+  const later = await verifyEdgeDevice(new Request(url, { headers: {
+    'cf-connecting-ip': '198.51.100.19',
+    'x-ipinfo-residential-proxy': 'false',
+    cookie: buildEdgeDeviceCookie(issued.token).split(';')[0],
+  } }), env);
+  assert.equal(later.state, 'valid');
+  assert.equal(later.deviceId, issued.deviceId,
+    'an IP change cannot silently reset a valid local browser identity');
+});
