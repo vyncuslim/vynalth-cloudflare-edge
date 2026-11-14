@@ -143,6 +143,14 @@ export async function handleRootBrowserEndpoint(request,env,url) {
     globalBrowserId:linkedGlobal||state.id,
     siteBrowserId:state.id,
     crossRootLinked:Boolean(linkedGlobal),
+    // Only explicit, first-party human approval can enable a cross-root link.
+    bridgeAvailable:env?.ANON_BROWSER_BRIDGE_ENABLED==='true'
+      && Boolean(env?.CONSENT_KV)
+      && (state.root==='vynlink.xyz'||state.root==='zokivo.xyz'),
+    connectPath:state.root==='vynlink.xyz'||state.root==='zokivo.xyz'
+      ?'/__vynalth/browser/bridge':null,
+    unlinkPath:state.root==='vynlink.xyz'||state.root==='zokivo.xyz'
+      ?'/__vynalth/browser/bridge/unlink':null,
     browserCredentialSigned:true,
     credentialState:state.state,
     lifetimeDays:90,
