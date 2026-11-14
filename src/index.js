@@ -17,6 +17,7 @@ import { handleVercelDrain } from "./vercel-log-drain.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
+import { handleRootBrowserEndpoint, addRootBrowserToDocumentResponse } from "./global-browser-id.js";
 import { applyVpnPageGradient } from "./vpn-page-gradient.js";
 import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
 import { checkFederatedDeviceAccess } from "./global-device-policy.js";
@@ -368,6 +369,13 @@ export default {
       return observedResponse(deviceStatus, request, incomingUrl, requestId, rootDomain);
     }
 
+    // First-party root-wide anonymous Browser ID; not a physical Device ID,
+    // cross-browser proof or authorization. Does not bypass WAF or IP policy.
+    const browserIdentity = await handleRootBrowserEndpoint(request,env,incomingUrl);
+    if (browserIdentity) {
+      return observedResponse(browserIdentity,request,incomingUrl,requestId,rootDomain);
+    }
+
     // GPS and Cookie Consent are independent modules in ONE existing Worker.
     // Signed canonical SSO trust/contact/status is exempt from this GPS
     // challenge, but does not bypass unrelated WAF or mandatory auth.
@@ -479,7 +487,10 @@ export default {
     // Only vpn.page.vynalthai.com HTML documents receive their full-page
     // gradient experiment. Preserve all existing origin APIs, installers,
     // redirects, signed device cookies and other hostnames byte-for-byte.
-    const themedResponse = applyVpnPageGradient(finalResponse, request, incomingUrl);
+    const browserResponse = await addRootBrowserToDocumentResponse(
+      request,finalResponse,env,incomingUrl,
+    );
+    const themedResponse = applyVpnPageGradient(browserResponse, request, incomingUrl);
     return observedResponse(
       themedResponse,
       request,

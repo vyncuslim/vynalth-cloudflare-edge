@@ -52,6 +52,11 @@ SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"
 # insecure device cookie is issued.
 EDGE_DEVICE_ID_ENABLED = "true"
 EDGE_DEVICE_ALLOW_DERIVED_KEY = "true"
+# Anonymous first-party Global Browser ID. Signed, HttpOnly and shared only
+# between subdomains of the same managed registrable domain. Different roots
+# and different browser profiles receive unrelated IDs; never use for auth,
+# hardware identification or global blocks. Operator emergency stop: "false".
+ROOT_BROWSER_ID_ENABLED = "true"
 # Automatic availability: no anonymous cross-site linkage. Each account-linked
 # browser still requires a first-party, explicit, one-time consent code.
 # Set this variable to "false" for an immediate operator-controlled rollback.
