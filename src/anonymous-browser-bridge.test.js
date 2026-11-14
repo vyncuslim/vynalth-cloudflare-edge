@@ -221,3 +221,27 @@ test('anonymous ordinary page identity never silently writes cross-root links',a
   assert.equal(b.scope,'first-party-root');
   assert.equal(env.CONSENT_KV.calls.filter(x=>x[0]==='put').length,0);
 });
+
+test('public bridge health reveals no identifiers and fails closed without signing or KV',async()=>{
+  const env=mock();
+  for(const host of ['vynalthai.com','vynlink.xyz','zokivo.xyz']){
+    const response=await route(req(host,bridge+'/health'),env);
+    assert.equal(response.status,200);
+    const data=await response.json();
+    assert.deepEqual(data,{
+      service:'vynalth-anonymous-browser-bridge',
+      version:'consent-v1',
+      enabled:true,
+      host,
+      consentRequired:true,
+      crossBrowserLinking:false,
+      securityAuthorization:false,
+    });
+    assert.equal(response.headers.get('set-cookie'),null);
+  }
+  const disabled=await route(req('vynlink.xyz',bridge+'/health'),
+    {...env,ANON_BROWSER_BRIDGE_ENABLED:'false'});
+  assert.equal(disabled.status,503);
+  const postHealth=await route(post('vynlink.xyz',bridge+'/health',{},''),env);
+  assert.equal(postHealth.status,405);
+});
