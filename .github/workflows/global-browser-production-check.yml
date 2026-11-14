@@ -1,0 +1,44 @@
+name: Global Browser ID Production Verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/global-browser-id.js'
+      - 'src/index.js'
+      - 'wrangler.toml'
+      - 'scripts/check-global-browser-production.mjs'
+      - '.github/workflows/global-browser-production-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: global-browser-production-check
+  cancel-in-progress: true
+
+jobs:
+  live-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout production source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check Node runtime
+        run: node --version
+      - name: Verify live Cloudflare routes and anonymous cross-subdomain continuity
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4; do
+            echo "Global Browser ID live verification attempt $attempt/4"
+            if node scripts/check-global-browser-production.mjs; then
+              echo "Verified from public endpoint; this does NOT attest different browsers or root domains share IDs."
+              exit 0
+            fi
+            if [ "$attempt" -ne 4 ]; then sleep 30; fi
+          done
+          echo "::error::Production Cloudflare Global Browser ID verification FAILED. Cloudflare Workers Builds, DNS/routes, WAF or signing configuration require investigation."
+          exit 1
