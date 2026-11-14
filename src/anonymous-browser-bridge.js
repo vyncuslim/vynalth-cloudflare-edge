@@ -171,6 +171,24 @@ export async function handleAnonymousBrowserBridge(request,env,url){
   const central=url.hostname===CENTRAL;
   const target=TARGETS.has(url.hostname);
   if(!central&&!target)return null;
+  if(url.pathname===PATH+'/health'){
+    const enabled=Boolean(secret(env)&&storage(env));
+    return new Response(JSON.stringify({
+      service:'vynalth-anonymous-browser-bridge',
+      version:'consent-v1',
+      enabled,
+      host:url.hostname,
+      consentRequired:true,
+      crossBrowserLinking:false,
+      securityAuthorization:false,
+    }),{status:enabled?200:503,headers:{
+      'Content-Type':'application/json; charset=utf-8',
+      'Cache-Control':'private, no-store, max-age=0',
+      'X-Robots-Tag':'noindex, nofollow',
+      'X-Content-Type-Options':'nosniff',
+      'Access-Control-Allow-Credentials':'false',
+    }});
+  }
   if(url.pathname!==PATH&&url.pathname!==PATH+'/complete'&&url.pathname!==PATH+'/script.js'
      &&url.pathname!==PATH+'/unlink')return null;
   if(!secret(env)||!storage(env))return failure('服务未配置，关联未启用。',503);
