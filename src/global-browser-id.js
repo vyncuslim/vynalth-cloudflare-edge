@@ -134,7 +134,7 @@ export async function handleRootBrowserEndpoint(request,env,url) {
   let linkedGlobal=null;
   if(request.method==='GET' && (state.state==='valid'||state.state==='rotated')){
     const {readConsentedBrowserLink}=await import('./anonymous-browser-bridge.js');
-    linkedGlobal=await readConsentedBrowserLink(env,state.root,state.id);
+    linkedGlobal=await readConsentedBrowserLink(env,state.root,state.id,request);
   }
   const body=request.method==='HEAD'?null:JSON.stringify({
     enabled:true,
