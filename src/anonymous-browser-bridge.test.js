@@ -123,7 +123,7 @@ test('signed grant cannot be redeemed in another browser or on another domain',a
   const grant=(await approve(start.centralUrl,env)).grant;
   const wrongBrowser=await complete('vynlink.xyz',env,
     named(await route(req('zokivo.xyz'),env),'__Secure-vyn_browser'),start.nonce,grant);
-  assert.equal(wrongBrowser.status,403);
+  assert.equal(wrongBrowser.status,428);
   const wrongHost=await complete('zokivo.xyz',env,start.local,start.nonce,grant);
   assert.equal(wrongHost.status,403);
   const tampered=grant.slice(0,-1)+(grant.endsWith('a')?'b':'a');
