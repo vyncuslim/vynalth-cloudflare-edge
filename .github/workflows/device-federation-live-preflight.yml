@@ -1,0 +1,30 @@
+name: Device Federation Live Route Preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/device-federation-live-preflight.yml'
+      - 'scripts/check-device-federation.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: device-federation-preflight
+  cancel-in-progress: true
+
+jobs:
+  read-only-routing-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout reviewed repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check Node runtime
+        run: node --version
+      - name: Verify managed hosts without pairing, login or secret access
+        run: node scripts/check-device-federation.mjs
