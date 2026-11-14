@@ -1,0 +1,44 @@
+name: Anonymous Browser Bridge Live Verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/anonymous-browser-bridge.js'
+      - 'src/global-browser-id.js'
+      - 'src/index.js'
+      - 'wrangler.toml'
+      - 'scripts/check-anonymous-browser-bridge.mjs'
+      - '.github/workflows/anonymous-browser-bridge-live.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anonymous-browser-bridge-live
+  cancel-in-progress: true
+
+jobs:
+  live-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout reviewed Worker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify three Cloudflare production hosts without user data
+        shell: bash
+        run: |
+          node --version
+          for attempt in 1 2 3 4 5; do
+            echo "Production Bridge readiness check attempt $attempt/5"
+            if node scripts/check-anonymous-browser-bridge.mjs; then
+              echo "Cloudflare Worker bridge health endpoints are live; actual consented browser E2E still requires interactive verification."
+              exit 0
+            fi
+            if [ "$attempt" -ne 5 ]; then sleep 30; fi
+          done
+          echo "::error::Bridge not confirmed live across all three Cloudflare hosts. Check Workers Builds, routes, secrets and WAF."
+          exit 1

@@ -57,6 +57,12 @@ EDGE_DEVICE_ALLOW_DERIVED_KEY = "true"
 # and different browser profiles receive unrelated IDs; never use for auth,
 # hardware identification or global blocks. Operator emergency stop: "false".
 ROOT_BROWSER_ID_ENABLED = "true"
+# Voluntary, anonymous cross-root ID federation for vynlink.xyz and zokivo.xyz.
+# No background bounce tracking, fingerprinting or account login. Requires a
+# visible central consent click and host-bound signed grant. Uses existing
+# CONSENT_KV only for revocable identity display aliases, never enforcement.
+# Operator emergency stop: "false" (local root-scoped IDs keep working).
+ANON_BROWSER_BRIDGE_ENABLED = "true"
 # Automatic availability: no anonymous cross-site linkage. Each account-linked
 # browser still requires a first-party, explicit, one-time consent code.
 # Set this variable to "false" for an immediate operator-controlled rollback.

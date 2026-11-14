@@ -127,11 +127,30 @@ export async function handleRootBrowserEndpoint(request,env,url) {
   if (state.state==='disabled')
     return new Response(JSON.stringify({enabled:false,reason:'SIGNING_NOT_CONFIGURED'}),
       {status:503,headers});
+  // A central, explicit opt-in record can identify this browser across
+  // separately owned first-party roots. It never affects auth or device bans.
+  // KV is eventually consistent; after approval, the link may take time
+  // to become visible and a read failure leaves the local ID unchanged.
+  let linkedGlobal=null;
+  if(request.method==='GET' && (state.state==='valid'||state.state==='rotated')){
+    const {readConsentedBrowserLink}=await import('./anonymous-browser-bridge.js');
+    linkedGlobal=await readConsentedBrowserLink(env,state.root,state.id,request);
+  }
   const body=request.method==='HEAD'?null:JSON.stringify({
     enabled:true,
-    scope:'first-party-root',
+    scope:linkedGlobal?'consented-cross-root':'first-party-root',
     rootDomain:state.root,
-    globalBrowserId:state.id,
+    globalBrowserId:linkedGlobal||state.id,
+    siteBrowserId:state.id,
+    crossRootLinked:Boolean(linkedGlobal),
+    // Only explicit, first-party human approval can enable a cross-root link.
+    bridgeAvailable:env?.ANON_BROWSER_BRIDGE_ENABLED==='true'
+      && Boolean(env?.CONSENT_KV)
+      && (state.root==='vynlink.xyz'||state.root==='zokivo.xyz'),
+    connectPath:state.root==='vynlink.xyz'||state.root==='zokivo.xyz'
+      ?'/__vynalth/browser/bridge':null,
+    unlinkPath:state.root==='vynlink.xyz'||state.root==='zokivo.xyz'
+      ?'/__vynalth/browser/bridge/unlink':null,
     browserCredentialSigned:true,
     credentialState:state.state,
     lifetimeDays:90,
@@ -139,7 +158,7 @@ export async function handleRootBrowserEndpoint(request,env,url) {
     hardwareVerified:false,
     crossBrowserLinked:false,
     securityAuthorization:false,
-    warning:'This is not a hardware ID; other root domains and browsers use separate identities.',
+    warning:'Not a hardware ID or authorization. Separate browsers are not linked. Other roots require explicit approval.',
   });
   let response=new Response(body,{status:200,headers});
   if (request.method==='GET' && state.shouldSetCookie)

@@ -18,6 +18,7 @@ import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleRootBrowserEndpoint, addRootBrowserToDocumentResponse } from "./global-browser-id.js";
+import { handleAnonymousBrowserBridge } from "./anonymous-browser-bridge.js";
 import { applyVpnPageGradient } from "./vpn-page-gradient.js";
 import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
 import { checkFederatedDeviceAccess } from "./global-device-policy.js";
@@ -367,6 +368,14 @@ export default {
     const deviceStatus = await handleEdgeDeviceEndpoint(request, env, incomingUrl);
     if (deviceStatus) {
       return observedResponse(deviceStatus, request, incomingUrl, requestId, rootDomain);
+    }
+
+    // Explicit human-approved anonymous cross-root Browser ID federation.
+    // No automatic redirects from ordinary browsing, no account login, no
+    // tracking-protection bypass. WAF and temporary security blocks still run.
+    const anonymousBridge=await handleAnonymousBrowserBridge(request,env,incomingUrl);
+    if(anonymousBridge){
+      return observedResponse(anonymousBridge,request,incomingUrl,requestId,rootDomain);
     }
 
     // First-party root-wide anonymous Browser ID; not a physical Device ID,
