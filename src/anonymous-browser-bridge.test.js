@@ -177,12 +177,21 @@ test('explicit unlink removes association without altering local browser ID or s
   const screen=await route(req('vynlink.xyz',bridge+'/unlink'),env);
   assert.equal(screen.status,200);
   assert.ok((await screen.text()).includes('解除关联'));
+  const previous=[...env.CONSENT_KV.values.entries()][0];
   const after=await route(post('vynlink.xyz',bridge+'/unlink',{},start.local),env);
   assert.equal(after.status,200);
+  const optout=named(after,'__Secure-vyn_browser_bridge_optout');
+  assert.equal(optout,'__Secure-vyn_browser_bridge_optout=1');
   const result=await status('vynlink.xyz',start.local,env);
   assert.equal(result.crossRootLinked,false);
   assert.equal(result.globalBrowserId,before.siteBrowserId);
   assert.equal(result.siteBrowserId,before.siteBrowserId);
+  // Simulate eventual KV replicas returning an old value even after delete.
+  // The browser-side opt-out must immediately override stale alias results.
+  env.CONSENT_KV.values.set(previous[0],previous[1]);
+  const stale=await status('vynlink.xyz',start.local+'; '+optout,env);
+  assert.equal(stale.crossRootLinked,false);
+  assert.equal(stale.globalBrowserId,before.siteBrowserId);
   assert.equal(env.CONSENT_KV.calls.filter(x=>x[0]==='delete').length,1);
 });
 
