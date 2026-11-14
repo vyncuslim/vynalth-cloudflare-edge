@@ -6,7 +6,7 @@ This feature **keeps** `https://vynlink.xyz` and `https://zokivo.xyz` as separat
 
 The anonymous visitor initiates linkage at each host once, reviews a visible approval screen hosted as a first-party page at `https://vynalthai.com`, then approves. A signed grant is delivered as a URL **fragment** on the way back, stripped from the browser address before a same-origin POST. Each site retains its own first-party cookie and stores a *pseudonymous ID alias* in the existing `CONSENT_KV` namespace.
 
-No Vynalth account or password is needed. **One deliberate approval on each target website is required**; there is no invisible cross-browser or cross-site association.
+No Vynalth account or password is needed. The default **per-site approval** remains available. As an alternative, the central page now offers **"一次授权，自动关联两个网站"**: one transparent approval authorizes a short 15-minute first-party auto-consent for **exactly** VynLink and ZoKivo, then navigates through both branded first-party domains to complete their individual signed-cookie linkages. Ordinary homepages never silently redirect; opt-out suppresses auto-relink. This is not invisible or involuntary tracking, and browsers may interrupt the opt-in navigation chain.
 
 ## Public user flow
 
@@ -55,3 +55,14 @@ Set `ANON_BROWSER_BRIDGE_ENABLED="false"` in the Cloudflare Worker environment a
 ## Public production health checks
 
 Run `node scripts/check-anonymous-browser-bridge.mjs` to query `GET /__vynalth/browser/bridge/health` on `vynalthai.com`, `vynlink.xyz` and `zokivo.xyz`. The check confirms a 200 response from the expected Cloudflare Worker, `version:consent-v1`, and `enabled:true`, without user cookies or visitor IDs. The companion `Anonymous Browser Bridge Live Verification` GitHub Action runs after the reviewed Worker updates reach `main`; it does **not** certify actual consent in Chrome/Firefox or any physical-device identity.
+
+## Auto-setup from one explicit approval
+
+1. Open either target's existing voluntary `/__vynalth/browser/bridge` entry point.
+2. On the central consent page choose **一次授权，自动关联两个网站**. Choosing the legacy **我同意关联这个浏览器** continues to link just the selected site.
+3. The chosen target validates its first-party nonce and signed grant, saves an alias, and shows an intermediate success page that continues to the other branded first-party site. The other site generates its own local ID and signed request; the central service returns a host-scoped grant automatically only because a **15-minute, signed central auto-consent cookie** was created by the preceding explicit choice.
+4. After completion, both root domains use different local first-party signed cookies and the same central display ID. No cookie is directly copied across roots.
+5. If the second site is blocked, loses cookies, or the auto-consent expires, the system stops and shows a consent/error page instead of guessing an identity. The user can still use either website independently. This is **not** a silent guarantee across Firefox, Chrome, Safari or separate profiles.
+6. Unlinking a site sets its first-party opt-out cookie, and that site's opt-out overrides the still-active central auto-consent, preventing involuntary re-linkage.
+
+Public automatic completion is limited to a visitor-initiated, already-approved enrollment flow. There is **no** automatic bridge on normal anonymous page visits. Never use this system for security authorization or physical-device identification.

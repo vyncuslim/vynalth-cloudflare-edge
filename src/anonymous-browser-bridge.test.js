@@ -271,3 +271,98 @@ test('public bridge health reveals no identifiers and fails closed without signi
   const postHealth=await route(post('vynlink.xyz',bridge+'/health',{},''),env);
   assert.equal(postHealth.status,405);
 });
+
+
+test('one explicit auto-all consent links both roots without second approval click',async()=>{
+  const env=mock();
+  const first=await begin('vynlink.xyz',env);
+  const initial=await route(new Request(first.centralUrl),env);
+  assert.equal(initial.status,200);
+  const page=await initial.text();
+  assert.match(page,/一次授权，自动关联两个网站/);
+  const centralCookie=named(initial,'__Secure-vyn_browser');
+  const csrfCookie=named(initial,'__Host-vyn_browser_bridge_csrf');
+  const request=page.match(/name="request" value="([^"]+)"/)?.[1];
+  const csrf=page.match(/name="csrf" value="([^"]+)"/)?.[1];
+  const approved=await route(post('vynalthai.com',bridge,
+    {request,csrf,consent:'yes',auto_all:'yes'},centralCookie+'; '+csrfCookie,'null','absent'),env);
+  assert.equal(approved.status,303);
+  const autoCookie=named(approved,'__Host-vyn_browser_bridge_auto');
+  assert.ok(autoCookie.includes('.'));
+  const firstGrant=new URL(approved.headers.get('Location')).hash.slice('#grant='.length);
+  const completed=await complete('vynlink.xyz',env,first.local,first.nonce,firstGrant);
+  assert.equal(completed.status,200);
+  assert.match(await completed.text(),/auto-next\.js/);
+  const nextJs=await route(req('vynlink.xyz',bridge+'/auto-next.js'),env);
+  assert.equal(nextJs.status,200);
+  const nextScript=await nextJs.text();
+  assert.match(nextScript,/zokivo\.xyz/);
+  // Only the successful first-party callback includes the next-hop script.
+  const second=await route(req('zokivo.xyz',bridge+'?auto=1'),env);
+  assert.equal(second.status,303);
+  const secondLocal=named(second,'__Secure-vyn_browser');
+  const secondNonce=named(second,'__Host-vyn_browser_bridge_state');
+  const automaticallyApproved=await route(new Request(second.headers.get('Location'),{
+    headers:{Cookie:centralCookie+'; '+autoCookie}
+  }),env);
+  // The central first-party cookie proves the earlier user consent. No
+  // second form click or exposure of a shared root cookie was necessary.
+  assert.equal(automaticallyApproved.status,303);
+  assert.equal(automaticallyApproved.headers.get('set-cookie'),null);
+  const secondTarget=new URL(automaticallyApproved.headers.get('Location'));
+  assert.equal(secondTarget.hostname,'zokivo.xyz');
+  const secondGrant=secondTarget.hash.slice('#grant='.length);
+  const done=await complete('zokivo.xyz',env,secondLocal,secondNonce,secondGrant);
+  assert.equal(done.status,200);
+  assert.doesNotMatch(await done.text(),/auto-next\.js/);
+  const firstId=await status('vynlink.xyz',first.local,env);
+  const secondId=await status('zokivo.xyz',secondLocal,env);
+  assert.equal(firstId.globalBrowserId,secondId.globalBrowserId);
+  assert.notEqual(firstId.siteBrowserId,secondId.siteBrowserId);
+  assert.equal(firstId.scope,'consented-cross-root');
+  assert.equal(secondId.scope,'consented-cross-root');
+  assert.equal(env.CONSENT_KV.calls.filter(x=>x[0]==='put').length,2);
+});
+
+test('no auto-all consent means next brand requires its own deliberate approval',async()=>{
+  const env=mock();
+  const first=await begin('vynlink.xyz',env);
+  const approved=await approve(first.centralUrl,env);
+  const result=await complete('vynlink.xyz',env,first.local,first.nonce,approved.grant);
+  assert.doesNotMatch(await result.text(),/auto-next\.js/);
+  const next=await route(req('zokivo.xyz',bridge+'?auto=1'),env);
+  const screen=await route(new Request(next.headers.get('Location'),{
+    headers:{Cookie:approved.centralCookie},
+  }),env);
+  assert.equal(screen.status,200);
+  assert.match(await screen.text(),/一次授权，自动关联两个网站/);
+  assert.equal(env.CONSENT_KV.calls.filter(x=>x[0]==='put').length,1);
+});
+
+test('auto consent is browser-bound and local opt-out forbids auto-relink',async()=>{
+  const env=mock(),first=await begin('vynlink.xyz',env);
+  const initial=await route(new Request(first.centralUrl),env);
+  const p=await initial.text();
+  const central=named(initial,'__Secure-vyn_browser');
+  const csrfCookie=named(initial,'__Host-vyn_browser_bridge_csrf');
+  const request=p.match(/name="request" value="([^"]+)"/)?.[1];
+  const csrf=p.match(/name="csrf" value="([^"]+)"/)?.[1];
+  const a=await route(post('vynalthai.com',bridge,{request,csrf,consent:'yes',auto_all:'yes'},
+    central+'; '+csrfCookie),env);
+  const auto=named(a,'__Host-vyn_browser_bridge_auto');
+  const second=await route(req('zokivo.xyz',bridge+'?auto=1'),env);
+  const centralUrl=second.headers.get('Location');
+  // Never auto-approve when central first-party identity cookie is absent.
+  const withoutCentral=await route(new Request(centralUrl,{headers:{Cookie:auto}}),env);
+  assert.equal(withoutCentral.status,200);
+  assert.match(await withoutCentral.text(),/授权共享匿名 Browser ID/);
+  // Forged consent also cannot auto approve.
+  const tampered=auto.slice(0,-1)+(auto.endsWith('a')?'b':'a');
+  const forged=await route(new Request(centralUrl,{headers:{Cookie:central+'; '+tampered}}),env);
+  assert.equal(forged.status,200);
+  // Even a recent central auto consent never overrides this site's opt-out.
+  const denied=await route(req('zokivo.xyz',bridge+'?auto=1',{
+    headers:{Cookie:'__Secure-vyn_browser_bridge_optout=1'},
+  }),env);
+  assert.equal(denied.status,409);
+});
