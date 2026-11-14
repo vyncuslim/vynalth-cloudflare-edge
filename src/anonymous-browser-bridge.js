@@ -18,6 +18,7 @@ const CENTRAL='vynalthai.com';
 const CENTRAL_ORIGIN='https://'+CENTRAL;
 const TARGETS=new Set(['vynlink.xyz','zokivo.xyz']);
 const NONCE_COOKIE='__Host-vyn_browser_bridge_state';
+const CSRF_COOKIE='__Host-vyn_browser_bridge_csrf';
 const OPT_OUT_COOKIE='__Secure-vyn_browser_bridge_optout';
 const GRANT_TTL=300;
 const LINK_TTL=90*86400;
@@ -90,11 +91,17 @@ async function verified(token,material,kind,nowMs=Date.now()){
     ||(kind==='grant'&&!UUID.test(String(data.global||''))))return null;
   return data;
 }
-function nonceCookie(request){
+function secureCookieValue(request,name){
   const list=String(request.headers.get('cookie')||'').split(';').map(x=>x.trim())
-    .filter(x=>x.startsWith(NONCE_COOKIE+'='));
+    .filter(x=>x.startsWith(name+'='));
   if(list.length!==1)return '';
-  return list[0].slice(NONCE_COOKIE.length+1);
+  return list[0].slice(name.length+1);
+}
+function nonceCookie(request){return secureCookieValue(request,NONCE_COOKIE);}
+function csrfCookie(request){return secureCookieValue(request,CSRF_COOKIE);}
+function csrfValid(request,values){
+  const token=String(values?.get('csrf')||'');
+  return NONCE.test(token)&&token===csrfCookie(request);
 }
 function setCookie(response,cookie){
   const h=new Headers(response.headers);h.append('Set-Cookie',cookie);
@@ -105,6 +112,12 @@ function setIdentityCookie(response,state){
 }
 function clearNonce(response){
   return setCookie(response,NONCE_COOKIE+'=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax');
+}
+function clearCsrf(response){
+  return setCookie(response,CSRF_COOKIE+'=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax');
+}
+function csrfSessionCookie(value){
+  return CSRF_COOKIE+'='+value+'; Path=/; Max-Age=300; Secure; HttpOnly; SameSite=Lax';
 }
 function revokeCookie(host){
   return OPT_OUT_COOKIE+'=1; Domain='+host+'; Path=/; Max-Age='+LINK_TTL
@@ -118,10 +131,18 @@ function locallyRevoked(request){
     .some(item=>item.trim()===OPT_OUT_COOKIE+'=1');
 }
 function allowedPost(request,host){
-  return request.method==='POST'
-    && request.headers.get('Origin')==='https://'+host
-    && request.headers.get('Sec-Fetch-Site')==='same-origin'
-    && String(request.headers.get('Content-Type')||'').startsWith('application/x-www-form-urlencoded');
+  if(request.method!=='POST'||
+    !String(request.headers.get('Content-Type')||'').startsWith('application/x-www-form-urlencoded'))
+    return false;
+  const origin=request.headers.get('Origin');
+  const site=request.headers.get('Sec-Fetch-Site');
+  // Browser and privacy-proxy sandboxes may send Origin:null and omit
+  // Fetch Metadata. In that case, enforce an explicit first-party CSRF
+  // challenge (consent/unlink) or a host-bound signed grant + nonce (callback).
+  // A wrong concrete origin or explicit cross-site signal always fails.
+  if(origin&&origin!=='null'&&origin!=='https://'+host)return false;
+  if(site&&site!=='same-origin')return false;
+  return true;
 }
 async function form(request){
   if(Number(request.headers.get('Content-Length')||0)>4000)return null;
@@ -213,6 +234,7 @@ export async function handleAnonymousBrowserBridge(request,env,url){
       if(!data)return failure('请求已过期或签名无效，请从原网站重新开始。',403);
       const state=await getRootBrowserIdentity(request,env);
       if(state.state==='disabled')return failure('中央浏览器签名服务不可用。',503);
+      const csrf=nonce();
       const reply=html('授权共享匿名 Browser ID',
         '<p>你正在选择把本浏览器在 <strong>'+data.host
         +'</strong> 的匿名 ID 与 Vynalth AI 中央 Browser ID 关联。</p>'
@@ -220,13 +242,15 @@ export async function handleAnonymousBrowserBridge(request,env,url){
         +'也不会在其他浏览器中自动识别你。你可在原网站解除关联。</p>'
         +'<form method="post" action="'+PATH+'">'
         +'<input type="hidden" name="request" value="'+url.searchParams.get('request')+'">'
+        +'<input type="hidden" name="csrf" value="'+csrf+'">'
         +'<input type="hidden" name="consent" value="yes">'
         +'<button type="submit">我同意关联这个浏览器</button></form>'
         +'<p><small>不点击则不会关联。授权凭证五分钟内有效。</small></p>');
-      return setIdentityCookie(reply,state);
+      return setCookie(setIdentityCookie(reply,state),csrfSessionCookie(csrf));
     }
     if(!allowedPost(request,CENTRAL))return failure('来源验证失败。',403);
     const values=await form(request);
+    if(!csrfValid(request,values))return failure('授权页面验证失败，请重新打开。',403);
     if(values?.get('consent')!=='yes')return failure('未取得同意。',403);
     const stateRequest=await verified(values.get('request'),material,'request');
     if(!stateRequest)return failure('关联请求过期或已被修改。',403);
@@ -237,7 +261,7 @@ export async function handleAnonymousBrowserBridge(request,env,url){
       kind:'grant',host:stateRequest.host,local:stateRequest.local,
       nonce:stateRequest.nonce,global:centralId.id,ts:Math.floor(Date.now()/1000)
     },material);
-    return redirect('https://'+stateRequest.host+PATH+'/complete#grant='+grant);
+    return clearCsrf(redirect('https://'+stateRequest.host+PATH+'/complete#grant='+grant));
   }
 
   if(target&&url.pathname===PATH&&request.method==='GET'){
@@ -282,17 +306,23 @@ export async function handleAnonymousBrowserBridge(request,env,url){
   }
 
   if(target&&url.pathname===PATH+'/unlink'){
-    if(request.method==='GET')return html('解除匿名身份关联',
-      '<p>此操作会解除本站 Browser ID 与中央 ID 的关联，'
-      +'但不会删除其他网站的 Cookie 或账号。</p>'
-      +'<form method="post" action="'+PATH+'/unlink">'
-      +'<button type="submit">确认解除关联</button></form>');
+    if(request.method==='GET'){
+      const csrf=nonce();
+      return setCookie(html('解除匿名身份关联',
+        '<p>此操作会解除本站 Browser ID 与中央 ID 的关联，'
+        +'但不会删除其他网站的 Cookie 或账号。</p>'
+        +'<form method="post" action="'+PATH+'/unlink">'
+        +'<input type="hidden" name="csrf" value="'+csrf+'">'
+        +'<button type="submit">确认解除关联</button></form>'),csrfSessionCookie(csrf));
+    }
     if(!allowedPost(request,url.hostname))return failure('来源验证失败。',403);
+    const values=await form(request);
+    if(!csrfValid(request,values))return failure('解除关联验证失败，请重新打开页面。',403);
     const state=await getRootBrowserIdentity(request,env);
     if(state.state!=='valid'&&state.state!=='rotated')return failure('本站身份验证失败。',428);
     try{await storage(env).delete(linkKey(url.hostname,state.id));}
     catch{return failure('解除关联失败，请稍后再试。',503);}
-    return setCookie(html('关联已解除','<p>✅ 本站已恢复独立 Browser ID。</p><p><a class="button" href="/">返回网站</a></p>'),revokeCookie(url.hostname));
+    return clearCsrf(setCookie(html('关联已解除','<p>✅ 本站已恢复独立 Browser ID。</p><p><a class="button" href="/">返回网站</a></p>'),revokeCookie(url.hostname)));
   }
 
   return failure('不支持此请求。',405);
