@@ -18,6 +18,7 @@ const CENTRAL='vynalthai.com';
 const CENTRAL_ORIGIN='https://'+CENTRAL;
 const TARGETS=new Set(['vynlink.xyz','zokivo.xyz']);
 const NONCE_COOKIE='__Host-vyn_browser_bridge_state';
+const OPT_OUT_COOKIE='__Secure-vyn_browser_bridge_optout';
 const GRANT_TTL=300;
 const LINK_TTL=90*86400;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -105,6 +106,17 @@ function setIdentityCookie(response,state){
 function clearNonce(response){
   return setCookie(response,NONCE_COOKIE+'=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax');
 }
+function revokeCookie(host){
+  return OPT_OUT_COOKIE+'=1; Domain='+host+'; Path=/; Max-Age='+LINK_TTL
+    +'; Secure; HttpOnly; SameSite=Lax';
+}
+function clearRevokeCookie(host){
+  return OPT_OUT_COOKIE+'=; Domain='+host+'; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax';
+}
+function locallyRevoked(request){
+  return String(request?.headers?.get('cookie')||'').split(';')
+    .some(item=>item.trim()===OPT_OUT_COOKIE+'=1');
+}
 function allowedPost(request,host){
   return request.method==='POST'
     && request.headers.get('Origin')==='https://'+host
@@ -142,7 +154,10 @@ function redirect(location){
 function linkKey(host,id){return 'gbid:consented-link:v1:'+host+':'+id;}
 
 /** Only explicit first-party links can override the root-scoped display ID. */
-export async function readConsentedBrowserLink(env,root,localId){
+export async function readConsentedBrowserLink(env,root,localId,request){
+  // Immediate browser-local opt-out overrides an eventually consistent KV
+  // replica. New user consent clears this first-party root-scoped cookie.
+  if(locallyRevoked(request))return null;
   if(!secret(env)||!storage(env)||!TARGETS.has(root)||!UUID.test(String(localId||'')))return null;
   try {
     const row=await storage(env).get(linkKey(root,localId),'json');
@@ -238,11 +253,11 @@ export async function handleAnonymousBrowserBridge(request,env,url){
         global:grant.global,host:url.hostname,consent:true,linkedAt:Date.now(),
       }),{expirationTtl:LINK_TTL});
     }catch{return failure('关联储存不可用。',503);}
-    return clearNonce(html('匿名 Browser ID 已关联',
+    return setCookie(clearNonce(html('匿名 Browser ID 已关联',
       '<p>✅ <strong>'+url.hostname+'</strong> 已通过中央授权关联。</p>'
       +'<p>返回本站时，将可查询同一个统一 Browser ID。</p>'
       +'<p><a class="button" href="/">返回网站</a></p>'
-      +'<p><small>本关联不是硬件身份验证，也不会改变现有设备封锁策略。</small></p>'));
+      +'<p><small>本关联不是硬件身份验证，也不会改变现有设备封锁策略。</small></p>')),clearRevokeCookie(url.hostname));
   }
 
   if(target&&url.pathname===PATH+'/unlink'){
@@ -256,7 +271,7 @@ export async function handleAnonymousBrowserBridge(request,env,url){
     if(state.state!=='valid'&&state.state!=='rotated')return failure('本站身份验证失败。',428);
     try{await storage(env).delete(linkKey(url.hostname,state.id));}
     catch{return failure('解除关联失败，请稍后再试。',503);}
-    return html('关联已解除','<p>✅ 本站已恢复独立 Browser ID。</p><p><a class="button" href="/">返回网站</a></p>');
+    return setCookie(html('关联已解除','<p>✅ 本站已恢复独立 Browser ID。</p><p><a class="button" href="/">返回网站</a></p>'),revokeCookie(url.hostname));
   }
 
   return failure('不支持此请求。',405);
