@@ -32,10 +32,14 @@ function named(response,name){
   return line.split(';')[0];
 }
 function post(host,path,body,cookie,origin=host,site='same-origin'){
-  return req(host,path,{method:'POST',headers:{
-    Cookie:cookie,Origin:'https://'+origin,
+  const headers={
+    Cookie:cookie,Origin:origin==='null'?'null':'https://'+origin,
     'Sec-Fetch-Site':site,'Content-Type':'application/x-www-form-urlencoded',
-  },body:new URLSearchParams(body).toString()});
+  };
+  if(origin==='absent')delete headers.Origin;
+  if(site==='absent')delete headers['Sec-Fetch-Site'];
+  return req(host,path,{method:'POST',headers,
+    body:new URLSearchParams(body).toString()});
 }
 async function route(request,env){
   return handleAnonymousBrowserBridge(request,env,new URL(request.url));
@@ -63,8 +67,14 @@ async function approve(centralUrl,env,priorCentralCookie=''){
   assert.ok(html.includes('我同意关联这个浏览器'));
   const saved=priorCentralCookie||named(screen,'__Secure-vyn_browser');
   const request=html.match(/name="request" value="([^"]+)"/)?.[1];
+  const csrf=html.match(/name="csrf" value="([^"]+)"/)?.[1];
   assert.ok(request);
-  const grant=await route(post('vynalthai.com',bridge,{request,consent:'yes'},saved),env);
+  assert.ok(csrf);
+  const csrfCookie=named(screen,'__Host-vyn_browser_bridge_csrf');
+  // Firecrawl's sandbox uses Origin:null and omits Fetch Metadata; the
+  // random HttpOnly synchronizer secret must still prove same browser.
+  const grant=await route(post('vynalthai.com',bridge,
+    {request,csrf,consent:'yes'},saved+'; '+csrfCookie,'null','absent'),env);
   assert.equal(grant.status,303);
   const target=new URL(grant.headers.get('Location'));
   assert.ok(target.hash.startsWith('#grant='));
@@ -72,7 +82,8 @@ async function approve(centralUrl,env,priorCentralCookie=''){
     targetHost:target.hostname,grantUrl:target.toString(),request};
 }
 async function complete(host,env,local,nonce,grant){
-  return route(post(host,bridge+'/complete',{grant},local+'; '+nonce),env);
+  return route(post(host,bridge+'/complete',{grant},
+    local+'; '+nonce,'null','absent'),env);
 }
 
 test('anonymous link to vynlink.xyz uses central explicit user consent and own cookies',async()=>{
@@ -137,10 +148,18 @@ test('central approval requires explicit opt-in, same-origin and signed request'
   const central=new URL(start.centralUrl);
   const screen=await route(new Request(central),env);
   const local=named(screen,'__Secure-vyn_browser');
+  const csrfCookie=named(screen,'__Host-vyn_browser_bridge_csrf');
+  const body=await screen.text();
+  const csrf=body.match(/name="csrf" value="([^"]+)"/)?.[1];
   const token=central.searchParams.get('request');
-  const noConsent=await route(post('vynalthai.com',bridge,{request:token,consent:'no'},local),env);
+  const missingCsrf=await route(post('vynalthai.com',bridge,
+    {request:token,consent:'yes'},local+'; '+csrfCookie,'null','absent'),env);
+  assert.equal(missingCsrf.status,403);
+  const noConsent=await route(post('vynalthai.com',bridge,
+    {request:token,csrf,consent:'no'},local+'; '+csrfCookie),env);
   assert.equal(noConsent.status,403);
-  const attack=await route(post('vynalthai.com',bridge,{request:token,consent:'yes'},local,'evil.example','cross-site'),env);
+  const attack=await route(post('vynalthai.com',bridge,
+    {request:token,csrf,consent:'yes'},local+'; '+csrfCookie,'evil.example','cross-site'),env);
   assert.equal(attack.status,403);
   const forged=await route(new Request(url('vynalthai.com',bridge+'?request=abc')),env);
   assert.equal(forged.status,403);
@@ -176,9 +195,16 @@ test('explicit unlink removes association without altering local browser ID or s
   assert.equal(before.crossRootLinked,true);
   const screen=await route(req('vynlink.xyz',bridge+'/unlink'),env);
   assert.equal(screen.status,200);
-  assert.ok((await screen.text()).includes('解除关联'));
+  const unlinkBody=await screen.text();
+  assert.ok(unlinkBody.includes('解除关联'));
+  const csrf=unlinkBody.match(/name="csrf" value="([^"]+)"/)?.[1];
+  const csrfCookie=named(screen,'__Host-vyn_browser_bridge_csrf');
   const previous=[...env.CONSENT_KV.values.entries()][0];
-  const after=await route(post('vynlink.xyz',bridge+'/unlink',{},start.local),env);
+  const missing=await route(post('vynlink.xyz',bridge+'/unlink',{},
+    start.local+'; '+csrfCookie,'null','absent'),env);
+  assert.equal(missing.status,403);
+  const after=await route(post('vynlink.xyz',bridge+'/unlink',{csrf},
+    start.local+'; '+csrfCookie,'null','absent'),env);
   assert.equal(after.status,200);
   const optout=named(after,'__Secure-vyn_browser_bridge_optout');
   assert.equal(optout,'__Secure-vyn_browser_bridge_optout=1');
