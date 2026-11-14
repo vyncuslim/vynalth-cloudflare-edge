@@ -103,6 +103,10 @@ export async function verifyActiveFederation(env,host,localDeviceId,globalDevice
     return value?.active===true;
   }catch{return false;}
 }
+// A one-time consent code lives only in the URL fragment. The first-party
+// pairing page removes it from browser history before same-origin form POST.
+// Static CSP hash is the SHA-256 of AUTO_LINK_SCRIPT; change together.
+const AUTO_LINK_SCRIPT="(()=>{try{const match=/^#vyn-auto-pair=([A-Za-z0-9_-]{43})$/.exec(location.hash);if(!match)return;history.replaceState(null,'',location.pathname+location.search);const form=document.querySelector('form[action=\"/__vynalth/device/link\"]');const input=document.getElementById('code');if(!form||!input)return;input.value=match[1];form.requestSubmit();}catch{}})();";
 const headers={
   'Cache-Control':'private, no-store, max-age=0',
   'Content-Type':'text/html; charset=utf-8',
@@ -110,7 +114,7 @@ const headers={
   'X-Robots-Tag':'noindex, nofollow, noarchive',
   'X-Content-Type-Options':'nosniff',
   'X-Frame-Options':'DENY',
-  'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy':"default-src 'none'; script-src 'sha256-nPC3J1t/VqVtQMgj9weFpcGnBkDUtHlPPdQ5Sft4Dc8='; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
 };
 function page(host,message='',isError=false) {
   const messageBlock=message?'<p role="status" class="'+(isError?'err':'ok')+'">'+message+'</p>':'';
@@ -135,9 +139,10 @@ function page(host,message='',isError=false) {
   +'pattern="[A-Za-z0-9_\\-]{43}" minlength="43" maxlength="43" spellcheck="false">'
   +'<button type="submit">授权关联这台浏览器</button></form>'
   +messageBlock
+  +'<p class="small">从 Vynalth AI 授权页面打开本站，可自动提交配对码；也可以手动输入。<\/p>'
   +'<p class="small">配对码有效期 5 分钟、只能使用一次。不会读取其他域名的 Cookie，'
   +'不会使用 IP、GPS 或浏览器指纹来推测身份。可在中央账户中撤销关联。</p>'
-  +'</main></body></html>';
+  +'</main><script>'+AUTO_LINK_SCRIPT+'</script></body></html>';
 }
 function respond(host,message='',status=200,error=false) {
   return new Response(page(host,message,error),{status,headers});
