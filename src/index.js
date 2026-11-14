@@ -1,4 +1,5 @@
 import { signedVisitorOriginRequest } from "./signed-visitor-ip.js";
+import { applyRuntimeConfigCacheHeaders } from "./runtime-config-cache.js";
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
 import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
@@ -43,7 +44,7 @@ function detectOrigin(headers) {
 }
 
 function buildEdgeHeaders(existingHeaders, request, incomingUrl, requestId, rootDomain) {
-  const headers = new Headers(existingHeaders);
+  const headers = applyRuntimeConfigCacheHeaders(new Headers(existingHeaders), incomingUrl.pathname);
   const cfRay = request.headers.get("cf-ray");
 
   headers.set("x-vynalth-edge", "cloudflare-worker");
