@@ -80,6 +80,35 @@ test("only Google source-IP-verified search GET pages are exempt", async () => {
   }), ranges), false, "Country cannot forge identity");
 });
 
+test("primary ZoKivo .xyz domains expose only public SEO resources to verified Google IPs", async () => {
+  for (const host of ["zokivo.xyz", "www.zokivo.xyz"]) {
+    for (const path of ["/", "/robots.txt", "/sitemap.xml", "/games", "/how-it-works",
+      "/try", "/paper", "/paper/cards", "/library", "/study", "/icon.svg",
+      "/_next/static/chunk.js"]) {
+      assert.equal(await isVerifiedGooglePublicCrawler(request(path, {host}), ranges), true,
+        host + path + " should be accessible to verified Google");
+    }
+    for (const path of ["/api/rooms/123456", "/auth/login", "/account", "/host",
+      "/play", "/game/123456", "/create", "/ai", "/paper/scan/123456",
+      "/__shield/gps/verify", "/.env", "/admin"]) {
+      assert.equal(await isVerifiedGooglePublicCrawler(request(path, {host}), ranges), false,
+        host + path + " must not bypass access controls");
+    }
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/sitemap.xml", {
+      host, ip:"203.0.113.5", ua:"Googlebot/2.1"
+    }), ranges), false, "Claimed Googlebot UA is insufficient");
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/robots.txt", {
+      host, ua:"Mozilla/5.0"
+    }), ranges), false, "Ordinary browser does not get crawler exemption");
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/sitemap.xml", {
+      host, method:"POST"
+    }), ranges), false, "POST never gets crawler exemption");
+    assert.equal(await isVerifiedGooglePublicCrawler(request("/sitemap.xml", {
+      host, method:"HEAD"
+    }), ranges), true, "HEAD is allowed only for verified public resources");
+  }
+});
+
 test("Google IP list failure fails closed", async () => {
   assert.equal(await isVerifiedGooglePublicCrawler(request("/"), async () => {throw Error("offline");}),false);
   assert.equal(await isVerifiedGooglePublicCrawler(request("/"), async () => []),false);

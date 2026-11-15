@@ -41,6 +41,15 @@ for (const lang of ['en', 'cn', 'ms']) {
   }
   MAIN_SITE_PUBLIC_FILES.add('/' + lang + '/');
 }
+// This exact allowlist is shared between the legacy subdomain and the
+// primary ZoKivo domain. Only Google source-IP-verified requests are exempt;
+// account, game room, teacher and API routes never inherit access.
+const ZOKIVO_PUBLIC_RESOURCES = {
+  files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
+    "/icon.svg", "/zokivo-mark.svg", "/games", "/how-it-works", "/try",
+    "/paper", "/paper/cards", "/library", "/study"]),
+  prefixes: ["/_next/static/"],
+};
 const PUBLIC_RESOURCES = new Map([
   ['vynalthai.com', {
     files: MAIN_SITE_PUBLIC_FILES,
@@ -50,12 +59,9 @@ const PUBLIC_RESOURCES = new Map([
     files: MAIN_SITE_PUBLIC_FILES,
     prefixes: ['/assets/'],
   }],
-  ["zokivo.vynalthai.com", {
-    files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/manifest.webmanifest",
-      "/icon.svg", "/zokivo-mark.svg", "/games", "/how-it-works", "/try",
-      "/paper", "/paper/cards", "/library", "/study"]),
-    prefixes: ["/_next/static/"],
-  }],
+  ["zokivo.vynalthai.com", ZOKIVO_PUBLIC_RESOURCES],
+  ["zokivo.xyz", ZOKIVO_PUBLIC_RESOURCES],
+  ["www.zokivo.xyz", ZOKIVO_PUBLIC_RESOURCES],
   ["gobal.vyncuslim.si", {
     files: new Set(["/", "/robots.txt", "/sitemap.xml", "/favicon.ico", "/vynalth-logo.svg"]),
     prefixes: ["/assets/"],
