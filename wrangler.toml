@@ -76,18 +76,18 @@ CONSENT_CMP_ENABLED = "false"
 SCHOOL_TRUSTED_SSO_EXEMPTION_ENABLED = "false"
 # Explicit, owner-accepted approximate OSM GPS policy; consent remains off.
 GPS_GATE_ENABLED = "true"
-# Browser GPS prompt covers Penang state (MY-07) EXCEPT Butterworth.
-# Trusted Cloudflare city/locality, narrow Butterworth postcode and coarse
-# mainland IP coordinate box can exempt Butterworth. Other Penang areas keep GPS.
-# This is an approximate IP-derived city exemption, NOT proof of location.
-# Separate WAF, School IP and origin authentication remain unaffected.
-# Upstream Service Binding calls need signed city metadata v3 to apply
-# Butterworth's exemption; v1/v2 callers cannot assert the source city.
+# Penang state (MY-07): during 05:00 (inclusive)–20:50 (exclusive) MYT,
+# challenge all localities, INCLUDING Butterworth. Use the server's clock
+# and trusted Cloudflare geolocation (not browser time, spoofable headers
+# or IP geolocation as physical-location proof).
+# GPS reported inside an existing mapped POWIIS campus returns HTTP 403.
+# Outside this window/non-Penang, this GPS overlay is skipped; all other
+# WAF, School IP, device restrictions and origin authentication remain.
 GPS_PENANG_ONLY_ENABLED = "true"
-# Consented location recovery: 30-minute host/IP-bound proof ONLY after
-# a successful outside-campus result near approximate Butterworth urban area.
-# Does not trust Tasek Glugor IP city alone, or bypass School IP/WAF/auth.
-GPS_BUTTERWORTH_PROOF_ENABLED = "true"
+GPS_PENANG_TIME_WINDOW_ENABLED = "true"
+GPS_PENANG_ALL_LOCALITIES_ENABLED = "true"
+# Disable legacy Butterworth 30-minute proof issuance under the new policy.
+GPS_BUTTERWORTH_PROOF_ENABLED = "false"
 # Retain legacy country/timezone feature flag for rollback only. When Penang-
 # state mode is enabled, its timezone preflight does not run for site traffic.
 GPS_REGION_TIMEZONE_ENABLED = "true"
