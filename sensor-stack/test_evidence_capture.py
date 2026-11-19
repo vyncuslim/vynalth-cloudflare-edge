@@ -139,7 +139,7 @@ class CaptureTests(unittest.TestCase):
         capture(src,out,"cowrie",KEY,tty_dir=root/"download")
         self.assertEqual(json.loads(out.read_text())["records"][0]["evidence"]["verification"],"unavailable")
 
-    def test_source_size_mismatch_and_missing_tty_are_truthful(self):
+    def test_source_reported_size_is_not_equated_to_physical_tty_bytes(self):
         root,src,out=self.files([])
         (root/"tty").mkdir()
         (root/"tty"/"demo.log").write_bytes(b"data")
@@ -147,7 +147,9 @@ class CaptureTests(unittest.TestCase):
                                         ttylog="demo.log",size=999))+"\n")
         capture(src,out,"cowrie",KEY,tty_dir=root/"tty")
         e=json.loads(out.read_text())["records"][0]["evidence"]
-        self.assertEqual(e["verification"],"source_size_mismatch")
+        self.assertEqual(e["verification"],"locally_hashed")
+        self.assertEqual(e["artifact"]["size_bytes"],4)
+        self.assertEqual(e["cowrie_reported_size_bytes"],999)
         self.assertTrue(e["artifact"]["sha256"])
 
     def test_opencanary_mysql_and_ftp_records_without_passwords(self):
