@@ -128,13 +128,31 @@ def spool(input_path: Path, spool_db: Path, source: str, sensor: str,
         for _ in range(max_lines):
             start = raw.tell()
             line = raw.readline(MAX_LINE+1)
-            if not line or not line.endswith(b"\n"):
+            if not line:
+                break
+            if len(line) > MAX_LINE:
+                # Drain a completed overlong JSONL record in bounded chunks.
+                # Never mistake an unfinished line for a committed event.
+                completed = line.endswith(b"\n")
+                total = len(line)
+                while not completed and total <= 1024 * 1024:
+                    chunk = raw.readline(MAX_LINE+1)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    completed = chunk.endswith(b"\n")
+                if total > 1024 * 1024:
+                    raise EvidenceError("oversized log line exceeds 1MiB cap")
+                if not completed:
+                    raw.seek(start)
+                    break
+                position = raw.tell()
+                rejected += 1
+                continue
+            if not line.endswith(b"\n"):
                 raw.seek(start)
                 break
             position = raw.tell()
-            if len(line) > MAX_LINE:
-                rejected += 1
-                continue
             try:
                 item = _canonical_event(json.loads(line), source, keybytes,
                                         start, None, None)
