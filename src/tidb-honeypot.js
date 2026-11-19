@@ -18,13 +18,14 @@ const INSERT_SQL = `INSERT INTO vynalth_honeypot.honeypot_events
 // SQL parameters, error messages, device IDs or raw HTTP headers are logged.
 // Disabled until the owner explicitly enables it for ONE planned release.
 const SAFE_OUTCOMES = new Set([
-  "not_configured", "invalid_event", "inserted", "failed",
+  "disabled", "no_lifecycle", "sampled_out", "not_configured",
+  "invalid_event", "inserted", "failed",
 ]);
 function logSafeOutcome(env, state, reason = "none") {
   if (env?.TIDB_HONEYPOT_DIAGNOSTICS_ENABLED !== "true" ||
       !SAFE_OUTCOMES.has(state)) return;
   const allowedReasons = new Set([
-    "none", "bad_url", "event", "insert", "schema", "auth",
+    "none", "disabled", "missing_ctx", "sampling", "bad_url", "event", "insert", "schema", "auth",
     "quota", "transport", "timeout", "other",
   ]);
   console.info("[HONEY TIDB OUTCOME]", JSON.stringify({
@@ -111,11 +112,23 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
 }
 
 export function scheduleTidbHoneypotEvent(args, random = Math.random) {
-  if (args?.env?.TIDB_HONEYPOT_INGEST_ENABLED !== "true" ||
-      typeof args?.ctx?.waitUntil !== "function" ||
-      !shouldSample(args.env, random)) return false;
+  // Only reached by an allowlisted honeypot route from src/index.js.
+  // These fixed outcome labels diagnose why a successful decoy GET
+  // may not produce a new row, without reflecting any request attributes.
+  if (args?.env?.TIDB_HONEYPOT_INGEST_ENABLED !== "true") {
+    logSafeOutcome(args?.env, "disabled", "disabled");
+    return false;
+  }
+  if (typeof args?.ctx?.waitUntil !== "function") {
+    logSafeOutcome(args.env, "no_lifecycle", "missing_ctx");
+    return false;
+  }
   if (!validDatabaseUrl(args.env)) {
     logSafeOutcome(args.env, "not_configured", "bad_url");
+    return false;
+  }
+  if (!shouldSample(args.env, random)) {
+    logSafeOutcome(args.env, "sampled_out", "sampling");
     return false;
   }
   args.ctx.waitUntil(dispatchTidbHoneypotEvent(args));
