@@ -76,6 +76,26 @@ services:
     cpus: 0.5
     networks:
       - sensor_lab
+  ssh-replay-probe:
+    build:
+      context: .
+      dockerfile: ci/Dockerfile.ssh
+    profiles: ["ci"]
+    restart: "no"
+    read_only: true
+    command: []
+    volumes:
+      - ./ci_ssh_session_probe.py:/ci_ssh_session_probe.py:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=8m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 40
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - sensor_lab
 volumes:
   cowrie_state: {}
 networks:
