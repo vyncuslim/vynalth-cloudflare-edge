@@ -118,10 +118,15 @@ def local_artifact(directory: Path | None, source_name, max_size=MAX_BYTES):
         fd = os.open(target, mode)
     except OSError:
         return None
-    with os.fdopen(fd, "rb") as stream:
-        info = os.fstat(stream.fileno())
+    try:
+        info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > max_size:
+            os.close(fd)
             return None
+    except OSError:
+        os.close(fd)
+        return None
+    with os.fdopen(fd, "rb") as stream:
         digest = hashlib.sha256()
         first = b""
         read = 0
