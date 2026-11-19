@@ -178,8 +178,7 @@ class UplinkTests(unittest.TestCase):
         # Reader mapping validates an exact protocol/class allowlist.
         item["protocol"]="MYSQL"
         with self.assertRaisesRegex(EvidenceError,"unrecognized"):
-            _summary(item["event_ref"],"ci-sensor-01",json.dumps(item),
-                     "0"*64,KEY.encode()) if False else self._bad_mapping(item)
+            self._bad_mapping(item)
 
     def _bad_mapping(self,item):
         import durable_spool
