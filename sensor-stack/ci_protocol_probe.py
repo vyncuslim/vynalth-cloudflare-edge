@@ -6,6 +6,7 @@ Docker processes are started by GitHub-hosted Actions and destroyed afterward.
 """
 from __future__ import annotations
 import json
+import os
 import socket
 import subprocess
 import time
@@ -20,7 +21,8 @@ def connect_local(port, wait=65):
     deadline=time.monotonic()+wait
     while time.monotonic()<deadline:
         try:
-            return socket.create_connection(("127.0.0.1",port),timeout=4)
+            host = ("cowrie" if port in (2222,2223) else "opencanary") if os.environ.get("CI_SENSOR_CONTAINER")=="1" else "127.0.0.1"
+            return socket.create_connection((host,port),timeout=4)
         except (OSError,TimeoutError):
             time.sleep(2)
     raise AssertionError("service not accepting local connections on "+str(port))
@@ -85,8 +87,13 @@ def run(cmd):
 
 def verify_real_cowrie_events():
     # Read the actual on-container JSONL; don't echo raw evidence to CI logs.
-    raw=run(["docker","exec","vynalth-lab-cowrie","cat",
-             "/cowrie/cowrie-git/var/log/cowrie/cowrie.json"])
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="cowrie-proof-") as temp:
+        destination=Path(temp)/"cowrie.jsonl"
+        subprocess.check_call(["docker","cp",
+          "vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json",
+          str(destination)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        raw=destination.read_text(encoding="utf-8",errors="replace")
     observed=0
     sanitized=[]
     for line in raw.splitlines()[:500]:
@@ -130,16 +137,26 @@ def verify_real_opencanary_events():
 
 
 def main():
-    statuses=[check_ssh(),check_telnet(),check_ftp(),check_mysql(),check_redis()]
+    if len(sys.argv)!=2 or sys.argv[1] not in {"--probe","--verify"}:
+        raise SystemExit("Specify --probe or --verify")
+    if sys.argv[1]=="--probe":
+        if os.environ.get("CI_SENSOR_CONTAINER")!="1":
+            raise SystemExit("protocol probe must run inside dedicated isolated CI container")
+        statuses=[check_ssh(),check_telnet(),check_ftp(),check_mysql(),check_redis()]
+        print(json.dumps({"proof_type":"isolated_container_real_tcp_handshakes",
+            "protocol_checks":statuses,"public_internet_sensor":False,
+            "credentials_exported":False},sort_keys=True))
+        return
+    if os.environ.get("CI_SENSOR_CONTAINER")=="1":
+        raise SystemExit("evidence verification must run on trusted host")
     time.sleep(3)
     cowrie=verify_real_cowrie_events()
     opencanary=verify_real_opencanary_events()
     print(json.dumps({
-        "proof_type":"ephemeral_github_runner_real_local_protocols",
+        "proof_type":"real_container_events_sanitized",
         "public_internet_sensor":False,
         "production_tidb_inserted":False,
         "credentials_exported":False,
-        "protocol_checks":statuses,
         **cowrie,**opencanary
     },sort_keys=True))
 
