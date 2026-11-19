@@ -271,6 +271,25 @@ def collect(raw_dir:Path,active_name:str,db_path:Path,health_path:Path,
         "new_sanitized_events","rejected_rows","queue_rows","remaining_bytes")}
 
 
+def _load_key():
+    """Load a short-lived or systemd-managed credential without printing it.
+
+    In production prefer LoadCredential=... over a plaintext EnvironmentFile.
+    The same key must be available across restarts for historical verification.
+    """
+    key=os.environ.get("VYNALTH_EVIDENCE_HMAC_KEY","")
+    if key:
+        return key
+    folder=os.environ.get("CREDENTIALS_DIRECTORY","")
+    if not folder:
+        return ""
+    path=Path(folder)/"vynalth_evidence_hmac_key"
+    if path.is_symlink() or not path.is_file() or path.stat().st_size>4096:
+        raise EvidenceError("systemd evidence credential unavailable")
+    # systemd-managed credential files are readable only to the service.
+    return path.read_text(encoding="utf-8").strip()
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-dir",type=Path)
@@ -285,8 +304,8 @@ def main():
     parser.add_argument("--min-free-mb",type=int,default=128)
     parser.add_argument("--check",action="store_true")
     args=parser.parse_args()
-    key=os.environ.get("VYNALTH_EVIDENCE_HMAC_KEY","")
     try:
+        key=_load_key()
         if args.check:
             outcome=health_status(args.health,key)
         else:
