@@ -2,6 +2,7 @@ import { signedVisitorOriginRequest } from "./signed-visitor-ip.js";
 import { applyRuntimeConfigCacheHeaders } from "./runtime-config-cache.js";
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
 import { guestGpsGate } from "./guest-gps.js";
+import { isPublicCyberCommandReadOnly } from "./public-cyber-command.js";
 import { isVerifiedGooglePublicCrawler } from "./public-crawler-access.js";
 import { handleJingxinMedia } from "./jingxin-media.js";
 import { temporaryIpBlockResponse } from "./temporary-ip-block.js";
@@ -406,7 +407,12 @@ export default {
     // private APIs, human GPS checks, and School IP Policy still apply.
     const verifiedPublicCrawler = !gpsEndpoint &&
       await isVerifiedGooglePublicCrawler(request);
-    if (!canonicallyExempt && !temporaryOwnerExempt && !verifiedPublicCrawler) {
+    // Exact, unauthenticated read-only public intelligence routes are
+    // intentionally accessible without a browser GPS prompt worldwide.
+    // This skips ONLY guest GPS; temporary blocks, federated device controls,
+    // school IP restrictions, Cloudflare WAF, login and private APIs remain.
+    const publicReadOnlyIntelligence = isPublicCyberCommandReadOnly(request,incomingUrl);
+    if (!canonicallyExempt && !temporaryOwnerExempt && !verifiedPublicCrawler && !publicReadOnlyIntelligence) {
       const gpsDecision = await guestGpsGate(request,env,incomingUrl,ctx,requestId);
       if (gpsDecision) {
         return observedResponse(gpsDecision,request,incomingUrl,requestId,rootDomain);
