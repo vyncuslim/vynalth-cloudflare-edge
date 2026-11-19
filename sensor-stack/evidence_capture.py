@@ -105,6 +105,11 @@ def local_artifact(directory: Path | None, source_name, max_size=MAX_BYTES):
     """
     if directory is None or not isinstance(source_name, str):
         return None
+    # Never trust a traversal path provided by a hostile client's JSON.
+    if (len(source_name) > 512 or "\\x00" in source_name or
+            any(part in {".", ".."} for part in
+                source_name.replace("\\\\", "/").split("/"))):
+        return None
     name = Path(source_name).name
     if name in {".", ".."} or not FILE_NAME.fullmatch(name):
         return None
@@ -203,10 +208,13 @@ def _canonical_event(raw, source, key: bytes, line_no, tty_dir, download_dir):
     else:
         return None
     record = {
-        "event_ref": str(uuid.uuid5(NS, source+"|"+str(line_no)+"|"+
-                                   hashlib.sha256(json.dumps(
-                                       raw, sort_keys=True, default=str,
-                                       separators=(",", ":")).encode()).hexdigest())),
+        # Event reference is keyed, so low-entropy passwords in the raw
+        # observation cannot be guessed via an unkeyed event fingerprint.
+        "event_ref": hmac.new(
+            key, (source+"|"+str(line_no)+"|").encode() +
+            json.dumps(raw, sort_keys=True, default=str,
+                       separators=(",", ":")).encode(),
+            hashlib.sha256).hexdigest(),
         "source": source,
         "protocol": proto,
         "event_class": kind,
