@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatchTidbHoneypotEvent, scheduleTidbHoneypotEvent } from "./tidb-honeypot.js";
+import { dispatchTidbHoneypotEvent, scheduleTidbHoneypotEvent, honeypotDiagnosticsEnabled } from "./tidb-honeypot.js";
+const DIAG_UNTIL = new Date(Date.now() + 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 
 const DUMMY_URL = "mysql://instance.honey_writer:fake_password@gateway01.ap-southeast-1.prod.aws.tidbcloud.com/vynalth_honeypot";
 const enabled = {
@@ -81,7 +82,8 @@ test("privacy-safe diagnostic logs only sampled write result, never sensitive pa
   const logs=[];
   console.info=(...fields)=>logs.push(fields.map(String).join(" "));
   console.warn=(...fields)=>logs.push(fields.map(String).join(" "));
-  const monitored={...enabled,TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true"};
+  const monitored={...enabled,TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",
+    TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:DIAG_UNTIL};
   try {
     const inserted=await dispatchTidbHoneypotEvent(makeArgs(monitored),()=>({
       execute(){return Promise.resolve({});}
@@ -123,7 +125,8 @@ test("diagnostics do not run for a sampled-out decoy and never schedule with inv
     const scheduled=[];
     const ctx={waitUntil(p){scheduled.push(p)}};
     const noSample={...enabled,TIDB_HONEYPOT_SAMPLE_RATE:"0.1",
-      TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true"};
+      TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",
+      TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:DIAG_UNTIL};
     assert.equal(scheduleTidbHoneypotEvent({...makeArgs(noSample),ctx},()=>0.99),false);
     assert.equal(scheduled.length,0);
     assert.equal(logged.length,1);
@@ -148,4 +151,18 @@ test("diagnostics do not run for a sampled-out decoy and never schedule with inv
       assert.equal(logged.join(" ").includes(sensitive),false);
     }
   } finally { console.info=originalInfo; }
+});
+
+test("short-term diagnostic window auto-expires, fails closed on missing or malformed UTC deadline", () => {
+  const now=Date.parse("2026-11-19T10:30:00Z");
+  const valid={TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",
+    TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:"2026-11-19T11:30:00Z"};
+  assert.equal(honeypotDiagnosticsEnabled(valid,now),true);
+  assert.equal(honeypotDiagnosticsEnabled(valid,now+60*60*1000),false);
+  assert.equal(honeypotDiagnosticsEnabled(valid,now+60*60*1000+1),false);
+  assert.equal(honeypotDiagnosticsEnabled({...valid,TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:"2026-11-19T20:30:00Z"},now),false);
+  assert.equal(honeypotDiagnosticsEnabled({...valid,TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:"2026-11-19T11:30:00+00:00"},now),false);
+  assert.equal(honeypotDiagnosticsEnabled({...valid,TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:"bad-data"},now),false);
+  assert.equal(honeypotDiagnosticsEnabled({TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true"},now),false);
+  assert.equal(honeypotDiagnosticsEnabled({...valid,TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"false"},now),false);
 });
