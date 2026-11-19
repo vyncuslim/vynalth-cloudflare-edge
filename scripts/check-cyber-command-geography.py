@@ -95,6 +95,29 @@ except Exception as error:
 print("JSON_API_CHECK:",json.dumps(json_check,ensure_ascii=False))
 with open("geo-audit-results.json","w") as file:
     json.dump({"httpProbes":report,"jsonApi":json_check},file,indent=2)
+# Check that HTTP 200 serves the actual Cyber Command application HTML,
+# rather than a generic bot challenge or home page with status 200.
+html_check={"target":TARGETS[0],"status":"unverified"}
+try:
+    req=urllib.request.Request(TARGETS[0],headers={"User-Agent":"VynalthPublicReadOnlyGeoAudit/1.0","Accept":"text/html"})
+    with urllib.request.urlopen(req,timeout=15) as resp:
+        html=resp.read(150000).decode("utf-8","replace")
+        if resp.status!=200 or "text/html" not in resp.headers.get("content-type",""):
+            raise ValueError("not-html-response")
+    if not ('id="root"' in html or "id='root'" in html):
+        raise ValueError("react-app-root-missing")
+    if 'cyber command' not in html.lower():
+        raise ValueError("cyber-command-seo-title-missing")
+    html_check={"target":TARGETS[0],"status":"verified-cyber-command-html"}
+except Exception as error:
+    html_check={"target":TARGETS[0],"status":"unverified","reason":type(error).__name__+":"+str(error)[:80]}
+print("HTML_PAGE_CHECK:",json.dumps(html_check,ensure_ascii=False))
+with open("geo-audit-results.json","w") as file:
+    json.dump({"httpProbes":report,"jsonApi":json_check,"htmlPage":html_check},file,indent=2)
+if html_check["status"]!="verified-cyber-command-html":
+    print("Page cannot be declared served to this independent probe.",file=sys.stderr)
+    sys.exit(3)
+
 if json_check["status"]!="verified-json":
     print("Live API cannot be declared operational; HTTP 200 alone is insufficient.",file=sys.stderr)
     sys.exit(2)
