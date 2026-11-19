@@ -197,6 +197,26 @@ class RotationTests(unittest.TestCase):
             with self.assertRaisesRegex(EvidenceError,"free-space threshold"):
                 self.cycle(min_free_mb=128)
 
+    def test_systemd_credential_can_be_loaded_without_environment_secret(self):
+        from unittest.mock import patch
+        from rotation_collector import _load_key
+        credentials=self.base/"credentials"
+        credentials.mkdir()
+        secret="this-is-a-local-test-credential-"+"x"*40
+        (credentials/"vynalth_evidence_hmac_key").write_text(secret+"\n")
+        with patch.dict(os.environ,{"CREDENTIALS_DIRECTORY":str(credentials),
+                                    "VYNALTH_EVIDENCE_HMAC_KEY":""}):
+            self.assertEqual(_load_key(),secret)
+        with patch.dict(os.environ,{"CREDENTIALS_DIRECTORY":str(credentials),
+                                    "VYNALTH_EVIDENCE_HMAC_KEY":"from-env"}):
+            self.assertEqual(_load_key(),"from-env")
+        (credentials/"vynalth_evidence_hmac_key").unlink()
+        (credentials/"vynalth_evidence_hmac_key").symlink_to(self.active)
+        with patch.dict(os.environ,{"CREDENTIALS_DIRECTORY":str(credentials),
+                                    "VYNALTH_EVIDENCE_HMAC_KEY":""}):
+            with self.assertRaises(EvidenceError):
+                _load_key()
+
     def test_no_export_of_raw_identifiers(self):
         self.active.write_text(serialize(row("cowrie.command.input")))
         self.cycle()
