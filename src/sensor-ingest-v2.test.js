@@ -17,9 +17,12 @@ const good={event_type:"suspicious_probe",source:"cowrie",
   request_path:"/ssh/login_attempt",action_taken:"observed"};
 
 class FakeSql {
-  constructor(){this.rows=new Map();}
+  constructor(){this.rows=new Map();this.lastChanges=0;}
   exec(query,...p){
     if(query.startsWith("CREATE TABLE"))return {rowsWritten:0};
+    if(query==="SELECT changes() AS changed"){
+      return {one:()=>({changed:this.lastChanges})};
+    }
     if(query.startsWith("SELECT event_ref")){
       return {toArray:()=>this.rows.has(p[0])?[{event_ref:p[0]}]:[]};
     }
@@ -27,15 +30,21 @@ class FakeSql {
       return {one:()=>({total:this.rows.size})};
     }
     if(query.startsWith("INSERT OR IGNORE")){
-      if(this.rows.has(p[0]))return {rowsWritten:0};
+      if(this.rows.has(p[0])){this.lastChanges=0;return {rowsWritten:0};}
       this.rows.set(p[0],{claimed_ms:p[1],state:"reserved"});
-      return {rowsWritten:1};
+      this.lastChanges=1;
+      // Simulate actual DO billing: a PK index entry and a table row.
+      return {rowsWritten:2};
     }
     if(query.startsWith("UPDATE")){
       const [status,ref]=p;
       const row=this.rows.get(ref);
-      if(!row||row.state!=="reserved")return {rowsWritten:0};
+      if(!row||row.state!=="reserved"){
+        this.lastChanges=0;
+        return {rowsWritten:0};
+      }
       row.state=status;
+      this.lastChanges=1;
       return {rowsWritten:1};
     }
     throw Error("Unexpected fake ledger SQL");

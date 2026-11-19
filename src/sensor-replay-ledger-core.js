@@ -24,16 +24,20 @@ export function claimEvent(sql,eventRef,nowMs){
   if(old.length)return "duplicate";
   const count=sql.exec("SELECT COUNT(*) AS total FROM sensor_claims").one().total;
   if(count>=SENSOR_LEDGER_CAP)return "capacity";
-  const inserted=sql.exec(
+  sql.exec(
       "INSERT OR IGNORE INTO sensor_claims(event_ref,claimed_ms,state) "+
       "VALUES (?,?,'reserved')",eventRef,nowMs);
-  return inserted.rowsWritten===1?"claimed":"duplicate";
+  // DO SqlStorageCursor.rowsWritten is a *billing* count and may include
+  // index writes; it is NOT SQLite's number of changed table rows.
+  // SELECT changes() counts base-table rows for the immediately prior write.
+  const changed=sql.exec("SELECT changes() AS changed").one().changed;
+  return changed===1?"claimed":"duplicate";
 }
 export function settleEvent(sql,eventRef,state){
   if(typeof eventRef!=="string"||!REF_RE.test(eventRef)||
      !STATES.has(state))return false;
-  const row=sql.exec(
+  sql.exec(
       "UPDATE sensor_claims SET state=? WHERE event_ref=? AND state='reserved'",
       state,eventRef);
-  return row.rowsWritten===1;
+  return sql.exec("SELECT changes() AS changed").one().changed===1;
 }
