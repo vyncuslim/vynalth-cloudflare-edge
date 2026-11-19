@@ -14,6 +14,7 @@ const COWRIE_ACTIONS = new Set(["connect","disconnect","login_attempt",
 const PROTOCOLS = Object.freeze({
  FTP:"opencanary",MYSQL:"opencanary",REDIS:"opencanary",SSH:"cowrie",TELNET:"cowrie"
 });
+const TOO_LARGE = Symbol("body-too-large");
 const HEADERS = Object.freeze({
  "Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store",
  "X-Content-Type-Options":"nosniff","X-Robots-Tag":"noindex, nofollow"
@@ -59,7 +60,7 @@ async function boundedRead(request) {
   const item=await reader.read();
   if(item.done)break;
   total+=item.value.byteLength;
-  if(total>1024){await reader.cancel();return null;}
+  if(total>1024){await reader.cancel();return TOO_LARGE;}
   parts.push(item.value);
  }
  const joined=new Uint8Array(total);let pos=0;
@@ -94,6 +95,7 @@ export async function handleSensorIngest(request,env,options={}) {
  const length=request.headers.get("content-length");
  if(length!==null&&Number(length)>1024)return reply(413,"body_too_large");
  const raw=await boundedRead(request);
+ if(raw===TOO_LARGE)return reply(413,"body_too_large");
  if(typeof raw!=="string"||raw.length<2)return reply(400,"invalid_body");
  if(!(await authorized(request,raw,env.HONEY_SENSOR_INGEST_KEY,
    options.now??Date.now())))return reply(401,"unauthorized");
