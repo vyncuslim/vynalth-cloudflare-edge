@@ -24,8 +24,9 @@ jobs:
           python-version: "3.12"
       - name: Verify evidence capture module
         run: |
-          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/test_evidence_capture.py
+          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/test_evidence_capture.py sensor-stack/test_durable_spool.py
           python -m unittest -v sensor-stack/test_evidence_capture.py
+          python -m unittest -v sensor-stack/test_durable_spool.py
       - name: Assert evidence does not require production secrets or connect to cloud
         run: |
           python - <<'PY'
@@ -40,6 +41,14 @@ jobs:
           assert "os.O_EXCL" in p
           assert 'getattr(os, "O_NOFOLLOW", 0)' in p
           assert "hmac.compare_digest" in p
+          spool = Path("sensor-stack/durable_spool.py").read_text()
+          assert "BEGIN IMMEDIATE" in spool
+          assert "journal_mode=WAL" in spool
+          assert "synchronous=FULL" in spool
+          assert "SPOOL_BLOCKED" in spool
+          for forbidden in ("import requests", "import socket", "subprocess",
+                            "urllib.request", "os.system("):
+              assert forbidden not in spool, forbidden
           print("PASS: offline restricted capture only; no network, no execution")
           PY
       - name: No production deploy
