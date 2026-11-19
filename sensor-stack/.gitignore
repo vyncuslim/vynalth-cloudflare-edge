@@ -11,3 +11,15 @@ runtime/
 .env.*
 __pycache__/
 .pytest_cache/
+
+# Persistent privacy-sensitive evidence queue and its SQLite sidecars
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+private/
+spool/
+tty/
+downloads/
+manifests/
