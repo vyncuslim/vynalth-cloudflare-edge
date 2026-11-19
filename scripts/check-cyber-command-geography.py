@@ -67,3 +67,34 @@ print(json.dumps(report,ensure_ascii=False,indent=2))
 with open("geo-audit-results.json","w") as file: json.dump(report,file,indent=2)
 # Intentionally don't assert global accessibility from automated probes.
 # Operator must independently inspect failures and preserve WAF.
+
+# Independently validate the *content*, not only HTTP 200. A 200 HTML SPA
+# fallback or bot challenge is not an operational JSON intelligence API.
+json_check = {"target": TARGETS[1], "status": "unverified"}
+try:
+    request = urllib.request.Request(TARGETS[1], headers=HEADERS)
+    with urllib.request.urlopen(request, timeout=15) as upstream:
+        content_type = upstream.headers.get("content-type", "")
+        body = upstream.read(30000)
+        if upstream.status != 200 or "application/json" not in content_type:
+            raise ValueError("not-a-json-api")
+    snapshot=json.loads(body)
+    expected={"status":"ready","sourceId":"ipsum-public","metric":"blacklist-appearances","sourceName":"IPsum"}
+    if any(snapshot.get(k)!=v for k,v in expected.items()):
+        raise ValueError("wrong-source-or-metric")
+    rows=snapshot.get("rows")
+    if not isinstance(rows,list) or not 5 <= len(rows) <= 20:
+        raise ValueError("rows-invalid")
+    if not all(isinstance(r.get("ip"),str) and isinstance(r.get("listCount"),int)
+        and 1 <= r["listCount"] <= 1000 for r in rows):
+        raise ValueError("entries-invalid")
+    json_check={"target":TARGETS[1],"status":"verified-json","rows":len(rows),
+        "metric":snapshot["metric"],"sourceUpdatedAt":snapshot.get("sourceUpdatedAt")}
+except Exception as error:
+    json_check={"target":TARGETS[1],"status":"unverified","reason":type(error).__name__+":"+str(error)[:80]}
+print("JSON_API_CHECK:",json.dumps(json_check,ensure_ascii=False))
+with open("geo-audit-results.json","w") as file:
+    json.dump({"httpProbes":report,"jsonApi":json_check},file,indent=2)
+if json_check["status"]!="verified-json":
+    print("Live API cannot be declared operational; HTTP 200 alone is insufficient.",file=sys.stderr)
+    sys.exit(2)
