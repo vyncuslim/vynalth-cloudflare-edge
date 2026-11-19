@@ -13,6 +13,11 @@ on:
       - "sensor-stack/test_retention_audit.py"
       - "sensor-stack/ci_signed_uplink_probe.py"
       - "src/sensor-outbox-crosslang.test.js"
+      - "src/sensor-ingest-v2.js"
+      - "src/sensor-ingest-v2.test.js"
+      - "src/sensor-replay-ledger.js"
+      - "src/sensor-replay-ledger-core.js"
+      - "wrangler.toml"
       - "sensor-stack/ops/**"
       - ".github/workflows/validate-honeypot-evidence.yml"
   workflow_dispatch:
@@ -48,7 +53,7 @@ jobs:
           trap 'rm -f "$fixture"' EXIT
           python sensor-stack/ci_signed_uplink_probe.py "$fixture"
           npm install --ignore-scripts --no-audit --no-fund --silent
-          VYNALTH_OUTBOX_CI_FIXTURE="$fixture" node --test src/sensor-outbox-crosslang.test.js
+          VYNALTH_OUTBOX_CI_FIXTURE="$fixture" node --test src/sensor-outbox-crosslang.test.js src/sensor-ingest-v2.test.js
           echo "PASS: Python-signed payload accepted by Worker interface; no public DB or network POST"
       - name: Assert evidence does not require production secrets or connect to cloud
         run: |
@@ -87,6 +92,16 @@ jobs:
           assert "ambiguous delivery held without retry" in outbox
           assert "raw_identifiers_uploaded" in outbox
           assert "network_alerts_sent" in alert
+          v2 = Path("src/sensor-ingest-v2.js").read_text()
+          ledger = Path("src/sensor-replay-ledger-core.js").read_text()
+          assert 'HONEY_SENSOR_V2_ENABLED' in v2
+          assert 'HONEY_SENSOR_V2_KEY' in v2
+          assert 'x-vynalth-sensor-event-ref' in v2
+          assert 'INSERT OR IGNORE INTO sensor_claims' in ledger
+          assert 'sampled_out' in ledger
+          conf = Path("wrangler.toml").read_text()
+          assert 'HONEY_SENSOR_V2_ENABLED = "false"' in conf
+          assert 'new_sqlite_classes = ["SensorReplayLedger"]' in conf
           assert 'if args.check:' in alert
           # Documentation may discuss Telegram/SMTP as deliberately absent.
           # The monitor implementation must not import a network client.
