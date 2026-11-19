@@ -18,7 +18,6 @@ import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { scheduleTidbHoneypotEvent } from "./tidb-honeypot.js";
 import { SENSOR_INTAKE_PATH, handleSensorIngest } from "./sensor-ingest.js";
 import { SENSOR_INTAKE_V2_PATH, handleSensorIngestV2 } from "./sensor-ingest-v2.js";
-export { SensorReplayLedger } from "./sensor-replay-ledger.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleRootBrowserEndpoint, addRootBrowserToDocumentResponse } from "./global-browser-id.js";
