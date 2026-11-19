@@ -1,0 +1,13 @@
+# CI ONLY. Local workerd/Miniflare storage. NO Cloudflare account or deploy.
+name = "vynalth-do-sqlite-local-ci"
+main = "../../src/sensor-ledger-runtime-probe.js"
+compatibility_date = "2026-11-19"
+workers_dev = false
+
+[[durable_objects.bindings]]
+name = "SENSOR_REPLAY_LEDGER"
+class_name = "SensorReplayLedger"
+
+[[migrations]]
+tag = "local-ci-sqlite-ledger-v1"
+new_sqlite_classes = ["SensorReplayLedger"]
