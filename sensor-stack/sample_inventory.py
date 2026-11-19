@@ -5,11 +5,34 @@ Run only against a copied/download-only Cowrie collection within a disposable
 analysis machine. Do not scan arbitrary production directories.
 """
 import argparse
+from collections import Counter
+import math
 import hashlib
 import json
 import os
 import stat
 from pathlib import Path
+
+
+def static_file_type(head: bytes):
+    if head.startswith(b"\\x7fELF"):
+        return "ELF"
+    if head.startswith(b"MZ"):
+        return "PE_or_DOS"
+    if head.startswith(b"PK\\x03\\x04"):
+        return "ZIP_or_Office"
+    if head.startswith(b"#!"):
+        return "SCRIPT"
+    return "UNKNOWN"
+
+
+def shannon_entropy(sample: bytes):
+    if not sample:
+        return 0.0
+    counts = Counter(sample)
+    length = len(sample)
+    return round(-sum((n / length) * math.log2(n / length)
+                       for n in counts.values()), 3)
 
 
 def inventory(directory: Path, max_size=20 * 1024 * 1024, max_files=200):
@@ -24,6 +47,7 @@ def inventory(directory: Path, max_size=20 * 1024 * 1024, max_files=200):
             continue
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         digest = hashlib.sha256()
+        signature = bytearray()
         try:
             fd = os.open(entry, flags)
             with os.fdopen(fd, "rb") as data:
@@ -35,14 +59,19 @@ def inventory(directory: Path, max_size=20 * 1024 * 1024, max_files=200):
                     total += len(block)
                     if total > max_size:
                         raise ValueError("file grew beyond cap")
+                    if len(signature) < 65536:
+                        signature.extend(block[:65536 - len(signature)])
                     digest.update(block)
         except (OSError, ValueError):
             continue
         results.append({
             "sha256": digest.hexdigest(),
             "size_bytes": total,
+            "file_type_hint": static_file_type(signature),
+            "entropy_first_64k": shannon_entropy(signature),
             "classification": "UNVERIFIED_SAMPLE",
-            "analyzed": False,
+            "analysis": "static_header_and_entropy_only",
+            "analyzed": True,
             "executed": False
         })
     return results
