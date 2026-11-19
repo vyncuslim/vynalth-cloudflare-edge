@@ -28,7 +28,7 @@ export function honeypotDiagnosticsEnabled(env, now = Date.now()) {
   if (env?.TIDB_HONEYPOT_DIAGNOSTICS_ENABLED !== "true") return false;
   const until = env?.TIDB_HONEYPOT_DIAGNOSTICS_UNTIL;
   if (typeof until !== "string" ||
-      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/.test(until)) return false;
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(until)) return false;
   const end = Date.parse(until);
   return Number.isFinite(end) && end > now && end - now <= 2 * 60 * 60 * 1000;
 }
