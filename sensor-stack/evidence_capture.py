@@ -181,16 +181,20 @@ def _canonical_event(raw, source, key: bytes, line_no, tty_dir, download_dir):
             expected = raw.get("shasum")
             expected = expected.lower() if isinstance(expected, str) and HEX64.fullmatch(expected.lower()) else None
             reported_size = raw.get("size")
-            size_matches = (reported_size == file["size_bytes"]) if (is_tty and file and type(reported_size) is int) else None
-            # Cowrie ttylog shasum is input-only; compare SHA256 only for sample files.
+            # Cowrie event 'size' may differ from physical TTY recording bytes
+            # due to transport/framing/serialized output. Preserve reported
+            # value without equating it to the on-disk artifact byte length.
+            reported_size = (reported_size if is_tty and type(reported_size) is int
+                             and 0 <= reported_size <= MAX_BYTES else None)
+            # Cowrie ttylog shasum is INPUT-only, never the full tape SHA-256.
             matches = ((file["sha256"] == expected) if (file and expected and not is_tty) else None)
             evidence = {
                 "kind": "tty_recording" if is_tty else "quarantined_file",
                 "artifact": file,
                 "verification": ("source_checksum_mismatch" if matches is False else
-                                 "source_size_mismatch" if size_matches is False else
                                  "locally_hashed" if file else "unavailable"),
                 "cowrie_reported_input_sha256": expected if is_tty else None,
+                "cowrie_reported_size_bytes": reported_size if is_tty else None,
                 "file_hash_verified_against_source": matches,
             }
     elif source == "opencanary":
