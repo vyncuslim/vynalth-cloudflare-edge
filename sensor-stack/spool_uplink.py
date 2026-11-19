@@ -253,11 +253,14 @@ def deliver(dbfile,key,ingest_key,max_events=1,transport=None):
 def inspect(dbfile,key):
     if not isinstance(key,str) or len(key)<32:
         raise EvidenceError("private evidence HMAC key required")
-    # Readback must prove each local source row's own HMAC first; a tampered
-    # spool cannot be displayed as healthy even if no upload was attempted.
-    verify_spool(dbfile,key)
+    # Zero events is a valid idle sensor, but NOT evidence of any capture.
+    # Once the spool has events, verify every source record before any status
+    # can be considered trusted; tampering fails closed.
     with _ro(dbfile) as db:
         total=db.execute("SELECT COUNT(*) FROM sanitized_event").fetchone()[0]
+    if total:
+        verify_spool(dbfile,key)
+    with _ro(dbfile) as db:
         exists=db.execute("""
             SELECT 1 FROM sqlite_master WHERE type='table'
             AND name='delivery_outbox'
@@ -270,7 +273,8 @@ def inspect(dbfile,key):
                 "outbox_states":counts,
                 "unsent":total-sum(counts.values()),
                 "operator_review_needed":sum(counts.get(x,0) for x in HELD),
-                "readonly":True,"network_requests":0}
+                "readonly":True,"network_requests":0,
+                "captured_evidence_verified":bool(total)}
 
 
 def main():
