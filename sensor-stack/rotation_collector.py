@@ -33,7 +33,7 @@ ARCHIVE_RE = re.compile(r"^(?:[1-9][0-9]{0,3}|20[0-9]{2}-[01][0-9]-[0-3][0-9](?:
 MAX_LOG_BYTES = 64 * 1024 * 1024
 
 
-def _allowed_files(directory: Path, active_name: str):
+def _allowed_files(directory: Path, active_name: str, key: bytes):
     directory = Path(directory)
     if not ACTIVE_RE.fullmatch(active_name) or "/" in active_name or active_name in {".", ".."}:
         raise EvidenceError("unsafe active log name")
@@ -54,7 +54,14 @@ def _allowed_files(directory: Path, active_name: str):
         info=entry.stat()
         if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_LOG_BYTES:
             raise EvidenceError("source file type or size cap failed")
-        identity=(info.st_dev,info.st_ino)
+        # A recycled inode is not a stable file identity. The protected
+        # first-64-byte signature identifies the source generation without
+        # storing plaintext log fragments in SQLite.
+        with entry.open("rb") as stream:
+            prefix=stream.read(64)
+        fingerprint=hmac.new(key,b"source-prefix-v1|"+prefix,
+                             hashlib.sha256).hexdigest()
+        identity=(info.st_dev,info.st_ino,fingerprint)
         if identity in inode_seen:
             raise EvidenceError("hard-linked source might double-count")
         inode_seen.add(identity)
@@ -67,7 +74,7 @@ def _allowed_files(directory: Path, active_name: str):
                 stream.seek(-1,os.SEEK_END)
                 if stream.read(1) != b"\n":
                     raise EvidenceError("archived log ends in an incomplete JSONL record")
-        found.append((active,info.st_mtime_ns,entry,info))
+        found.append((active,info.st_mtime_ns,entry,info,fingerprint))
         if len(found)>MAX_FILES:
             raise EvidenceError("more than 32 retained archives; fail closed")
     if not active_exists:
@@ -83,33 +90,34 @@ def _inventory_table(db):
       source TEXT NOT NULL,
       device INTEGER NOT NULL,
       inode INTEGER NOT NULL,
+      prefix_hmac TEXT NOT NULL,
       last_known_bytes INTEGER NOT NULL,
       processed_bytes INTEGER NOT NULL,
       last_seen_utc TEXT NOT NULL,
-      PRIMARY KEY (sensor_id,source,device,inode)
+      PRIMARY KEY (sensor_id,source,device,inode,prefix_hmac)
     )
     """)
 
 
 def _missing_unprocessed(db, source, sensor, present):
-    for dev,ino,known,processed in db.execute("""
-      SELECT device,inode,last_known_bytes,processed_bytes
+    for dev,ino,prefix,known,processed in db.execute("""
+      SELECT device,inode,prefix_hmac,last_known_bytes,processed_bytes
       FROM observed_source_file WHERE sensor_id=? AND source=?
     """,(sensor,source)):
-        if (dev,ino) not in present and processed < known:
+        if (dev,ino,prefix) not in present and processed < known:
             raise EvidenceError("previously observed unread archive vanished")
 
 
-def _update_inventory(db, source, sensor, info, processed, now):
+def _update_inventory(db, source, sensor, info, fingerprint, processed, now):
     db.execute("""
       INSERT INTO observed_source_file
-        (sensor_id,source,device,inode,last_known_bytes,processed_bytes,last_seen_utc)
-      VALUES (?,?,?,?,?,?,?)
-      ON CONFLICT(sensor_id,source,device,inode) DO UPDATE SET
+        (sensor_id,source,device,inode,prefix_hmac,last_known_bytes,processed_bytes,last_seen_utc)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(sensor_id,source,device,inode,prefix_hmac) DO UPDATE SET
         last_known_bytes=MAX(last_known_bytes,excluded.last_known_bytes),
         processed_bytes=MAX(processed_bytes,excluded.processed_bytes),
         last_seen_utc=excluded.last_seen_utc
-    """,(sensor,source,info.st_dev,info.st_ino,info.st_size,processed,now))
+    """,(sensor,source,info.st_dev,info.st_ino,fingerprint,info.st_size,processed,now))
 
 
 def _private_health_parent(path: Path):
@@ -190,8 +198,8 @@ def collect(raw_dir:Path,active_name:str,db_path:Path,health_path:Path,
     if not 0<=min_free_mb<=4096:
         raise EvidenceError("invalid minimum free disk setting")
     # No attacker-supplied paths, and no raw evidence is printed.
-    files=_allowed_files(raw_dir,active_name)
-    present={(i.st_dev,i.st_ino) for _,_,_,i in files}
+    files=_allowed_files(raw_dir,active_name,key.encode())
+    present={(i.st_dev,i.st_ino,fingerprint) for _,_,_,i,fingerprint in files}
     _private_health_parent(health_path)
     db=conn_for(db_path)
     try:
@@ -204,9 +212,9 @@ def collect(raw_dir:Path,active_name:str,db_path:Path,health_path:Path,
         raise EvidenceError("collector free-space threshold reached")
     new_events=rejected=0
     remaining=0
-    archive_count=sum(1 for active,_,_,_ in files if not active)
+    archive_count=sum(1 for active,_,_,_,_ in files if not active)
     now=datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
-    for is_active,_,file_path,info in files:
+    for is_active,_,file_path,info,fingerprint in files:
         processed=0
         for _ in range(max_rounds):
             outcome=spool(file_path,db_path,source,sensor,key,batch_size,max_records)
@@ -234,7 +242,7 @@ def collect(raw_dir:Path,active_name:str,db_path:Path,health_path:Path,
         db=conn_for(db_path)
         try:
             db.execute("BEGIN IMMEDIATE")
-            _update_inventory(db,source,sensor,latest,processed,now)
+            _update_inventory(db,source,sensor,latest,fingerprint,processed,now)
             db.commit()
         except BaseException:
             db.rollback()
