@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from durable_spool import EvidenceError,safe_store_path,conn_for,_mac
+from durable_spool import EvidenceError,safe_store_path,conn_for,_mac,verify as verify_spool
 from send_summaries import ENDPOINT,sign_message,validate_row
 
 VERSION="vynalth-sensor-outbox-v1"
@@ -253,6 +253,9 @@ def deliver(dbfile,key,ingest_key,max_events=1,transport=None):
 def inspect(dbfile,key):
     if not isinstance(key,str) or len(key)<32:
         raise EvidenceError("private evidence HMAC key required")
+    # Readback must prove each local source row's own HMAC first; a tampered
+    # spool cannot be displayed as healthy even if no upload was attempted.
+    verify_spool(dbfile,key)
     with _ro(dbfile) as db:
         total=db.execute("SELECT COUNT(*) FROM sanitized_event").fetchone()[0]
         exists=db.execute("""
