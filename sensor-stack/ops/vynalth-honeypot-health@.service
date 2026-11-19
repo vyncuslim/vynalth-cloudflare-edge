@@ -1,0 +1,25 @@
+# No network access or remote alert dispatch. Failed service is visible to
+# systemd/journald operator and should be routed to an authorized SOC.
+[Unit]
+Description=Verify signed Vynalth honeypot collector heartbeat (%i)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=vynalth-collector
+Group=vynalth-collector
+WorkingDirectory=/opt/vynalth-honeypot/sensor-stack
+LoadCredential=vynalth_evidence_hmac_key:/etc/vynalth-honeypot/evidence.key
+ExecStart=/usr/bin/python3 /opt/vynalth-honeypot/sensor-stack/rotation_collector.py --check --health /var/lib/vynalth-honeypot/private/%i-health.json
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+CapabilityBoundingSet=
+ReadOnlyPaths=/var/lib/vynalth-honeypot/private /opt/vynalth-honeypot
+UMask=0077
+MemoryMax=128M
+TimeoutStartSec=20

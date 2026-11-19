@@ -1,0 +1,89 @@
+name: Validate honeypot evidence custody and privacy
+on:
+  pull_request:
+    paths:
+      - "sensor-stack/evidence_capture.py"
+      - "sensor-stack/test_evidence_capture.py"
+      - "sensor-stack/EVIDENCE.md"
+      - ".github/workflows/validate-honeypot-evidence.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-forensic-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify evidence capture module
+        run: |
+          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py sensor-stack/rotation_collector.py
+          python -m unittest -v sensor-stack/test_evidence_capture.py
+          python -m unittest -v sensor-stack/test_durable_spool.py
+          python -m unittest -v sensor-stack/test_safe_tty_replay.py
+          python -m unittest -v sensor-stack/test_rotation_collector.py
+      - name: Assert evidence does not require production secrets or connect to cloud
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("sensor-stack/evidence_capture.py").read_text()
+          for forbidden in (
+              "urllib.request", "requests.", "fetch(", "socket.socket(",
+              "connect(", "subprocess.run(", "os.system(", "eval(",
+              "exec(", "importlib.import_module", "mysql://"
+          ):
+              assert forbidden not in p, forbidden
+          assert "os.O_EXCL" in p
+          assert 'getattr(os, "O_NOFOLLOW", 0)' in p
+          assert "hmac.compare_digest" in p
+          spool = Path("sensor-stack/durable_spool.py").read_text()
+          assert "BEGIN IMMEDIATE" in spool
+          assert "journal_mode=WAL" in spool
+          assert "synchronous=FULL" in spool
+          assert "SPOOL_BLOCKED" in spool
+          for forbidden in ("import requests", "import socket", "subprocess",
+                            "urllib.request", "os.system("):
+              assert forbidden not in spool, forbidden
+          rotations = Path("sensor-stack/rotation_collector.py").read_text()
+          assert "_missing_unprocessed" in rotations
+          assert "archived log ends in an incomplete" in rotations
+          assert "COLLECTOR_BLOCKED" in rotations
+          assert "health report tampered" in rotations
+          for forbidden in ("import requests", "import socket", "subprocess",
+                            "urllib.request", "os.system("):
+              assert forbidden not in rotations, forbidden
+          tty = Path("sensor-stack/safe_tty_replay.py").read_text()
+          assert "struct.Struct" in tty
+          assert "rendered_to_terminal" in tty
+          assert "file_executed" in tty
+          for forbidden in ("import socket", "subprocess", "os.system(", "eval("):
+              assert forbidden not in tty, forbidden
+          print("PASS: offline restricted capture, spool, and read-only TTY format checks")
+          PY
+      - name: Static systemd unit syntax verification, no enable/start
+        run: |
+          systemd-analyze verify \
+            sensor-stack/ops/vynalth-honeypot-collector@.service \
+            sensor-stack/ops/vynalth-honeypot-collector@.timer \
+            sensor-stack/ops/vynalth-honeypot-health@.service \
+            sensor-stack/ops/vynalth-honeypot-health@.timer
+          python - <<'PY'
+          from pathlib import Path
+          for path in Path("sensor-stack/ops").glob("*.service"):
+              content=path.read_text()
+              for required in ("NoNewPrivileges=yes","IPAddressDeny=any",
+                               "LoadCredential=vynalth_evidence_hmac_key:",
+                               "ProtectSystem=strict","User=vynalth-collector"):
+                  assert required in content,(path,required)
+          print("PASS: staged service units are network-denied and use private credentials")
+          PY
+      - name: No production deploy
+        run: |
+          echo "No public VM, no cloud deploy, no TiDB DDL, no binary upload."

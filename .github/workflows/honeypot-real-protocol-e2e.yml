@@ -38,6 +38,12 @@ jobs:
       - name: Connect via real protocols inside dedicated isolated Docker bridge
         run: |
           docker compose -f sensor-stack/compose.lab.yaml run --rm --no-deps probe
+      - name: Build SSH fake-shell test image on disposable cloud runner
+        run: |
+          docker compose -f sensor-stack/compose.lab.yaml build ssh-replay-probe
+      - name: Establish authentic Cowrie shell and capture harmless command
+        run: |
+          docker compose -f sensor-stack/compose.lab.yaml run --rm --no-deps ssh-replay-probe
       - name: Verify genuine Cowrie/OpenCanary events from the trusted runner
         run: |
           python -u sensor-stack/ci_protocol_probe.py --verify
@@ -48,6 +54,115 @@ jobs:
           python threat-intel/ci_full_chain.py
           npm install --ignore-scripts --no-audit --no-fund --silent
           node --test src/sensor-ingest.test.js
+      - name: Validate signed forensic index against REAL Cowrie connection log
+        env:
+          VYNALTH_EVIDENCE_HMAC_KEY: "ci-test-only-fresh-ephemeral-evidence-key-00000001"
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/lib/cowrie/tty "$scratch/tty"
+          python sensor-stack/evidence_capture.py \
+            --source cowrie --input "$scratch/cowrie.jsonl" --tty-dir "$scratch/tty" --output "$scratch/restricted-evidence.json"
+          python sensor-stack/evidence_capture.py \
+            --source cowrie --input "$scratch/restricted-evidence.json" --verify
+          python - "$scratch/restricted-evidence.json" <<'PY'
+          import json,sys
+          from pathlib import Path
+          data=json.loads(Path(sys.argv[1]).read_text())
+          counts=data["counts_by_class"]
+          assert counts.get("honeypot_login_accepted",0)>=1, "fake-shell auth event absent"
+          assert counts.get("shell_command",0)>=1, "command event absent"
+          assert counts.get("tty_finalized",0)>=1, "real TTY finalized event absent"
+          tapes=[x["evidence"] for x in data["records"]
+                 if x["event_class"]=="tty_finalized"]
+          print(json.dumps({"tty_verification_states":[e["verification"] for e in tapes if e],
+                            "tty_files_located":sum(bool(e and e["artifact"]) for e in tapes)}))
+          assert any(e and e["verification"]=="locally_hashed" and
+                     e["artifact"] and e["artifact"]["sha256"] for e in tapes)
+          print(json.dumps({"fake_shell_login":True,"command_recorded":True,
+                            "tty_artifact_verified":True,
+                            "public_attacks_captured":False}))
+          PY
+          echo "PASS: genuine Cowrie fake-shell session and locally hashed TTY evidence"
+      - name: Safely decode genuine Cowrie TTY frames (without displaying terminal output)
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/lib/cowrie/tty "$scratch/tty"
+          python sensor-stack/ci_validate_playlog.py "$scratch/cowrie.jsonl" "$scratch/tty"
+      - name: Verify restart-safe restricted spool from genuine Cowrie events
+        env:
+          VYNALTH_EVIDENCE_HMAC_KEY: "ci-test-only-fresh-ephemeral-evidence-key-00000001"
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
+          python sensor-stack/durable_spool.py --source cowrie --sensor-id ci-cowrie-lab --input "$scratch/cowrie.jsonl" --db "$scratch/private/spool.db"
+          python sensor-stack/durable_spool.py --db "$scratch/private/spool.db" --verify
+          python - "$scratch/private/spool.db" <<'PY'
+          import json, sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              counts=dict(db.execute("SELECT event_class,COUNT(*) FROM sanitized_event GROUP BY event_class"))
+          assert counts.get("honeypot_login_accepted",0)>=1
+          assert counts.get("shell_command",0)>=1
+          assert counts.get("tty_finalized",0)>=1
+          print(json.dumps({"real_cowrie_durable_spool":True,"event_classes_verified":True,"public_ip_sensor":False}))
+          PY
+          python sensor-stack/durable_spool.py --source cowrie --sensor-id ci-cowrie-lab --input "$scratch/cowrie.jsonl" --db "$scratch/private/spool.db"
+      - name: Verify archived real Cowrie logs drain before current file and sign health
+        env:
+          VYNALTH_EVIDENCE_HMAC_KEY: "ci-test-only-fresh-ephemeral-evidence-key-00000001"
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          mkdir -p "$scratch/raw"
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/source.jsonl"
+          python - "$scratch/source.jsonl" "$scratch/raw" <<'PY'
+          import sys
+          from pathlib import Path
+          source=Path(sys.argv[1]).read_bytes().splitlines(keepends=True)
+          assert len(source) >= 10, "Cowrie did not produce enough audit lines"
+          folder=Path(sys.argv[2])
+          half=len(source)//2
+          (folder/"cowrie.json.1").write_bytes(b"".join(source[:half]))
+          (folder/"cowrie.json").write_bytes(b"".join(source[half:]))
+          PY
+          python sensor-stack/rotation_collector.py --source cowrie \
+            --sensor-id ci-cowrie-rotation --raw-dir "$scratch/raw" \
+            --active-name cowrie.json --db "$scratch/private/events.db" \
+            --health "$scratch/private/health.json" --min-free-mb 0
+          python sensor-stack/rotation_collector.py --health "$scratch/private/health.json" --check
+          python sensor-stack/durable_spool.py --db "$scratch/private/events.db" --verify
+          python - "$scratch/private/events.db" <<'PY'
+          import json,sqlite3,sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              counts=dict(db.execute("SELECT event_class,COUNT(*) FROM sanitized_event GROUP BY event_class"))
+          assert counts.get("honeypot_login_accepted",0)>=1
+          assert counts.get("shell_command",0)>=1
+          assert counts.get("tty_finalized",0)>=1
+          print(json.dumps({"source":"real_cowrie_cloud_ci",
+                            "retained_archive_recovered":True,
+                            "signed_health_verified":True,
+                            "public_attack_data":False}))
+          PY
+          python - "$scratch" <<'PY'
+          import json,os,subprocess,sys
+          base=sys.argv[1]
+          cmd=["python","sensor-stack/rotation_collector.py","--source","cowrie",
+               "--sensor-id","ci-cowrie-rotation","--raw-dir",base+"/raw",
+               "--active-name","cowrie.json","--db",base+"/private/events.db",
+               "--health",base+"/private/health.json","--min-free-mb","0"]
+          result=json.loads(subprocess.check_output(cmd,text=True))
+          assert result["new_sanitized_events"]==0
+          assert result["status"]=="healthy"
+          print("PASS: real Cowrie archive replay is idempotent")
+          PY
       - name: Ensure test runner was isolated and production unchanged
         run: |
           echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."
