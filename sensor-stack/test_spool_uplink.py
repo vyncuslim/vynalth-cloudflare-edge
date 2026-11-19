@@ -143,7 +143,8 @@ class UplinkTests(unittest.TestCase):
             db.execute("UPDATE sanitized_event SET payload_json='{}'")
         with self.assertRaisesRegex(EvidenceError,"HMAC"):
             reserve(self.db,KEY)
-        self.assertEqual(inspect(self.db,KEY)["unsent"],1)
+        with self.assertRaisesRegex(EvidenceError,"HMAC"):
+            inspect(self.db,KEY)
 
     def test_opencanary_schema_maps_only_probe(self):
         log={
