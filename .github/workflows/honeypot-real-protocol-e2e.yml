@@ -86,13 +86,14 @@ jobs:
                             "public_attacks_captured":False}))
           PY
           echo "PASS: genuine Cowrie fake-shell session and locally hashed TTY evidence"
-      - name: Replay genuine Cowrie terminal tape without printing untrusted bytes
+      - name: Safely decode genuine Cowrie TTY frames (without displaying terminal output)
         run: |
           set -euo pipefail
           scratch=$(mktemp -d)
           trap 'rm -rf "$scratch"' EXIT
           docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
-          python sensor-stack/ci_validate_playlog.py "$scratch/cowrie.jsonl"
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/lib/cowrie/tty "$scratch/tty"
+          python sensor-stack/ci_validate_playlog.py "$scratch/cowrie.jsonl" "$scratch/tty"
       - name: Verify restart-safe restricted spool from genuine Cowrie events
         env:
           VYNALTH_EVIDENCE_HMAC_KEY: "ci-test-only-fresh-ephemeral-evidence-key-00000001"
