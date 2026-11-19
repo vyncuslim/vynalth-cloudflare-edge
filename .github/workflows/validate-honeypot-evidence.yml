@@ -24,10 +24,11 @@ jobs:
           python-version: "3.12"
       - name: Verify evidence capture module
         run: |
-          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py
+          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py sensor-stack/rotation_collector.py
           python -m unittest -v sensor-stack/test_evidence_capture.py
           python -m unittest -v sensor-stack/test_durable_spool.py
           python -m unittest -v sensor-stack/test_safe_tty_replay.py
+          python -m unittest -v sensor-stack/test_rotation_collector.py
       - name: Assert evidence does not require production secrets or connect to cloud
         run: |
           python - <<'PY'
@@ -50,6 +51,14 @@ jobs:
           for forbidden in ("import requests", "import socket", "subprocess",
                             "urllib.request", "os.system("):
               assert forbidden not in spool, forbidden
+          rotations = Path("sensor-stack/rotation_collector.py").read_text()
+          assert "_missing_unprocessed" in rotations
+          assert "archived log ends in an incomplete" in rotations
+          assert "COLLECTOR_BLOCKED" in rotations
+          assert "health report tampered" in rotations
+          for forbidden in ("import requests", "import socket", "subprocess",
+                            "urllib.request", "os.system("):
+              assert forbidden not in rotations, forbidden
           tty = Path("sensor-stack/safe_tty_replay.py").read_text()
           assert "struct.Struct" in tty
           assert "rendered_to_terminal" in tty
