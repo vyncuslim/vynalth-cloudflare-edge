@@ -1,0 +1,47 @@
+name: Verify real honeypot protocol evidence in GitHub cloud
+on:
+  pull_request:
+    paths:
+      - 'sensor-stack/**'
+      - 'threat-intel/**'
+      - '.github/workflows/honeypot-real-protocol-e2e.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-isolated-connection-and-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check Docker Compose and all loopback-only port mappings
+        run: |
+          docker compose -f sensor-stack/compose.lab.yaml config --quiet
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('sensor-stack/compose.lab.yaml').read_text()
+          for port in (2222,2223,2121,13306,16379):
+              assert f'127.0.0.1:{port}:{port}' in s
+          assert 'internal: true' in s
+          assert '0.0.0.0:' not in s
+          print('PASS: no public bound ports')
+          PY
+      - name: Launch independent disposable protocol sensors
+        run: |
+          docker compose -f sensor-stack/compose.lab.yaml up -d
+          docker compose -f sensor-stack/compose.lab.yaml ps --format json
+      - name: Connect via real SSH Telnet FTP MySQL Redis protocol sockets
+        run: |
+          python -u sensor-stack/ci_protocol_probe.py
+      - name: Ensure test runner was isolated and production unchanged
+        run: |
+          echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."
+      - name: Erase ephemeral local-only honeypot evidence
+        if: always()
+        run: |
+          docker compose -f sensor-stack/compose.lab.yaml down -v --remove-orphans --timeout 5 || true
