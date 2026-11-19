@@ -24,9 +24,10 @@ jobs:
           python-version: "3.12"
       - name: Verify evidence capture module
         run: |
-          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/test_evidence_capture.py sensor-stack/test_durable_spool.py
+          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py
           python -m unittest -v sensor-stack/test_evidence_capture.py
           python -m unittest -v sensor-stack/test_durable_spool.py
+          python -m unittest -v sensor-stack/test_safe_tty_replay.py
       - name: Assert evidence does not require production secrets or connect to cloud
         run: |
           python - <<'PY'
@@ -49,7 +50,13 @@ jobs:
           for forbidden in ("import requests", "import socket", "subprocess",
                             "urllib.request", "os.system("):
               assert forbidden not in spool, forbidden
-          print("PASS: offline restricted capture only; no network, no execution")
+          tty = Path("sensor-stack/safe_tty_replay.py").read_text()
+          assert "struct.Struct" in tty
+          assert "rendered_to_terminal" in tty
+          assert "file_executed" in tty
+          for forbidden in ("import socket", "subprocess", "os.system(", "eval("):
+              assert forbidden not in tty, forbidden
+          print("PASS: offline restricted capture, spool, and read-only TTY format checks")
           PY
       - name: No production deploy
         run: |
