@@ -22,23 +22,31 @@ def connect(port, timeout=55):
 
 
 def greeting(port):
-    with connect(port) as sock:
-        if port==2323:
-            sock.sendall(b"\r\n")
-            return "telnet_tunnel_connected"
-        try: banner=sock.recv(512)
-        except (TimeoutError,OSError): banner=b""
-        if port==2222 and not banner.startswith(b"SSH-2.0-"):
-            raise AssertionError("HAProxy to Cowrie SSH failed")
-        if port==2121 and not banner.startswith(b"220"):
-            raise AssertionError("HAProxy to OpenCanary FTP failed")
-        if port==13306 and (len(banner)<5 or banner[4]!=10):
-            raise AssertionError("HAProxy to OpenCanary MySQL handshake failed")
-        return {
-            2222:"cowrie_ssh_through_gateway",
-            2121:"opencanary_ftp_through_gateway",
-            13306:"opencanary_mysql_through_gateway",
-        }[port]
+    deadline=time.monotonic()+65
+    while time.monotonic()<deadline:
+        try:
+            with connect(port, timeout=8) as sock:
+                if port==2323:
+                    sock.sendall(b"\r\n")
+                try: banner=sock.recv(512)
+                except (TimeoutError,OSError): banner=b""
+                matched=(
+                    (port==2222 and banner.startswith(b"SSH-2.0-")) or
+                    (port==2323 and bool(banner)) or
+                    (port==2121 and banner.startswith(b"220")) or
+                    (port==13306 and len(banner)>4 and banner[4]==10)
+                )
+                if matched:
+                    return {
+                        2222:"cowrie_ssh_through_gateway",
+                        2323:"cowrie_telnet_through_gateway",
+                        2121:"opencanary_ftp_through_gateway",
+                        13306:"opencanary_mysql_through_gateway",
+                    }[port]
+        except (OSError,TimeoutError):
+            pass
+        time.sleep(2)
+    raise AssertionError("gateway backend never completed the expected handshake")
 
 
 def main():
