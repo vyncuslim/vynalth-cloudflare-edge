@@ -11,6 +11,7 @@ import { scheduleThreatTelemetry } from "./threat-telemetry.js";
 import { handlePhpInfoHoneypot } from "./phpinfo-honeypot.js";
 import { isPhpInfoHoneypotPath } from "./phpinfo-honeypot.js";
 import { handlePhpHoneypot, matchPhpHoneypot } from "./php-honeypots.js";
+import { handleHoneypotUiAsset } from "./honeypot-ui-client.js";
 import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { scheduleEdgeAccessLogs } from "./dual-access-logs.js";
 import { handleVercelDrain } from "./vercel-log-drain.js";
@@ -160,6 +161,11 @@ export default {
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
     }
+
+    // Serve a fixed local script ONLY for the isolated browser-only honeypot UI.
+    // No external resources, credentials, origin forwarding or new route bindings.
+    const decoyAsset = handleHoneypotUiAsset(request, incomingUrl.pathname);
+    if (decoyAsset) return observedResponse(decoyAsset, request, incomingUrl, requestId, rootDomain);
 
     // Vercel Log Drains terminate at Cloudflare, not the Vercel origin.
     // Never create a log of this drain request itself: that would cause
