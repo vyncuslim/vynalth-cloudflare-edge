@@ -201,8 +201,10 @@ class IntelTests(unittest.TestCase):
             batch(row,{**approval([row]),"api_token":"secret"})
         with self.assertRaises(ReviewError):
             batch(row,approval([row],indicator_ids=[fixed_uuid(99)]))
+        altered=approval([row])
+        altered["signature"]="broken"
         with self.assertRaises(ReviewError):
-            batch(row,approval([row],signature="broken"))
+            batch(row,altered)
 
     def test_export_writes_restricted_local_file_and_no_network(self):
         rows=[indicator()]
