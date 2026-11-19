@@ -14,7 +14,6 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from event_sanitizer import clean_event
 
 
 def connect_local(port, wait=65):
@@ -86,6 +85,7 @@ def run(cmd):
 
 
 def verify_real_cowrie_events():
+    from event_sanitizer import clean_event
     # Read the actual on-container JSONL; don't echo raw evidence to CI logs.
     import tempfile
     with tempfile.TemporaryDirectory(prefix="cowrie-proof-") as temp:
@@ -115,6 +115,7 @@ def verify_real_cowrie_events():
 
 
 def verify_real_opencanary_events():
+    from event_sanitizer import clean_event
     # Docker stdout carries raw honeypot logs; do not print them.
     raw=run(["docker","logs","vynalth-lab-opencanary"])
     observed=0
