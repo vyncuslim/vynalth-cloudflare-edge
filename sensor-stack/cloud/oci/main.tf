@@ -45,7 +45,10 @@ resource "oci_core_security_list" "sensor" {
     content {
       protocol = "6"
       source   = ingress_security_rules.value
-      tcp_options { min = 22, max = 22 }
+      tcp_options {
+        min = 22
+        max = 22
+      }
     }
   }
   dynamic "ingress_security_rules" {
@@ -64,12 +67,18 @@ resource "oci_core_security_list" "sensor" {
   egress_security_rules {
     protocol = "6"
     destination = "0.0.0.0/0"
-    tcp_options { min = 443, max = 443 }
+    tcp_options {
+      min = 443
+      max = 443
+    }
   }
   egress_security_rules {
     protocol = "17"
     destination = "0.0.0.0/0"
-    udp_options { min = 53, max = 53 }
+    udp_options {
+      min = 53
+      max = 53
+    }
   }
 }
 resource "oci_core_subnet" "sensor" {
@@ -115,7 +124,7 @@ resource "oci_core_instance" "sensor" {
   # No automated software install or secret injection. Network isolation,
   # provider eligibility and storage must be verified before deployment.
 }
-output "sensor_public_ip" {
-  value = var.launch_approved ? oci_core_instance.sensor[0].public_ip : null
-  description = "Address only available after an explicitly reviewed apply"
+output "sensor_instance_id" {
+  value       = var.launch_approved ? oci_core_instance.sensor[0].id : null
+  description = "Instance OCID only available after an explicitly reviewed apply"
 }
