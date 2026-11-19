@@ -33,7 +33,8 @@ def _sha256_file(path,expected):
         metadata=os.fstat(stream.fileno())
         if (not stat.S_ISREG(metadata.st_mode) or
             (metadata.st_dev,metadata.st_ino)!=(expected.st_dev,expected.st_ino) or
-            metadata.st_size!=expected.st_size):
+            metadata.st_size!=expected.st_size or
+            metadata.st_mtime_ns!=expected.st_mtime_ns):
             raise EvidenceError("archive changed before custody hash")
         digest=hashlib.sha256()
         while True:
