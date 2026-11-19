@@ -46,6 +46,7 @@ jobs:
           python -m unittest discover -v -s sensor-stack -p 'test_*.py'
           python -m unittest discover -v -s threat-intel -p 'test_*.py'
           python threat-intel/ci_full_chain.py
+          npm ci --ignore-scripts --no-audit --no-fund --silent
           node --test src/sensor-ingest.test.js
       - name: Ensure test runner was isolated and production unchanged
         run: |
