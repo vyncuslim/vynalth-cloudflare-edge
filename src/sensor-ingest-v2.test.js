@@ -144,6 +144,22 @@ test("new nonce with unchanged eventRef remains duplicate",async()=>{
   });
   assert.equal(outcome.status,409);
 });
+test("20 concurrent signed deliveries produce exactly one TiDB attempt",async()=>{
+  const seen=ledger();let writes=0;
+  const opts={now:NOW,ledgerClaim:seen.claim,ledgerSettle:seen.settle,
+    connectImpl:()=>({execute:async()=>{
+      // Yield to force requests to overlap after the persistent claim.
+      await Promise.resolve();
+      writes++;
+    }})};
+  const outcomes=await Promise.all(
+    Array.from({length:20},async()=>handleSensorIngestV2(await request(),env,opts)));
+  const statuses=outcomes.map(r=>r.status);
+  assert.equal(statuses.filter(x=>x===201).length,1);
+  assert.equal(statuses.filter(x=>x===409).length,19);
+  assert.equal(writes,1);
+});
+
 test("signature binds event reference and exact JSON; invalid never claims",async()=>{
   let calls=0;
   const noDb={now:NOW,ledgerClaim:()=>{
