@@ -1,0 +1,38 @@
+name: Validate Vynalth Threat Intelligence v1
+on:
+  pull_request:
+    paths:
+      - "threat-intel/**"
+      - ".github/workflows/validate-threat-intel.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review-schema-and-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile and validate
+        run: |
+          python -m compileall -q threat-intel
+          python -m unittest discover -v -s threat-intel -p "test_*.py"
+      - name: Prevent unreviewed production schema mutations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          migration = Path("threat-intel/sql/001_intelligence_v1.sql").read_text()
+          assert migration.count("CREATE TABLE IF NOT EXISTS") == 5
+          for forbidden in ("DROP TABLE", "ALTER TABLE honeypot_events", "GRANT ALL", "REVOKE ", "DELETE FROM "):
+              assert forbidden not in migration, forbidden
+          assert "USE vynalth_honeypot" in migration
+          print("OK: additive-only SQL; no production DDL execution")
+          PY
+      - name: Deployment explicitly disabled
+        run: |
+          echo "Offline validation only: no TiDB access, no Cloudflare deployment, no Vercel usage, no TAXII/MISP network traffic."

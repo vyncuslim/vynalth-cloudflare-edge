@@ -1,0 +1,13 @@
+# Raw honeypot evidence can contain passwords, IP addresses and malware.
+# NEVER commit any local runtime, sample or session recordings.
+runtime/
+*.log
+*.jsonl
+*.tty
+*.session
+*.sample
+*.bin
+.env
+.env.*
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,42 @@
+# Protocol honeypot lab: no production deployment
+name: Validate isolated honeypot sensors
+on:
+  pull_request:
+    paths:
+      - 'sensor-stack/**'
+      - '.github/workflows/validate-honeypot-sensors.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sensors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check Python scripts
+        run: |
+          python -m compileall -q sensor-stack
+          python -m unittest discover -v -s sensor-stack -p 'test_*.py'
+      - name: Validate OpenCanary JSON and safety boundaries
+        run: |
+          python -m json.tool sensor-stack/opencanary.conf > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          conf = json.loads(Path("sensor-stack/opencanary.conf").read_text())
+          assert conf["ftp.port"] == 2121 and conf["mysql.port"] == 13306
+          assert conf["redis.port"] == 16379
+          text = Path("sensor-stack/compose.lab.yaml").read_text()
+          assert '127.0.0.1:2222:2222' in text
+          assert '127.0.0.1:2223:2223' in text
+          assert '127.0.0.1:13306:13306' in text
+          assert '0.0.0.0:' not in text
+          assert "no-new-privileges:true" in text
+          print("PASS: loopback-only sensor lab; production routes unchanged")
+          PY
+      - name: No cloud deploy from this workflow
+        run: echo "CI validates only; Docker containers are not started and no Cloudflare/Vercel deploy occurs."

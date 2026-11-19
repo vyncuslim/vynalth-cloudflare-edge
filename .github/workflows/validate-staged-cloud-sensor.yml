@@ -1,0 +1,71 @@
+name: Validate staged OCI honeypot cloud release
+on:
+  pull_request:
+    paths:
+      - "sensor-stack/cloud/**"
+      - "src/tidb-honeypot.js"
+      - "src/tidb-honeypot.test.js"
+      - ".github/workflows/validate-staged-cloud-sensor.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static-infra-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+      - name: Validate OCI Terraform WITHOUT plan/apply or credentials
+        working-directory: sensor-stack/cloud/oci
+        run: |
+          terraform init -backend=false -input=false -no-color
+          terraform validate -no-color
+      - name: Verify staged Compose is loopback-only and sensor-only internal
+        run: |
+          docker compose -f sensor-stack/cloud/compose.public-staged.yaml config --quiet
+          docker compose -f sensor-stack/cloud/compose.public-staged.yaml config --format json > /tmp/cloud-sensor-compose.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('/tmp/cloud-sensor-compose.json').read_text())
+          services=d['services']
+          assert set(services)=={'cowrie','opencanary','ingress'}, set(services)
+          assert not services['cowrie'].get('ports')
+          assert not services['opencanary'].get('ports')
+          assert set(services['cowrie']['networks'])=={'sensor_core'}
+          assert set(services['opencanary']['networks'])=={'sensor_core'}
+          assert set(services['ingress']['networks'])=={'sensor_core','proxy_front'}
+          assert d['networks']['sensor_core']['internal'] is True
+          mapped=services['ingress']['ports']
+          assert len(mapped)==4
+          assert {str(x['published']) for x in mapped}=={'2222','2323','2121','13306'}
+          assert all(x.get('host_ip')=='127.0.0.1' for x in mapped),mapped
+          tf=Path('sensor-stack/cloud/oci/variables.tf').read_text()
+          assert tf.count('default     = false')>=2
+          assert 'public_decoys_approved' in tf and 'launch_approved' in tf
+          assert not list(Path('sensor-stack/cloud').rglob('*.tfvars'))
+          print("PASS: default-zero cloud resources and loopback-only decoy ingress")
+          PY
+      - name: Syntax-check fail-closed host firewall gate
+        run: bash -n sensor-stack/cloud/host-egress-gate.sh
+      - name: HAProxy config syntax only (never starts a public listener)
+        run: |
+          docker run --rm --network none --entrypoint haproxy \
+            -v "$PWD/sensor-stack/cloud/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro" \
+            haproxy:3.4.8-alpine -c -f /usr/local/etc/haproxy/haproxy.cfg
+      - name: Verify real TCP through loopback gateway on disposable GitHub runner
+        run: |
+          docker compose -f sensor-stack/cloud/compose.public-staged.yaml up -d
+          python -u sensor-stack/cloud/ci_gateway_probe.py
+      - name: Destroy staged gateway test and ephemeral evidence
+        if: always()
+        run: |
+          docker compose -f sensor-stack/cloud/compose.public-staged.yaml down -v --remove-orphans --timeout 5 || true
+      - name: Assert no production provisioning
+        run: |
+          echo 'Static validation ONLY. No terraform plan/apply, no OCI VM created, no Docker Compose up, no Cloudflare/Vercel deploy.'
