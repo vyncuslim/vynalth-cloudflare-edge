@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from hashlib import sha256
+import hmac
 import ipaddress
 import json
 import os
@@ -39,7 +40,7 @@ INDICATOR_FIELDS = {
 APPROVAL_FIELDS = {
     "approval_id", "recipient_id", "purpose", "export_format", "tlp",
     "indicator_ids", "approved", "approved_by", "approved_at", "expires_at",
-    "public_ip_release_approved", "second_reviewer_id",
+    "public_ip_release_approved", "second_reviewer_id", "signature",
 }
 PROTOCOLS = {"SSH", "TELNET", "HTTP", "FTP", "MYSQL", "REDIS"}
 HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -166,9 +167,29 @@ def eligible(indicator, now):
     return value
 
 
+def sign_approval(approval, key):
+    """Produce/verify an HMAC over canonical JSON, excluding signature.
+
+    An independent, protected key can detect forged/modified approval files,
+    but this is not a legal signature or proof of distinct human reviewers.
+    """
+    if not isinstance(key, str) or len(key) < 32:
+        reject("protected approval HMAC key is missing or too short")
+    content = {k: v for k, v in approval.items() if k != "signature"}
+    data = json.dumps(content, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("utf-8")
+    return hmac.new(key.encode("utf-8"), data, "sha256").hexdigest()
+
+
 def validate_approval(approval, fmt, ids, now):
     if not isinstance(approval, dict) or set(approval) != APPROVAL_FIELDS:
         reject("approval schema mismatch")
+    supplied = approval["signature"]
+    if not isinstance(supplied, str) or not HEX64.fullmatch(supplied):
+        reject("approval has no valid HMAC signature")
+    expected = sign_approval(approval, os.environ.get("VYNALTH_TI_APPROVAL_HMAC_KEY", ""))
+    if not hmac.compare_digest(supplied.lower(), expected):
+        reject("approval signature mismatch")
     canonical_uuid(approval["approval_id"], "approval_id")
     if approval["approved"] is not True or approval["export_format"] != fmt:
         reject("approval missing or format differs")
