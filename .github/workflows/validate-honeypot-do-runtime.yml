@@ -7,6 +7,7 @@ on:
       - "src/sensor-ledger-runtime-probe.js"
       - "sensor-stack/ci/do-runtime-wrangler.toml"
       - "sensor-stack/ci/do_runtime_acceptance.py"
+      - "sensor-stack/ci/validate_sensor_release_gate.py"
       - "sensor-stack/ops/DO_RUNTIME_ACCEPTANCE.md"
       - ".github/workflows/validate-honeypot-do-runtime.yml"
   workflow_dispatch:
@@ -46,6 +47,9 @@ jobs:
           assert cfg["migrations"][0]["new_sqlite_classes"]==["SensorReplayLedger"]
           print("PASS: isolated, local-only Wrangler config without production bindings")
           PY
+      - name: Enforce zero-public-sensor and no-paid-deploy release gate
+        run: |
+          python3 sensor-stack/ci/validate_sensor_release_gate.py
       - name: Run REAL local workerd SQLite Durable Object, restart persistence and concurrency
         run: |
           python3 sensor-stack/ci/do_runtime_acceptance.py
