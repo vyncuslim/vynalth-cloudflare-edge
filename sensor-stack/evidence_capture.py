@@ -114,7 +114,7 @@ def local_artifact(directory: Path | None, source_name, max_size=MAX_BYTES):
     if target.is_symlink():
         return None
     try:
-        mode = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        mode = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         fd = os.open(target, mode)
     except OSError:
         return None
@@ -220,6 +220,8 @@ def _canonical_event(raw, source, key: bytes, line_no, tty_dir, download_dir):
 def _scan(input_path, source, key, tty_dir, download_dir, max_lines):
     if not input_path.is_file() or input_path.is_symlink():
         raise EvidenceError("source must be a regular local evidence log")
+    if input_path.stat().st_size > 64 * 1024 * 1024:
+        raise EvidenceError("source evidence byte size exceeds the 64MiB safety cap")
     records, counts = [], Counter()
     digest = hashlib.sha256()
     rejected = 0
@@ -325,7 +327,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", choices=("cowrie", "opencanary"), required=True)
     parser.add_argument("--input", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--tty-dir", type=Path)
     parser.add_argument("--download-dir", type=Path)
     parser.add_argument("--max-lines", type=int, default=10000)
@@ -336,6 +338,8 @@ def main():
         if args.verify:
             result = verify_manifest(args.input, key)
         else:
+            if args.output is None:
+                raise EvidenceError("--output is required for capture")
             result = capture(args.input, args.output, args.source, key,
                              args.tty_dir, args.download_dir, args.max_lines)
     except (EvidenceError, OSError, ValueError, TypeError, KeyError):
