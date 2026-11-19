@@ -78,8 +78,19 @@ class RotationTests(unittest.TestCase):
     def test_lost_unread_archive_is_detected_and_blocks_processing(self):
         self.active.write_text(serialize(row(),row("cowrie.login.failed")))
         self.cycle(batch_size=1,max_rounds=1)
-        self.active.unlink()
-        self.active.write_text(serialize(row("cowrie.command.input")))
+        replacement=self.logs/"newfile.json"
+        replacement.write_text(serialize(row("cowrie.command.input")))
+        os.replace(replacement,self.active)
+        with self.assertRaisesRegex(EvidenceError,"unread archive vanished"):
+            self.cycle()
+        self.assertEqual(verify(self.db,KEY)["sanitized_events"],1)
+
+    def test_inplace_rewrite_same_inode_cannot_hide_unread_data(self):
+        self.active.write_text(serialize(row(),row("cowrie.login.failed")))
+        self.cycle(batch_size=1,max_rounds=1)
+        original=self.active.stat().st_ino
+        self.active.write_text(serialize(row("cowrie.command.failed")))
+        self.assertEqual(self.active.stat().st_ino,original)
         with self.assertRaisesRegex(EvidenceError,"unread archive vanished"):
             self.cycle()
         self.assertEqual(verify(self.db,KEY)["sanitized_events"],1)
