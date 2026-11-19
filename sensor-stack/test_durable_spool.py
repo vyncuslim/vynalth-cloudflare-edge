@@ -136,6 +136,20 @@ class DurableSpoolTests(unittest.TestCase):
         with self.assertRaisesRegex(EvidenceError,"HMAC"):
             verify(self.store,"a-different-test-key-"+"b"*40)
 
+    def test_verification_is_readonly_and_empty_spool_is_not_evidence(self):
+        self.raw.write_bytes(b"")
+        zero=self.run_spool()
+        self.assertEqual(zero["new_events"],0)
+        with self.assertRaisesRegex(EvidenceError,"empty spool"):
+            verify(self.store,KEY)
+        self.append(cowrie())
+        self.run_spool()
+        before=self.store.stat().st_mtime_ns
+        validated=verify(self.store,KEY)
+        self.assertEqual(validated["sanitized_events"],1)
+        self.assertTrue(validated["readonly"])
+        self.assertEqual(self.store.stat().st_mtime_ns,before)
+
     def test_unknown_event_is_counted_but_not_exported(self):
         self.raw.write_text(lines(
             cowrie("cowrie.not-recognized"),
