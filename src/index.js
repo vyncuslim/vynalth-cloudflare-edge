@@ -15,6 +15,7 @@ import { scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 import { scheduleEdgeAccessLogs } from "./dual-access-logs.js";
 import { handleVercelDrain } from "./vercel-log-drain.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
+import { scheduleTidbHoneypotEvent } from "./tidb-honeypot.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleRootBrowserEndpoint, addRootBrowserToDocumentResponse } from "./global-browser-id.js";
@@ -184,6 +185,8 @@ export default {
       scheduleThreatTelemetry(request, env, ctx, requestId);
       scheduleAxiomSecurityEvent({ request, url:incomingUrl, env, ctx, requestId,
         status:403, path:"/wp-admin/install.php", kind:"wp_installer_block" });
+      scheduleTidbHoneypotEvent({ request, url:incomingUrl, env, ctx, requestId,
+        status:403, path:"/wp-admin/install.php", kind:"wp_installer_block" });
       return observedResponse(new Response("Forbidden", {
         status: 403,
         headers: {
@@ -215,6 +218,10 @@ export default {
       const canonicalDecoyPath = isPhpInfoHoneypotPath(incomingUrl.pathname)
         ? "/api/phpinfo.php" : matchPhpHoneypot(incomingUrl.pathname)?.path;
       if (canonicalDecoyPath) scheduleAxiomSecurityEvent({
+        request, url:incomingUrl, env, ctx, requestId, status:phpDecoy.status,
+        path:canonicalDecoyPath, kind:decoyKind,
+      });
+      if (canonicalDecoyPath) scheduleTidbHoneypotEvent({
         request, url:incomingUrl, env, ctx, requestId, status:phpDecoy.status,
         path:canonicalDecoyPath, kind:decoyKind,
       });
