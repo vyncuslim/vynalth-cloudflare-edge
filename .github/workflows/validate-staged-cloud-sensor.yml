@@ -58,6 +58,14 @@ jobs:
           docker run --rm --network none --entrypoint haproxy \
             -v "$PWD/sensor-stack/cloud/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro" \
             haproxy:3.4.8-alpine -c -f /usr/local/etc/haproxy/haproxy.cfg
+      - name: Verify real TCP through loopback gateway on disposable GitHub runner
+        run: |
+          docker compose -f sensor-stack/cloud/compose.public-staged.yaml up -d
+          python -u sensor-stack/cloud/ci_gateway_probe.py
+      - name: Destroy staged gateway test and ephemeral evidence
+        if: always()
+        run: |
+          docker compose -f sensor-stack/cloud/compose.public-staged.yaml down -v --remove-orphans --timeout 5 || true
       - name: Assert no production provisioning
         run: |
           echo 'Static validation ONLY. No terraform plan/apply, no OCI VM created, no Docker Compose up, no Cloudflare/Vercel deploy.'
