@@ -44,6 +44,9 @@ AXIOM_HONEYPOT_INGEST_ENABLED = "false"
 # No Vercel endpoint or new Cloudflare route is involved.
 TIDB_HONEYPOT_INGEST_ENABLED = "true"
 TIDB_HONEYPOT_SAMPLE_RATE = "0.1"
+# One controlled verification release only. Keep false until release approval.
+# Fixed, privacy-safe log categories; no raw user/IP/secret details.
+TIDB_HONEYPOT_DIAGNOSTICS_ENABLED = "false"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "true"
 SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"
