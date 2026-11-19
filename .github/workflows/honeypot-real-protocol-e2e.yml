@@ -38,6 +38,12 @@ jobs:
       - name: Connect via real protocols inside dedicated isolated Docker bridge
         run: |
           docker compose -f sensor-stack/compose.lab.yaml run --rm --no-deps probe
+      - name: Build SSH fake-shell test image on disposable cloud runner
+        run: |
+          docker compose -f sensor-stack/compose.lab.yaml build ssh-replay-probe
+      - name: Establish authentic Cowrie shell and capture harmless command
+        run: |
+          docker compose -f sensor-stack/compose.lab.yaml run --rm --no-deps ssh-replay-probe
       - name: Verify genuine Cowrie/OpenCanary events from the trusted runner
         run: |
           python -u sensor-stack/ci_protocol_probe.py --verify
@@ -56,11 +62,28 @@ jobs:
           scratch=$(mktemp -d)
           trap 'rm -rf "$scratch"' EXIT
           docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/lib/cowrie/tty "$scratch/tty"
           python sensor-stack/evidence_capture.py \
-            --source cowrie --input "$scratch/cowrie.jsonl" --output "$scratch/restricted-evidence.json"
+            --source cowrie --input "$scratch/cowrie.jsonl" --tty-dir "$scratch/tty" --output "$scratch/restricted-evidence.json"
           python sensor-stack/evidence_capture.py \
             --source cowrie --input "$scratch/restricted-evidence.json" --verify
-          echo "PASS: authenticated offline metadata index from true Cowrie socket events"
+          python - "$scratch/restricted-evidence.json" <<'PY'
+          import json,sys
+          from pathlib import Path
+          data=json.loads(Path(sys.argv[1]).read_text())
+          counts=data["counts_by_class"]
+          assert counts.get("honeypot_login_accepted",0)>=1, "fake-shell auth event absent"
+          assert counts.get("shell_command",0)>=1, "command event absent"
+          assert counts.get("tty_finalized",0)>=1, "real TTY finalized event absent"
+          tapes=[x["evidence"] for x in data["records"]
+                 if x["event_class"]=="tty_finalized"]
+          assert any(e and e["verification"]=="locally_hashed" and
+                     e["artifact"] and e["artifact"]["sha256"] for e in tapes)
+          print(json.dumps({"fake_shell_login":True,"command_recorded":True,
+                            "tty_artifact_verified":True,
+                            "public_attacks_captured":False}))
+          PY
+          echo "PASS: genuine Cowrie fake-shell session and locally hashed TTY evidence"
       - name: Ensure test runner was isolated and production unchanged
         run: |
           echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."
