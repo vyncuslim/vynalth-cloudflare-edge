@@ -38,8 +38,8 @@ services:
     cap_add: [SETUID, SETGID]
     networks: [sensor_core]
   ingress:
-    # Digest-pin and ARM64-verify this image before a public release.
-    image: haproxy:3.4.8-alpine
+    # Version 3.4.8 alpine image digest captured from 2026-11-19 cloud CI; verify ARM64 manifest before public release.
+    image: haproxy@sha256:0f4ac017b3a028170f9727f0f0865cfae9264519efa5b7c7d31606ce4777f8bc
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
