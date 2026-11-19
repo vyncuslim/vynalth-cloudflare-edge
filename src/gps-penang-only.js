@@ -1,3 +1,5 @@
+import { isPenangGpsWindow } from './gps-penang-time-window.js';
+
 /**
  * Penang STATE (MY-07) selector for consent-based browser GPS checking.
  * Butterworth's optional GPS exemption is selected by original Cloudflare
@@ -32,12 +34,17 @@ const parseCoord = (x,min,max) => {
 
 export function gpsPenangOnlyDecision(
   request, env, verifiedCountry = null, verifiedRegionCode = null, verifiedRegion = null,
-  verifiedCity = null
+  verifiedCity = null, now = Date.now()
 ) {
   // Keep the existing deployed environment variable name for compatibility.
   // The enabled policy now covers the entire state, not just Penang island.
   if (env?.GPS_PENANG_ONLY_ENABLED !== "true") {
     return {enabled:false,requireGPS:true,reason:"legacy-policy"};
+  }
+  // Optional server-clock schedule: outside 05:00–20:50 MYT, the GPS overlay
+  // is not required. All independent WAF, account and School IP rules still apply.
+  if (env?.GPS_PENANG_TIME_WINDOW_ENABLED === "true" && !isPenangGpsWindow(now)) {
+    return {enabled:true,requireGPS:false,reason:"outside-penang-gps-hours"};
   }
   const signed = verifiedCountry !== null;
   const cf = request?.cf;
@@ -56,6 +63,12 @@ export function gpsPenangOnlyDecision(
   }
   if (!codeMatches && !nameMatches) {
     return {enabled:true,requireGPS:false,reason:"outside-penang-or-unknown-region"};
+  }
+  // When the operator opts in, ALL of Penang including Butterworth and
+  // the mainland must complete the campus check. IP locality is not proof.
+  if (env?.GPS_PENANG_ALL_LOCALITIES_ENABLED === "true") {
+    return {enabled:true,requireGPS:true,
+      reason:signed ? "penang-state-signed-evidence" : "penang-state-ip-evidence"};
   }
   // A Service Binding call carries only the signed original city in v3.
   // Never use the *receiving* Worker's IP postcode or coordinates for it.

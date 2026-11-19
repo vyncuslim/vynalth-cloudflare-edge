@@ -628,7 +628,8 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
   return reply(200,{purpose:"campus geofence validation",locationPermission:"visitor-controlled",
     exemptAccountStatuses:["trust","contact","status"],preciseCoordinatesStoredInCookie:false,
     crossDomainCookieReading:false,defaultEnabled:false,
-    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?"penang-state-except-butterworth":"legacy"});
+    regionalMode:env?.GPS_PENANG_ONLY_ENABLED==="true"?
+      (env?.GPS_PENANG_ALL_LOCALITIES_ENABLED==="true"?"penang-state-all-localities":"penang-state-except-butterworth"):"legacy"});
  }
 
  if(env?.GPS_GATE_ENABLED!=="true")return null;
@@ -640,7 +641,7 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
  // Only coarse, safe diagnostic state is exposed; never raw Cookie, IP or GPS.
  const recovery=await inspectButterworthProof(request,env,url.hostname);
  const browserProof=!!cfg && penang.enabled && penang.requireGPS &&
-    recovery.valid && !(await hasBlockVerdict(request,cfg,url.hostname));
+    env?.GPS_PENANG_ALL_LOCALITIES_ENABLED!=="true" && recovery.valid && !(await hasBlockVerdict(request,cfg,url.hostname));
  if(((penang.enabled && !penang.requireGPS)||browserProof) &&
     !url.pathname.startsWith("/__shield/gps/"))return null;
  // An explicitly enabled GPS gate must never quietly become permissive
@@ -728,7 +729,9 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
    gpsServiceBinding:{configured:typeof env?.GPS_SERVICE_AUTH_SECRET==="string"&&
     env.GPS_SERVICE_AUTH_SECRET.length>=32},
    regionalPolicy:penang.enabled
-    ? {enabled:true,mode:"penang-state-except-butterworth",trigger:"cloudflare-ip-state-city-metadata",
+    ? {enabled:true,mode:env?.GPS_PENANG_ALL_LOCALITIES_ENABLED==="true"?"penang-state-all-localities":"penang-state-except-butterworth",
+       trigger:"cloudflare-ip-state-metadata",
+       timeWindow:env?.GPS_PENANG_TIME_WINDOW_ENABLED==="true"?"05:00-20:50 Asia/Kuala_Lumpur":"unrestricted",
        regionKnown:penang.reason.startsWith("penang-state-")||penang.reason.startsWith("butterworth-"),
        gpsRequired:penang.requireGPS && !browserProof,
        selectionReason:browserProof?(recovery.kind===MISLOCATED_OUTSIDE_KIND?
@@ -736,7 +739,8 @@ export async function guestGpsGate(request,env,url,ctx=null,requestId=null,verif
        browserProofKind:browserProof?recovery.kind:null,
        browserProofActive:browserProof,
        butterworthRecovery:{
-        enabled:env?.GPS_BUTTERWORTH_PROOF_ENABLED==="true",
+        enabled:env?.GPS_BUTTERWORTH_PROOF_ENABLED==="true"&&
+          env?.GPS_PENANG_ALL_LOCALITIES_ENABLED!=="true",
         credentialStatus:recovery.status,
         verifyPath:"/__shield/gps/recover",
         maxDurationSeconds:1800
