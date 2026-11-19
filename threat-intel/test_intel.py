@@ -206,6 +206,24 @@ class IntelTests(unittest.TestCase):
         with self.assertRaises(ReviewError):
             batch(row,altered)
 
+    def test_duplicate_or_nonstring_approval_ids_are_rejected(self):
+        row=indicator()
+        for ids in [[row["indicator_id"],row["indicator_id"]], [None], {"a":"b"}, [42]]:
+            with self.subTest(ids=ids):
+                bad=approval([row],indicator_ids=ids)
+                with self.assertRaises(ReviewError):
+                    batch(row,bad)
+
+    def test_independent_signer_and_expiration_must_be_valid(self):
+        row=indicator()
+        for bad in [
+            approval([row],expires_at=time_at(-1)),
+            approval([row],approved_at=time_at(2)),
+            approval([row],approved_by="reviewer-A"),
+        ]:
+            with self.assertRaises(ReviewError):
+                batch(row,bad)
+
     def test_export_writes_restricted_local_file_and_no_network(self):
         rows=[indicator()]
         grant=approval(rows)
