@@ -41,7 +41,8 @@ class MonitorTests(unittest.TestCase):
                 "cowrie","ci-monitored-01",KEY,min_free_mb=0)
 
     def check(self,**kwargs):
-        return monitor(self.db,self.health,self.alert,KEY,min_free_mb=0,**kwargs)
+        kwargs.setdefault("min_free_mb",0)
+        return monitor(self.db,self.health,self.alert,KEY,**kwargs)
 
     def test_healthy_signed_monitor_default_is_offline(self):
         result=self.check()
