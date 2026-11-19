@@ -78,6 +78,16 @@ def boot(port,persist,logs):
     until=time.monotonic()+60
     while time.monotonic()<until:
         if proc.poll() is not None:
+            logs.flush()
+            with open(logs.name,"rb") as local_log:
+                # Only the synthetic, token-free CI harness is running.
+                # Print bounded startup diagnostics so a real runtime
+                # incompatibility cannot be misrepresented as success.
+                excerpt=local_log.read()[-5000:].decode("utf-8","replace")
+            for line in excerpt.splitlines()[-20:]:
+                if any(word in line.lower() for word in
+                       ("error","fail","cannot","not found","invalid","wrangler","entry")):
+                    print("LOCAL_WORKER_STARTUP: "+line[:250],file=sys.stderr)
             raise AssertionError("workerd exited before serving localhost")
         if ready(port):
             return proc
@@ -181,6 +191,6 @@ if __name__=="__main__":
         exercise()
     except Exception as exc:
         # No raw body, token or local source ID is included in fixed messages.
-        print("DO_RUNTIME_ACCEPTANCE_FAILED: "+type(exc).__name__,
+        print("DO_RUNTIME_ACCEPTANCE_FAILED: "+type(exc).__name__+" "+str(exc)[:160],
               file=sys.stderr)
         raise SystemExit(2)
