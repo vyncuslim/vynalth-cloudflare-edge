@@ -44,6 +44,9 @@ AXIOM_HONEYPOT_INGEST_ENABLED = "false"
 # No Vercel endpoint or new Cloudflare route is involved.
 TIDB_HONEYPOT_INGEST_ENABLED = "true"
 TIDB_HONEYPOT_SAMPLE_RATE = "0.1"
+# Keep schema v2 OFF until docs/sql/honeypot-events-v2.sql is manually applied.
+# New releases must not assume the additional columns exist in production.
+TIDB_HONEYPOT_ENRICHED_ENABLED = "false"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "true"
 SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"
