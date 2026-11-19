@@ -36,6 +36,15 @@ jobs:
           python -m unittest -v sensor-stack/test_rotation_collector.py
           python -m unittest -v sensor-stack/test_spool_uplink.py
           python -m unittest -v sensor-stack/test_delivery_monitor.py
+      - name: Exercise real Python HMAC -> JS Worker handler with MOCK TiDB
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/vynalth-disposable-outbox-ci.json"
+          trap 'rm -f "$fixture"' EXIT
+          python sensor-stack/ci_signed_uplink_probe.py "$fixture"
+          npm install --ignore-scripts --no-audit --no-fund --silent
+          VYNALTH_OUTBOX_CI_FIXTURE="$fixture" node --test src/sensor-outbox-crosslang.test.js
+          echo "PASS: Python-signed payload accepted by Worker interface; no public DB or network POST"
       - name: Assert evidence does not require production secrets or connect to cloud
         run: |
           python - <<'PY'
