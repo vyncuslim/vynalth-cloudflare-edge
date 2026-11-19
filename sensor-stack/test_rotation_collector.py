@@ -43,8 +43,9 @@ class RotationTests(unittest.TestCase):
         self.health=self.base/"private"/"collector.json"
 
     def cycle(self,**opts):
+        opts.setdefault("min_free_mb",0)
         return collect(self.logs,"cowrie.json",self.db,self.health,
-                       "cowrie",SENSOR,KEY,min_free_mb=0,**opts)
+                       "cowrie",SENSOR,KEY,**opts)
 
     def test_initial_collection_and_signed_health(self):
         self.active.write_text(serialize(row(),row("cowrie.login.failed")))
@@ -177,9 +178,13 @@ class RotationTests(unittest.TestCase):
         self.assertEqual(verify(self.db,KEY)["sanitized_events"],2)
 
     def test_out_of_disk_policy_refuses_new_evidence(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
         self.active.write_text(serialize(row()))
-        with self.assertRaisesRegex(EvidenceError,"free-space threshold"):
-            self.cycle(min_free_mb=4096+1)
+        with patch("rotation_collector.shutil.disk_usage",
+                   return_value=SimpleNamespace(free=0)):
+            with self.assertRaisesRegex(EvidenceError,"free-space threshold"):
+                self.cycle(min_free_mb=128)
 
     def test_no_export_of_raw_identifiers(self):
         self.active.write_text(serialize(row("cowrie.command.input")))
