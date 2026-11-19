@@ -1,4 +1,6 @@
 import { PHPINFO_STATIC_HTML } from "./phpinfo-honeypot.js";
+import { HONEY_UI_CSS, interactiveConsoleHTML } from "./honeypot-console.js";
+import { HONEY_UI_ASSET_PATH } from "./honeypot-ui-client.js";
 /**
  * Fixed-path PHP scanner decoys for managed Cloudflare Worker routes.
  *
@@ -34,6 +36,15 @@ const SECURITY_HEADERS = Object.freeze({
     "script-src 'none'; img-src 'none'; connect-src 'none'; font-src 'none'; " +
     "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+});
+
+// Only the fictional console pages allow one same-origin, fixed JS asset.
+// No inline script, network access, form submissions, frames or origin APIs.
+const INTERACTIVE_SECURITY_HEADERS = Object.freeze({
+  ...SECURITY_HEADERS,
+  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; " +
+    "script-src 'self'; img-src 'none'; connect-src 'none'; font-src 'none'; " +
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 });
 
 const TITLES = Object.freeze({
@@ -125,19 +136,12 @@ function renderContent(kind) {
           ["Last scheduled task", "Completed"], ["Log level", "warning"],
         ]));
     case "login":
-      return '<div class="authbox"><h2>Administrator Sign in</h2>' +
-        '<p>Restricted management area</p>' +
-        '<label class="field" for="user">Username</label>' +
-        '<input id="user" type="text" autocomplete="off" placeholder="Username" disabled>' +
-        '<label class="field" for="pass">Password</label>' +
-        '<input id="pass" type="password" autocomplete="off" placeholder="Password" disabled>' +
-        '<button type="button" disabled>Sign in</button>' +
-        '<p><small>Authentication service is temporarily unavailable.</small></p></div>';
+      return interactiveConsoleHTML("login");
     case "database":
       return section("Server Overview", table(["Variable", "Value"], [
         ["Database server", "localhost via TCP/IP"], ["Server type", "MySQL"],
         ["Server version", "8.0.39"], ["Protocol version", "10"],
-        ["Connection", "read-only"], ["Client library", "mysqlnd 8.3.14"],
+        ["Connection", "TCP/IP"], ["Client library", "mysqlnd 8.3.14"],
       ])) + section("Databases", table(["Database", "Tables", "Status"], [
         ["app_core", "14", "available"], ["app_cache", "7", "available"],
         ["information_schema", "83", "system"], ["performance_schema", "114", "system"],
@@ -159,14 +163,14 @@ function renderContent(kind) {
         ["index.php", "PHP file", "3.2 KB", "2024-11-21"],
         ["config.php", "PHP file", "1.8 KB", "2024-11-21"],
         ["composer.json", "JSON file", "1.1 KB", "2024-11-21"],
-      ])) + section("Access", '<p><span class="pill warn">Read-only</span> File operations are unavailable.</p>');
+      ])) + section("Access", '<p><span class="pill">Online</span> File editor available in the management console.</p>');
     case "backup":
       return section("Backup Jobs", table(["Snapshot", "Type", "Size", "Status"], [
         ["daily-2024-11-21", "Full", "184 MB", "Completed"],
         ["daily-2024-11-20", "Incremental", "39 MB", "Completed"],
         ["daily-2024-11-19", "Incremental", "36 MB", "Completed"],
       ])) + section("Restore",
-        '<p><span class="pill warn">Unavailable</span> Restore operations require administrator authorization.</p>');
+        '<p><span class="pill">Ready</span> Backup restore console online.</p>');
     default:
       return "";
   }
@@ -231,7 +235,7 @@ const PAGES = new Map(
       '<meta name="robots" content="noindex,nofollow,noarchive">',
       "<title>", esc(brand), "</title>",
       '<style>:root{--accent:', THEMES[kind],
-      "}", STYLE, EXTRA_STYLE, "</style></head>",
+      "}", STYLE, EXTRA_STYLE, HONEY_UI_CSS, "</style></head>",
       '<body class="theme-',esc(kind),'"><main>',
       '<div class="appbar"><b>',esc(brand),'</b><em>Server: localhost</em></div>',
       '<div class="productbar"><b>Home</b>',staticNavigation(NAVIGATION[kind] || []),'</div>',
@@ -249,8 +253,11 @@ const PAGES = new Map(
       '</div>', side.map((x,i)=>
         '<span'+(i===0?' class="current"':'')+'>'+esc(x)+'</span>').join(""),
       '</aside><div class="main-area">',renderContent(kind),
-      '<div class="hint">Status: <b>Read only</b> · Interactive operations unavailable.</div>',
-      '</div></div><footer>System information</footer></main></body></html>',
+      kind === "login" ? "" : interactiveConsoleHTML(kind),
+      '<div class="hint">System state: <b>Operational</b> · Management console connected.</div>',
+      '</div></div><footer>System information</footer></main>',
+      '<script src="',HONEY_UI_ASSET_PATH,'" defer></script>',
+      '</body></html>',
     ].join("");
     return [kind,chrome];
   })
@@ -284,6 +291,7 @@ export function handlePhpHoneypot(request, url) {
     });
   }
   return new Response(method === "HEAD" ? null : PAGES.get(match.kind), {
-    status: 200, headers: SECURITY_HEADERS,
+    status: 200,
+    headers: match.kind === "php" ? SECURITY_HEADERS : INTERACTIVE_SECURITY_HEADERS,
   });
 }

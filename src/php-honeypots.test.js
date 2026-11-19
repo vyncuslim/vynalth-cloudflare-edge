@@ -7,6 +7,7 @@ import {
 } from "./php-honeypots.js";
 import { isObservedSecurityProbe, scheduleThreatTelemetry } from "./threat-telemetry.js";
 import { classifyEdgeAlert } from "./edge-telegram-alert.js";
+import { HONEY_UI_ASSET_PATH, HONEY_UI_SCRIPT, handleHoneypotUiAsset } from "./honeypot-ui-client.js";
 
 const base = "https://vynalthai.com";
 const req = (path, method = "GET") => new Request(base + path, { method });
@@ -38,11 +39,11 @@ test("each PHP honeypot renders an isolated and responsive HTML fixture", async 
   const representative = {
     php: ["PHP Version 8.3.14", "session.cookie_httponly"],
     diagnostics: ["Health Checks", "Database ping"],
-    login: ["Administrator Sign in", 'disabled>'],
+    login: ["Administrator Sign in", 'data-honey-login-form'],
     database: ["Server Overview", "app_core"],
     config: ["APP_ENV", "DB_PASSWORD"],
     files: ["Document Root", "composer.json"],
-    backup: ["Backup Jobs", "Restore operations"],
+    backup: ["Backup Jobs", "Backup restore console online."],
   };
   for (const route of PHP_HONEYPOT_ROUTES) {
     const url = new URL(base + route.path + "?secret=" + secret);
@@ -55,13 +56,31 @@ test("each PHP honeypot renders an isolated and responsive HTML fixture", async 
     assert.match(response.headers.get("Content-Type"), /text\/html/);
     assert.match(response.headers.get("Cache-Control"), /no-store/);
     assert.match(response.headers.get("X-Robots-Tag"), /noindex/);
-    assert.match(response.headers.get("Content-Security-Policy"), /script-src 'none'/);
-    assert.match(response.headers.get("Content-Security-Policy"), /form-action 'none'/);
+    const csp = response.headers.get("Content-Security-Policy");
+    assert.match(csp, route.kind === "php" ? /script-src 'none'/ : /script-src 'self'/);
+    assert.match(csp, /connect-src 'none'/);
+    assert.match(csp, /form-action 'none'/);
+    assert.match(csp, /frame-ancestors 'none'/);
     const body = await response.text();
     assert.match(body, /<meta name="viewport"/, route.path);
     for (const keyword of representative[route.kind]) assert.ok(body.includes(keyword), route.path + ": " + keyword);
+    if (route.kind === "php") {
+      assert.equal(body.includes("<script"), false);
+      assert.equal(body.includes("<form"), false);
+    } else {
+      assert.ok(body.includes('<script src="' + HONEY_UI_ASSET_PATH + '" defer></script>'), route.path);
+      assert.ok(body.includes("data-honey-root"), route.path);
+      assert.equal(body.includes("Read only"), false);
+      assert.equal(body.includes("Interactive operations unavailable"), false);
+    }
+    if (route.kind === "login") {
+      assert.match(body, /type="password"[^>]*required/);
+      assert.equal(body.includes('name="password"'), false);
+      assert.equal(body.includes('<form action='), false);
+      assert.equal(body.includes('disabled>'), false);
+    }
     for (const forbidden of [secret, "198.51.100.7", "vynalthai.com",
-      "<script", "<form", "fetch(", "document.cookie", 'href="http://', 'href="https://']) {
+      "fetch(", "document.cookie", 'href="http://', 'href="https://']) {
       assert.equal(body.includes(forbidden), false, route.path + ": " + forbidden);
     }
   }
@@ -144,4 +163,42 @@ test("all PHP honeypot telemetry has allowlisted path, 200/405 and no user secre
         "password=", "private="]) assert.equal(JSON.stringify(event).includes(forbidden), false);
     });
   } finally { globalThis.fetch = prior; }
+});
+
+test("interactivity uses a fixed same-origin asset and never sends input to origin", async () => {
+  assert.ok(HONEY_UI_ASSET_PATH.startsWith("/__vynalth/decoy/"));
+  assert.equal(HONEY_UI_SCRIPT.includes("fetch("), false);
+  assert.equal(HONEY_UI_SCRIPT.includes("sendBeacon"), false);
+  assert.equal(HONEY_UI_SCRIPT.includes("XMLHttpRequest"), false);
+  assert.equal(HONEY_UI_SCRIPT.includes("localStorage"), false);
+  assert.equal(HONEY_UI_SCRIPT.includes("document.cookie"), false);
+  assert.equal(HONEY_UI_SCRIPT.includes("innerHTML"), false);
+  assert.match(HONEY_UI_SCRIPT, /event.preventDefault\(\)/);
+  assert.match(HONEY_UI_SCRIPT, /terminal_action_simulated/);
+  assert.equal(handleHoneypotUiAsset(req("/__vynalth/decoy/wrong.js"), "/__vynalth/decoy/wrong.js"), null);
+  const url = HONEY_UI_ASSET_PATH;
+  const script = handleHoneypotUiAsset(req(url), url);
+  assert.equal(script.status, 200);
+  assert.equal(script.headers.get("Content-Type"), "application/javascript; charset=utf-8");
+  assert.equal(script.headers.get("Cross-Origin-Resource-Policy"), "same-origin");
+  assert.equal(await script.text(), HONEY_UI_SCRIPT);
+  const head = handleHoneypotUiAsset(req(url, "HEAD"), url);
+  assert.equal(await head.text(), "");
+  const post = handleHoneypotUiAsset(req(url, "POST"), url);
+  assert.equal(post.status, 405);
+});
+
+test("the Worker never forwards honeypot UI assets to an origin", async () => {
+  const original = console.info;
+  console.info = () => {};
+  try {
+    const request = req(HONEY_UI_ASSET_PATH);
+    const result = await worker.fetch(request, {
+      GPS_GATE_ENABLED: "true", EDGE_TELEGRAM_ALERTS_ENABLED:"false",
+      THREAT_INTEL_COLLECT_ENABLED:"false",
+    }, { waitUntil() {} });
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get("x-vynalth-edge"), "cloudflare-worker");
+    assert.match(await result.text(), /Sandbox-only browser UI/);
+  } finally { console.info = original; }
 });
