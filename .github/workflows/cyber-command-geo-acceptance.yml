@@ -1,0 +1,25 @@
+name: One-off Global Cyber Command HTTP reachability check
+on:
+  push:
+    branches:
+      - audit/cyber-command-geo-http-20261119
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  world-http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe two public endpoints from geographically distributed external HTTP nodes
+        run: python3 scripts/check-cyber-command-geography.py
+      - name: Archive observation records (no user IPs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyber-command-geo-audit
+          path: geo-audit-results.json
+          retention-days: 7
