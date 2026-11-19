@@ -11,10 +11,12 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from intel import (ReviewError, eligible, export_misp, export_stix,
-                   export_to_file, validated_batch, valid_indicator_value)
+                   export_to_file, validated_batch, valid_indicator_value, sign_approval)
 
 
 NOW = datetime(2026, 11, 19, 8, 0, tzinfo=timezone.utc)
+KEY = "test-only-approval-key-" + "x" * 48
+os.environ["VYNALTH_TI_APPROVAL_HMAC_KEY"] = KEY
 def time_at(days=0):
     return (NOW + timedelta(days=days)).isoformat().replace("+00:00", "Z")
 
@@ -59,6 +61,7 @@ def approval(indicators, fmt="stix", **changes):
         second_reviewer_id=None,
     )
     doc.update(changes)
+    doc["signature"] = sign_approval(doc, KEY)
     return doc
 
 def batch(row=None, grant=None, fmt="stix"):
@@ -168,12 +171,36 @@ class IntelTests(unittest.TestCase):
         with self.assertRaises(ReviewError):
             batch(indicator(kind="sha256",value="A"*64))
 
+    def test_tampering_after_approval_signature_is_rejected(self):
+        row=indicator()
+        signed=approval([row])
+        signed["recipient_id"]="attacker-controller"
+        with self.assertRaisesRegex(ReviewError,"signature"):
+            batch(row,signed)
+        signed=approval([row])
+        signed["approved"]=False
+        with self.assertRaisesRegex(ReviewError,"signature"):
+            batch(row,signed)
+        signed=approval([row])
+        signed["signature"]="0"*64
+        with self.assertRaisesRegex(ReviewError,"signature"):
+            batch(row,signed)
+        signed=approval([row])
+        del os.environ["VYNALTH_TI_APPROVAL_HMAC_KEY"]
+        try:
+            with self.assertRaisesRegex(ReviewError,"HMAC key"):
+                batch(row,signed)
+        finally:
+            os.environ["VYNALTH_TI_APPROVAL_HMAC_KEY"]=KEY
+
     def test_unknown_approval_fields_and_wrong_ids_refused(self):
         row=indicator()
         with self.assertRaises(ReviewError):
             batch(row,{**approval([row]),"api_token":"secret"})
         with self.assertRaises(ReviewError):
             batch(row,approval([row],indicator_ids=[fixed_uuid(99)]))
+        with self.assertRaises(ReviewError):
+            batch(row,approval([row],signature="broken"))
 
     def test_export_writes_restricted_local_file_and_no_network(self):
         rows=[indicator()]
