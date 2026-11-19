@@ -132,12 +132,14 @@ def exercise():
                 c={"eventRef":"c"*64,"nowMs":now}
                 d={"eventRef":"d"*64,"nowMs":now}
                 must(port,"/claim",a,201,"claimed")
+                print("PASS_STAGE initial_a",flush=True)
                 must(port,"/claim",a,409,"duplicate")
                 must(port,"/settle",{"eventRef":a["eventRef"],
                                      "state":"insert_acknowledged"},200,"settled")
                 must(port,"/settle",{"eventRef":a["eventRef"],
                                      "state":"sampled_out"},409,"not_reserved")
                 must(port,"/claim",b,201,"claimed")
+                print("PASS_STAGE initial_b",flush=True)
                 # Concurrent requests route to same actual SQLite-backed DO.
                 with ThreadPoolExecutor(max_workers=16) as pool:
                     results=list(pool.map(
@@ -145,7 +147,9 @@ def exercise():
                 codes=[x[0] for x in results]
                 assert codes.count(201)==1, codes
                 assert codes.count(409)==19, codes
+                print("PASS_STAGE concurrent_20",flush=True)
                 must(port,"/claim",d,201,"claimed")
+                print("PASS_STAGE initial_d",flush=True)
                 must(port,"/claim",{"eventRef":"G"*64,"nowMs":now},
                      400,"invalid_ref")
                 must(port,"/claim",{"eventRef":"a"*64,"nowMs":-1},
@@ -158,6 +162,7 @@ def exercise():
                 assert any(p.is_file() for p in persist.rglob("*")), (
                     "no local SQLite persistence state was created")
                 process=boot(port,persist,logs)
+                print("PASS_STAGE restarted_fresh_workerd",flush=True)
                 # Four claims on four deterministic DO partitions survived
                 # a COMPLETE process restart, including a reserved event.
                 for obj in (a,b,c,d):
@@ -168,6 +173,7 @@ def exercise():
                 # A fresh ref must still be accepted (not a global block).
                 e={"eventRef":"e"*64,"nowMs":now+1000}
                 must(port,"/claim",e,201,"claimed")
+                print("PASS_STAGE fresh_e_after_restart",flush=True)
                 print(json.dumps({
                    "runtime":"cloudflare_local_workerd_miniflare",
                    "sqlite_persist_to_reused":True,
