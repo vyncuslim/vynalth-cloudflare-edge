@@ -1,0 +1,15 @@
+# Never check in raw honeypot evidence, credentials, approved indicators or exports
+private/
+runtime/
+evidence/
+quarantine/
+*.jsonl
+*.stix.json
+*.draft.json
+*.signed.json
+*.approval.json
+*.secret
+.env
+.env.*
+__pycache__/
+.pytest_cache/
