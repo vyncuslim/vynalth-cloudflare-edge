@@ -216,7 +216,12 @@ def verify(spool_db: Path, key: str):
         raise EvidenceError("protected verification key required")
     if not Path(spool_db).is_file() or Path(spool_db).is_symlink():
         raise EvidenceError("private spool file missing")
-    db = conn_for(spool_db)
+    # A verification job is not a writer: use SQLite's genuine read-only
+    # connection and never initialize schema, create rows, or checkpoint.
+    path = safe_store_path(spool_db)
+    db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro",
+                         uri=True, timeout=5)
+    db.execute("PRAGMA query_only=ON")
     count = 0
     try:
         for ref, sensor, payload, signature in db.execute("""
@@ -230,7 +235,10 @@ def verify(spool_db: Path, key: str):
             if row["event_ref"] != ref or row["share_authorized"] is not False:
                 raise EvidenceError("spool privacy/correlation mismatch")
             count += 1
-        return {"verified": True, "sanitized_events": count, "no_network": True}
+        if count == 0:
+            raise EvidenceError("empty spool has no verifiable captured events")
+        return {"verified": True, "sanitized_events": count,
+                "readonly": True, "no_network": True}
     finally:
         db.close()
 
