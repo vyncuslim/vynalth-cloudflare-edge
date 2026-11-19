@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 from durable_spool import spool
-from spool_uplink import reserve
+from spool_uplink import reserve, sign_message_v2
 from send_summaries import sign_message
 
 KEY="ci-integration-evidence-key-"+("x"*42)
@@ -33,7 +33,7 @@ def main(target:Path):
             "password":"never-send-test-password"}
         raw.write_text(json.dumps(ev)+"\n")
         spool(raw,db,"cowrie","ci-signed-agent-01",KEY)
-        _,body=reserve(db,KEY)
+        event_ref,body=reserve(db,KEY)
         json_body=json.loads(body)
         assert json_body["request_path"]=="/ssh/login_attempt"
         assert "password" not in body and "src_ip" not in body
@@ -42,6 +42,8 @@ def main(target:Path):
           "timestamp":str(TS),
           "nonce":NONCE,
           "signature":sign_message(body,INGEST_KEY,TS,NONCE),
+          "v2_signature":sign_message_v2(body,INGEST_KEY,TS,NONCE,event_ref),
+          "event_ref":event_ref,
           "key":INGEST_KEY,
           "expected_source":"cowrie",
         }
