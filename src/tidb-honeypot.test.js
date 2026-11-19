@@ -126,12 +126,26 @@ test("diagnostics do not run for a sampled-out decoy and never schedule with inv
       TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true"};
     assert.equal(scheduleTidbHoneypotEvent({...makeArgs(noSample),ctx},()=>0.99),false);
     assert.equal(scheduled.length,0);
-    assert.equal(logged.length,0);
+    assert.equal(logged.length,1);
+    assert.match(logged[0],/"state":"sampled_out"/);
+    assert.match(logged[0],/"reason":"sampling"/);
+    logged.length=0;
     const missing={...enabled,TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",
       TIDB_HONEYPOT_DATABASE_URL:"mysql://not-a-real-url"};
-    assert.equal(scheduleTidbHoneypotEvent({...makeArgs(missing),ctx},()=>0),false);
+    // Incorrect credentials/config are identified without depending on RNG.
+    assert.equal(scheduleTidbHoneypotEvent({...makeArgs(missing),ctx},()=>0.99),false);
     assert.equal(scheduled.length,0);
     assert.equal(logged.length,1);
     assert.match(logged[0],/"state":"not_configured"/);
+    logged.length=0;
+    const disabled={...noSample,TIDB_HONEYPOT_INGEST_ENABLED:"false"};
+    assert.equal(scheduleTidbHoneypotEvent({...makeArgs(disabled),ctx},()=>0),false);
+    assert.match(logged[0],/"state":"disabled"/);
+    logged.length=0;
+    assert.equal(scheduleTidbHoneypotEvent(makeArgs(noSample),()=>0),false);
+    assert.match(logged[0],/"state":"no_lifecycle"/);
+    for(const sensitive of [DUMMY_URL,"fake_password","198.51.100.41","SENSITIVE","/admin.php"]) {
+      assert.equal(logged.join(" ").includes(sensitive),false);
+    }
   } finally { console.info=originalInfo; }
 });
