@@ -44,6 +44,9 @@ AXIOM_HONEYPOT_INGEST_ENABLED = "false"
 # No Vercel endpoint or new Cloudflare route is involved.
 TIDB_HONEYPOT_INGEST_ENABLED = "true"
 TIDB_HONEYPOT_SAMPLE_RATE = "0.1"
+# Safe outcome-only logs for diagnosing sampled Worker->TiDB writes.
+# Keep OFF until explicit owner-approved production verification.
+TIDB_HONEYPOT_DIAGNOSTICS_ENABLED = "false"
 
 # Cowrie/OpenCanary signed protocol sensor intake. Deliberately OFF.
 # Requires an isolated sensor node and HONEY_SENSOR_INGEST_KEY secret.
