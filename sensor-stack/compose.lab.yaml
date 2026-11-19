@@ -1,0 +1,59 @@
+# Local-only, disposable, isolated honeypot lab. DO NOT publish these ports
+# on 0.0.0.0, assign production IPs, or deploy to existing Oracle VPN/Voice.
+name: vynalth-honeypot-lab
+services:
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: vynalth-lab-cowrie
+    restart: "no"
+    environment:
+      COWRIE_TELNET_ENABLED: "yes"
+    ports:
+      - "127.0.0.1:2222:2222"
+      - "127.0.0.1:2223:2223"
+    volumes:
+      - cowrie_state:/cowrie/cowrie-git/var
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - sensor_lab
+  opencanary:
+    image: thinkst/opencanary:latest
+    container_name: vynalth-lab-opencanary
+    restart: "no"
+    volumes:
+      - ./opencanary.conf:/root/.opencanary.conf:ro
+    ports:
+      - "127.0.0.1:2121:2121"
+      - "127.0.0.1:13306:13306"
+      - "127.0.0.1:16379:16379"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+      - /var/tmp:rw,nosuid,nodev,noexec,size=16m
+      - /run:rw,nosuid,nodev,noexec,size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - sensor_lab
+volumes:
+  cowrie_state: {}
+networks:
+  sensor_lab:
+    driver: bridge
+    internal: true
+# Docker's internal bridge blocks ordinary external routing; confirm real
+# behavior with tests. Host-level egress firewall also required for public nodes.
