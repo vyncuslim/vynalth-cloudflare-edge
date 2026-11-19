@@ -163,6 +163,21 @@ jobs:
           assert result["status"]=="healthy"
           print("PASS: real Cowrie archive replay is idempotent")
           PY
+          python sensor-stack/spool_uplink.py --db "$scratch/private/events.db"
+          python sensor-stack/delivery_monitor.py \
+            --db "$scratch/private/events.db" \
+            --collector-health "$scratch/private/health.json" \
+            --alert "$scratch/private/delivery-alert.json" --min-free-mb 0
+          python sensor-stack/delivery_monitor.py --check \
+            --alert "$scratch/private/delivery-alert.json"
+          python sensor-stack/retention_audit.py \
+            --raw-dir "$scratch/raw" --active-name cowrie.json \
+            --db "$scratch/private/events.db" \
+            --manifest "$scratch/private/retention.json" \
+            --source cowrie --sensor-id ci-cowrie-rotation
+          python sensor-stack/retention_audit.py --verify \
+            --manifest "$scratch/private/retention.json"
+          echo "PASS: real Cowrie archive -> private outbox -> signed health and signed retention; NO outbound network"
       - name: Ensure test runner was isolated and production unchanged
         run: |
           echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."

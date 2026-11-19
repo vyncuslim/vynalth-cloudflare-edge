@@ -1,0 +1,25 @@
+# REVIEW-ONLY. A fixed-field, offline, signed operational alert.
+# Never install on production VPN, Voice or public honeypot containers.
+[Unit]
+Description=Validate Vynalth isolated sensor delivery and forensic status (%i)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=vynalth-collector
+Group=vynalth-collector
+WorkingDirectory=/opt/vynalth-honeypot/sensor-stack
+LoadCredential=vynalth_evidence_hmac_key:/etc/vynalth-honeypot/evidence.key
+ExecStart=/usr/bin/python3 /opt/vynalth-honeypot/sensor-stack/delivery_monitor.py --db /var/lib/vynalth-honeypot/private/%i.db --collector-health /var/lib/vynalth-honeypot/private/%i-health.json --alert /var/lib/vynalth-honeypot/private/%i-delivery-alert.json --max-pending 500 --min-free-mb 128
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/vynalth-honeypot/private
+UMask=0077
+MemoryMax=128M
+TimeoutStartSec=20

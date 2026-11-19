@@ -5,6 +5,15 @@ on:
       - "sensor-stack/evidence_capture.py"
       - "sensor-stack/test_evidence_capture.py"
       - "sensor-stack/EVIDENCE.md"
+      - "sensor-stack/spool_uplink.py"
+      - "sensor-stack/test_spool_uplink.py"
+      - "sensor-stack/delivery_monitor.py"
+      - "sensor-stack/test_delivery_monitor.py"
+      - "sensor-stack/retention_audit.py"
+      - "sensor-stack/test_retention_audit.py"
+      - "sensor-stack/ci_signed_uplink_probe.py"
+      - "src/sensor-outbox-crosslang.test.js"
+      - "sensor-stack/ops/**"
       - ".github/workflows/validate-honeypot-evidence.yml"
   workflow_dispatch:
 permissions:
@@ -24,11 +33,23 @@ jobs:
           python-version: "3.12"
       - name: Verify evidence capture module
         run: |
-          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py sensor-stack/rotation_collector.py
+          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py sensor-stack/rotation_collector.py sensor-stack/spool_uplink.py sensor-stack/delivery_monitor.py sensor-stack/retention_audit.py sensor-stack/ci_signed_uplink_probe.py
           python -m unittest -v sensor-stack/test_evidence_capture.py
           python -m unittest -v sensor-stack/test_durable_spool.py
           python -m unittest -v sensor-stack/test_safe_tty_replay.py
           python -m unittest -v sensor-stack/test_rotation_collector.py
+          python -m unittest -v sensor-stack/test_spool_uplink.py
+          python -m unittest -v sensor-stack/test_delivery_monitor.py
+          python -m unittest -v sensor-stack/test_retention_audit.py
+      - name: Exercise real Python HMAC -> JS Worker handler with MOCK TiDB
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/vynalth-disposable-outbox-ci.json"
+          trap 'rm -f "$fixture"' EXIT
+          python sensor-stack/ci_signed_uplink_probe.py "$fixture"
+          npm install --ignore-scripts --no-audit --no-fund --silent
+          VYNALTH_OUTBOX_CI_FIXTURE="$fixture" node --test src/sensor-outbox-crosslang.test.js
+          echo "PASS: Python-signed payload accepted by Worker interface; no public DB or network POST"
       - name: Assert evidence does not require production secrets or connect to cloud
         run: |
           python - <<'PY'
@@ -59,6 +80,26 @@ jobs:
           for forbidden in ("import requests", "import socket", "subprocess",
                             "urllib.request", "os.system("):
               assert forbidden not in rotations, forbidden
+          outbox = Path("sensor-stack/spool_uplink.py").read_text()
+          alert = Path("sensor-stack/delivery_monitor.py").read_text()
+          assert 'parser.add_argument("--send",action="store_true")' in outbox
+          assert "BEGIN IMMEDIATE" in outbox
+          assert "ambiguous delivery held without retry" in outbox
+          assert "raw_identifiers_uploaded" in outbox
+          assert "network_alerts_sent" in alert
+          assert 'if args.check:' in alert
+          # Documentation may discuss Telegram/SMTP as deliberately absent.
+          # The monitor implementation must not import a network client.
+          for marker in ("import socket", "import smtplib", "import requests",
+                         "import urllib", "subprocess.run(", "os.system("):
+              assert marker not in alert, marker
+          retention = Path("sensor-stack/retention_audit.py").read_text()
+          for required in ("_sha256_file", "retention_release_authorized",
+                           "deletions_performed", "verify_manifest"):
+              assert required in retention
+          for forbidden in ("import urllib", "import socket", "import subprocess",
+                            "unlink(", "remove(", "shutil.rmtree"):
+              assert forbidden not in retention, forbidden
           tty = Path("sensor-stack/safe_tty_replay.py").read_text()
           assert "struct.Struct" in tty
           assert "rendered_to_terminal" in tty
