@@ -22,8 +22,10 @@ configuration. This repository cannot read secrets or TiDB SQL Editor.
 
 ## Safe result telemetry
 
-The sampled decoy INSERT code emits **one bounded, structured outcome** only
-when the diagnostics flag is explicitly enabled, without raw error details.
+The allowlisted decoy scheduling and sampled INSERT code emits **one fixed-label,
+privacy-safe outcome per eligible decoy** only when the diagnostics flag is
+explicitly enabled, without raw error details. Disable after short controlled
+verification: recording sampled-out events can increase log volume on active traps.
 
 \`\`\`json
 {
@@ -34,16 +36,21 @@ when the diagnostics flag is explicitly enabled, without raw error details.
 }
 \`\`\`
 
-Possible states: \`not_configured\`, \`invalid_event\`, \`inserted\`,
-\`failed\`. Failure categories: \`schema\`, \`auth\`, \`quota\`,
+Possible states: \`disabled\`, \`no_lifecycle\`, \`sampled_out\`,
+\`not_configured\`, \`invalid_event\`, \`inserted\`, \`failed\`. Failure categories: \`schema\`, \`auth\`, \`quota\`,
 \`transport\`, \`timeout\`, \`other\`. There is no IP, name, raw URL,
 password, auth header, query string, SQL statement or exception text.
 The trace is *not* an externally visible endpoint. When diagnostics is
 disabled, only the existing generic error warning remains on exceptions.
 
 **Interpreting negative results:**
-- No outcome log: could be no sampled decoy, WAF interception, wrong Worker,
-  disabled diagnostics, or log visibility issues. NOT proof of success.
+- No outcome log: could be WAF interception, wrong Worker, diagnostics not
+  deployed/enabled, or log visibility/sampling issues. NOT proof of success.
+- \`disabled\`: production runtime's Worker ingestion switch is OFF.
+- \`no_lifecycle\`: no available Worker \`waitUntil\` execution context.
+- \`sampled_out\`: a decoy request reached the Worker but its TiDB INSERT
+  was deliberately skipped under the existing 10% sampler. This is expected;
+  it is NOT a database outage.
 - \`not_configured\`: Worker cannot validate the expected dedicated connection
   URL/secret. Check secret NAME, URL percent-encoding, username and host; do
   NOT paste the password or URL into chats or logs.
@@ -70,7 +77,11 @@ https://developers.cloudflare.com/workers/observability/logs/workers-logs/
    owner approval; do not touch Vercel, DNS or database schema.
 4. Open one existing, allowlisted benign decoy GET (e.g. \`/admin.php\`)
    under the site's normal access policy. Do not hammer or bypass WAF.
-5. Inspect the privacy-safe Worker outcome log for one sampled attempt.
+5. Inspect privacy-safe \`[HONEY TIDB OUTCOME]\` records: a single
+   \`sampled_out\` means the path is correct and sampling skipped INSERT; an
+   \`inserted\` means the driver acknowledged SQL; \`not_configured\` or
+   \`failed\` distinguishes the failing phase. Do not disclose raw logs.
+   Turn diagnostics OFF again after the controlled acceptance window.
 6. In the **owner SQL Editor only**, execute:
 
 \`\`\`sql
@@ -101,3 +112,16 @@ Never transfer raw credentials, malware binaries or full TTY tape to TiDB.
 
 This is a production validation plan and code, NOT a claim that the
 production connection has been proven or activated.
+
+## Current user-supplied evidence (2026-11-19)
+
+The DB owner ran an authorized SELECT filtering source IN
+('cloudflare_worker','cowrie','opencanary'), and SQL Editor returned
+\`Query OK. empty set\`. This shows zero rows *matching those source names
+at query time*, not a database error. No \`[TIDB HONEYPOT] insert failed\` is
+known to have been observed, but that warning is only generated if the code
+actually reaches an INSERT exception. It cannot confirm a successful insert.
+
+At user request, **do not require Oracle quota checks** as a prerequisite to
+continuing the existing Cloudflare→TiDB diagnostic. The dedicated cloud
+sensor deployment remains postponed without resource/cost authorization.
