@@ -25,7 +25,21 @@ import urllib.request
 import uuid
 
 from durable_spool import EvidenceError,safe_store_path,conn_for,_mac,verify as verify_spool
-from send_summaries import ENDPOINT,sign_message,validate_row
+from send_summaries import validate_row
+
+ENDPOINT_V2 = "https://vynalthai.com/__vynalth/honeypot/sensors/v2"
+V2_DOMAIN = "vynalth-sensor-v2"
+
+def sign_message_v2(raw, secret, when, nonce, event_ref):
+    if not isinstance(secret, str) or len(secret) < 32:
+        raise EvidenceError("sensor V2 signing key is invalid")
+    if (not isinstance(event_ref, str) or len(event_ref) != 64 or
+            any(c not in "0123456789abcdef" for c in event_ref)):
+        raise EvidenceError("source event reference invalid")
+    material=(V2_DOMAIN+"\n"+str(when)+"\n"+nonce+"\n"+
+              event_ref+"\n"+raw).encode("utf-8")
+    return hmac.new(secret.encode(),material,hashlib.sha256).hexdigest()
+
 
 VERSION="vynalth-sensor-outbox-v1"
 MAPPING={
@@ -196,17 +210,18 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def send_one(raw,ingest_key):
+def send_one(raw,ingest_key,event_ref):
     if not isinstance(ingest_key,str) or len(ingest_key)<32:
         raise EvidenceError("separate scoped ingest key missing")
     now=int(time.time())
     nonce=str(uuid.uuid4())
-    request=urllib.request.Request(ENDPOINT,data=raw.encode(),method="POST",
+    request=urllib.request.Request(ENDPOINT_V2,data=raw.encode(),method="POST",
         headers={
           "Content-Type":"application/json",
           "X-Vynalth-Sensor-Time":str(now),
           "X-Vynalth-Sensor-Nonce":nonce,
-          "X-Vynalth-Sensor-Signature":sign_message(raw,ingest_key,now,nonce),
+          "X-Vynalth-Sensor-Event-Ref":event_ref,
+          "X-Vynalth-Sensor-Signature":sign_message_v2(raw,ingest_key,now,nonce,event_ref),
           "User-Agent":"VynalthTrustedCollector/1.1",
         })
     try:
@@ -230,7 +245,8 @@ def deliver(dbfile,key,ingest_key,max_events=1,transport=None):
             break
         ref,payload=row
         try:
-            status=(transport or send_one)(payload,ingest_key)
+            status=(transport(payload,ingest_key) if transport is not None else
+                    send_one(payload,ingest_key,ref))
         except Exception:
             settle(dbfile,key,ref,"uncertain")
             raise EvidenceError("ambiguous delivery held without retry")
@@ -287,7 +303,7 @@ def main():
     try:
         if args.send:
             result=deliver(args.db,secret,
-                           os.environ.get("HONEY_SENSOR_INGEST_KEY",""),
+                           os.environ.get("HONEY_SENSOR_V2_KEY",""),
                            args.max_events)
         else:
             result=inspect(args.db,secret)

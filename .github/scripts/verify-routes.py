@@ -34,7 +34,35 @@ EXPECTED = {
 def check(path: Path) -> None:
     config = tomllib.loads(path.read_text(encoding="utf-8"))
     assert config.get("name") == "vynalth-cloudflare-edge", "Wrong Worker name"
-    assert config.get("main") == "src/index.js", "Worker entrypoint changed"
+    entry = config.get("main")
+    if entry == "src/worker-entry.js":
+        # The only authorized wrapper delegates unchanged HTTP routing to
+        # src/index.js and separately exports the review-only DO class.
+        wrapper = (path.parent / "src/worker-entry.js").read_text(
+            encoding="utf-8")
+        assert 'export { default } from "./index.js";' in wrapper, (
+            "Wrangler wrapper must preserve exact main HTTP Worker handler"
+        )
+        assert 'export { SensorReplayLedger } from "./sensor-replay-ledger.js";' in wrapper, (
+            "Dedicated SQLite replay ledger class export missing"
+        )
+        assert config.get("vars", {}).get("HONEY_SENSOR_V2_ENABLED") == "false", (
+            "V2 sensor intake must remain disabled without a release gate"
+        )
+        assert config.get("vars", {}).get("HONEY_SENSOR_V2_SAMPLE_RATE") == "0.1", (
+            "Do not increase TiDB sampling rate"
+        )
+        assert any(x.get("name") == "SENSOR_REPLAY_LEDGER"
+                   and x.get("class_name") == "SensorReplayLedger"
+                   for x in config.get("durable_objects", {}).get("bindings", [])), (
+            "Missing private replay-ledger Durable Object binding"
+        )
+        assert any("SensorReplayLedger" in x.get("new_sqlite_classes", [])
+                   for x in config.get("migrations", [])), (
+            "Replay ledger MUST use SQLite-backed Durable Object migration"
+        )
+    else:
+        assert entry == "src/index.js", "Worker entrypoint changed unexpectedly"
     # Keep this deployment route-free: never auto-create/delete a route.
     assert "routes" not in config and "route" not in config, (
         "Wrangler must not redeclare Cloudflare Dashboard-owned routes (10020)"

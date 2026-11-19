@@ -1,5 +1,5 @@
 name = "vynalth-cloudflare-edge"
-main = "src/index.js"
+main = "src/worker-entry.js"
 compatibility_date = "2026-09-19"
 workers_dev = true
 
@@ -54,6 +54,12 @@ TIDB_HONEYPOT_DIAGNOSTICS_ENABLED = "false"
 # 10% sampled to protect TiDB Starter's US$0 cap.
 HONEY_SENSOR_INGEST_ENABLED = "false"
 HONEY_SENSOR_SAMPLE_RATE = "0.1"
+# V2 replay ledger feature — code review only, NOT authorized for activation.
+# SQLite Durable Objects consume Workers Free quota and require verifying
+# current account usage, no surprise costs, migration and rollback plan.
+# Never enable before a separate explicit production release approval.
+HONEY_SENSOR_V2_ENABLED = "false"
+HONEY_SENSOR_V2_SAMPLE_RATE = "0.1"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "true"
 SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"
@@ -170,3 +176,13 @@ enabled = true
 [[kv_namespaces]]
 binding = "SCHOOL_IP_KV"
 id = "afbc03d02494467e8f39b63f755de44d"
+
+# REVIEW ONLY: new SQLite-backed DO namespace is not created until a
+# separately approved Cloudflare production deployment. V1 stays disabled.
+[[durable_objects.bindings]]
+name = "SENSOR_REPLAY_LEDGER"
+class_name = "SensorReplayLedger"
+
+[[migrations]]
+tag = "honeypot-sensor-replay-v2-sqlite-20261119"
+new_sqlite_classes = ["SensorReplayLedger"]
