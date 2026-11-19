@@ -49,6 +49,27 @@ services:
     cpus: 1.0
     networks:
       - sensor_lab
+  probe:
+    image: python:3.12-alpine
+    profiles: ["ci"]
+    restart: "no"
+    read_only: true
+    environment:
+      CI_SENSOR_CONTAINER: "1"
+    command: ["python", "/probe.py", "--probe"]
+    volumes:
+      - ./ci_protocol_probe.py:/probe.py:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 30
+    mem_limit: 128m
+    cpus: 0.5
+    networks:
+      - sensor_lab
 volumes:
   cowrie_state: {}
 networks:
