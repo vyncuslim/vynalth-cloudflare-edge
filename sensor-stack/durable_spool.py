@@ -172,6 +172,15 @@ def spool(input_path: Path, spool_db: Path, source: str, sensor: str,
             if len(payload.encode()) > MAX_RECORD_BYTES:
                 rejected += 1
                 continue
+            # On rename-based rotation we may encounter the SAME inode and
+            # source line at a different pathname. Deduplicate *before* the
+            # capacity check, otherwise an already-full spool deadlocks on
+            # historic archive records even when no new row is required.
+            exists = db.execute(
+                "SELECT 1 FROM sanitized_event WHERE event_ref=?",
+                (item["event_ref"],)).fetchone()
+            if exists:
+                continue
             size = db.execute("SELECT COUNT(*) FROM sanitized_event").fetchone()[0]
             if size >= max_records:
                 raise EvidenceError("spool row cap reached; pause before data loss")
