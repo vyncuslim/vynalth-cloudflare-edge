@@ -87,7 +87,10 @@ class SensorStackTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["size_bytes"], len(data))
             self.assertEqual(rows[0]["executed"], False)
-            self.assertEqual(rows[0]["analyzed"], False)
+            self.assertEqual(rows[0]["analyzed"], True)
+            self.assertEqual(rows[0]["file_type_hint"], "ELF")
+            self.assertEqual(rows[0]["analysis"], "static_header_and_entropy_only")
+            self.assertTrue(0 <= rows[0]["entropy_first_64k"] <= 8)
             self.assertNotIn("sample", json.dumps(rows))
 
 
