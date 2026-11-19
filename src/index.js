@@ -17,6 +17,8 @@ import { handleVercelDrain } from "./vercel-log-drain.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { scheduleTidbHoneypotEvent } from "./tidb-honeypot.js";
 import { SENSOR_INTAKE_PATH, handleSensorIngest } from "./sensor-ingest.js";
+import { SENSOR_INTAKE_V2_PATH, handleSensorIngestV2 } from "./sensor-ingest-v2.js";
+export { SensorReplayLedger } from "./sensor-replay-ledger.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleRootBrowserEndpoint, addRootBrowserToDocumentResponse } from "./global-browser-id.js";
@@ -167,6 +169,12 @@ export default {
     // Disabled until a separate sensor and secure ingress have passed tests.
     if (hostname === VYNALTH_APEX && incomingUrl.pathname === SENSOR_INTAKE_PATH) {
       return handleSensorIngest(request, env);
+    }
+    // Isolated V2 path: disabled by default. Requires SQLite Durable Object
+    // binding, fresh HMAC with signed event reference, and a unique claim
+    // BEFORE any sampled TiDB write. Never fall back to unguarded V1.
+    if (hostname === VYNALTH_APEX && incomingUrl.pathname === SENSOR_INTAKE_V2_PATH) {
+      return handleSensorIngestV2(request, env);
     }
 
     // Vercel Log Drains terminate at Cloudflare, not the Vercel origin.
