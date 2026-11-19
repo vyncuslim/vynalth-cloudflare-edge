@@ -134,6 +134,7 @@ test("diagnostics do not run for a sampled-out decoy and never schedule with inv
     assert.match(logged[0],/"reason":"sampling"/);
     logged.length=0;
     const missing={...enabled,TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",
+      TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:DIAG_UNTIL,
       TIDB_HONEYPOT_DATABASE_URL:"mysql://not-a-real-url"};
     // Incorrect credentials/config are identified without depending on RNG.
     assert.equal(scheduleTidbHoneypotEvent({...makeArgs(missing),ctx},()=>0.99),false);
