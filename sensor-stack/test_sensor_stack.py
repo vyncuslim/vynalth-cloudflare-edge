@@ -6,6 +6,7 @@ from pathlib import Path
 
 from event_sanitizer import clean_event, anonymous_network_marker
 from sample_inventory import inventory
+from send_summaries import validate_row, sign_message
 
 SENSITIVE = "user_password_must_never_leak"
 IP = "198.51.100.9"
@@ -50,6 +51,17 @@ class SensorStackTests(unittest.TestCase):
         self.assertNotIn(SENSITIVE, json.dumps(row))
         self.assertNotIn(IP, json.dumps(row))
         self.assertIsNone(clean_event({**entry, "dst_port": 4000}, "opencanary"))
+
+    def test_summary_sender_signs_without_sensitive_input(self):
+        safe = clean_event({
+            "eventid": "cowrie.login.failed", "protocol": "ssh",
+            "src_ip": IP, "password": SENSITIVE
+        }, "cowrie")
+        self.assertTrue(validate_row(safe))
+        self.assertFalse(validate_row({**safe, "password": SENSITIVE}))
+        self.assertFalse(validate_row({**safe, "protocol": "MYSQL"}))
+        self.assertEqual(len(sign_message(json.dumps(safe), "k" * 48,
+                            1795075200, "11111111-2222-4333-8444-555555555555")),64)
 
     def test_invalid_unknown_events_cannot_pollute_table(self):
         self.assertIsNone(clean_event({"eventid": "other", "protocol": "ssh"}, "cowrie"))
