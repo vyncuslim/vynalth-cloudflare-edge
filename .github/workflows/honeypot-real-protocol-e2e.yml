@@ -50,6 +50,9 @@ jobs:
       - name: Ensure test runner was isolated and production unchanged
         run: |
           echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."
+      - name: Emit redacted startup diagnostics only if a probe fails
+        if: failure()
+        run: python sensor-stack/ci_container_diagnostics.py
       - name: Erase ephemeral local-only honeypot evidence
         if: always()
         run: |
