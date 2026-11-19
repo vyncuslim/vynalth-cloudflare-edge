@@ -35,9 +35,12 @@ jobs:
         run: |
           docker compose -f sensor-stack/compose.lab.yaml up -d
           docker compose -f sensor-stack/compose.lab.yaml ps --format json
-      - name: Connect via real SSH Telnet FTP MySQL Redis protocol sockets
+      - name: Connect via real protocols inside dedicated isolated Docker bridge
         run: |
-          python -u sensor-stack/ci_protocol_probe.py
+          docker compose -f sensor-stack/compose.lab.yaml run --rm --no-deps probe
+      - name: Verify genuine Cowrie/OpenCanary events from the trusted runner
+        run: |
+          python -u sensor-stack/ci_protocol_probe.py --verify
       - name: Verify full sanitized evidence and signed export workflow (synthetic data only)
         run: |
           python -m unittest discover -v -s sensor-stack -p 'test_*.py'
