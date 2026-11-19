@@ -303,7 +303,7 @@ def main():
     try:
         if args.send:
             result=deliver(args.db,secret,
-                           os.environ.get("HONEY_SENSOR_INGEST_KEY",""),
+                           os.environ.get("HONEY_SENSOR_V2_KEY",""),
                            args.max_events)
         else:
             result=inspect(args.db,secret)
