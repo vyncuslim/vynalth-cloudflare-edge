@@ -38,6 +38,12 @@ jobs:
       - name: Connect via real SSH Telnet FTP MySQL Redis protocol sockets
         run: |
           python -u sensor-stack/ci_protocol_probe.py
+      - name: Verify full sanitized evidence and signed export workflow (synthetic data only)
+        run: |
+          python -m unittest discover -v -s sensor-stack -p 'test_*.py'
+          python -m unittest discover -v -s threat-intel -p 'test_*.py'
+          python threat-intel/ci_full_chain.py
+          node --test src/sensor-ingest.test.js
       - name: Ensure test runner was isolated and production unchanged
         run: |
           echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."
