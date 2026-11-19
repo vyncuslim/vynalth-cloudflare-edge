@@ -22,9 +22,12 @@ class. Categories include download, persistence, reconnaissance, destructive
 process, privilege/access changes, and other. It never exports the command
 text, username, password, domain, URL, raw source IP or raw session ID.
 
-For Cowrie TTY recordings: optional local SHA-256 and file-size verification,
-with Cowrie's separate *attacker input-only* SHA-256. This is NOT verification
-that the replay was opened or read by an investigator.
+For Cowrie TTY recordings: optional local SHA-256 of the **actual tape** and
+the physical file size. Cowrie's own `shasum` is an *attacker input-only*
+digest; the event `size` is kept as a separate source-reported value and
+is NOT assumed identical to the physical recording size. This avoids false
+custody mismatches due to serialized terminal framing. Neither the hash nor
+the existence of a TTY file proves it has been replayed by an investigator.
 
 For Cowrie file uploads/downloads: optional local SHA-256, file size, magic
 type and comparison with Cowrie's reported file digest. File content remains
