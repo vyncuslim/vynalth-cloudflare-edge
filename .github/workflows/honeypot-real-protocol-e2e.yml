@@ -77,6 +77,8 @@ jobs:
           assert counts.get("tty_finalized",0)>=1, "real TTY finalized event absent"
           tapes=[x["evidence"] for x in data["records"]
                  if x["event_class"]=="tty_finalized"]
+          print(json.dumps({"tty_verification_states":[e["verification"] for e in tapes if e],
+                            "tty_files_located":sum(bool(e and e["artifact"]) for e in tapes)}))
           assert any(e and e["verification"]=="locally_hashed" and
                      e["artifact"] and e["artifact"]["sha256"] for e in tapes)
           print(json.dumps({"fake_shell_login":True,"command_recorded":True,
