@@ -204,8 +204,12 @@ def validate_approval(approval, fmt, ids, now):
     reviewer = approval["approved_by"]
     if not isinstance(reviewer, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]{3,80}", reviewer):
         reject("approved_by missing")
-    if not isinstance(approval["indicator_ids"], list) or sorted(approval["indicator_ids"]) != sorted(ids):
-        reject("approval must match the exact indicator ID set")
+    allowed_ids = approval["indicator_ids"]
+    if (not isinstance(allowed_ids, list) or
+        not all(isinstance(x, str) for x in allowed_ids) or
+        len(set(allowed_ids)) != len(allowed_ids) or
+        sorted(allowed_ids) != sorted(ids)):
+        reject("approval must match the exact unique indicator ID set")
     if not approval["indicator_ids"]:
         reject("empty approval")
     start, end = utc(approval["approved_at"]), utc(approval["expires_at"])
