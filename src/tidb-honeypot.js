@@ -21,9 +21,19 @@ const SAFE_OUTCOMES = new Set([
   "disabled", "no_lifecycle", "sampled_out", "not_configured",
   "invalid_event", "inserted", "failed",
 ]);
+// Single-deployment short observation window. Expiration is evaluated per
+// request, so logging automatically stops without another production release.
+// A missing/malformed/too-distant UTC deadline fails closed.
+export function honeypotDiagnosticsEnabled(env, now = Date.now()) {
+  if (env?.TIDB_HONEYPOT_DIAGNOSTICS_ENABLED !== "true") return false;
+  const until = env?.TIDB_HONEYPOT_DIAGNOSTICS_UNTIL;
+  if (typeof until !== "string" ||
+      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/.test(until)) return false;
+  const end = Date.parse(until);
+  return Number.isFinite(end) && end > now && end - now <= 2 * 60 * 60 * 1000;
+}
 function logSafeOutcome(env, state, reason = "none") {
-  if (env?.TIDB_HONEYPOT_DIAGNOSTICS_ENABLED !== "true" ||
-      !SAFE_OUTCOMES.has(state)) return;
+  if (!honeypotDiagnosticsEnabled(env) || !SAFE_OUTCOMES.has(state)) return;
   const allowedReasons = new Set([
     "none", "disabled", "missing_ctx", "sampling", "bad_url", "event", "insert", "schema", "auth",
     "quota", "transport", "timeout", "other",
@@ -104,7 +114,7 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
   } catch (error) {
     // Sanitized fixed categories only; no raw connection URL or exception text.
     const reason = safeErrorCategory(error);
-    if (args?.env?.TIDB_HONEYPOT_DIAGNOSTICS_ENABLED === "true")
+    if (honeypotDiagnosticsEnabled(args?.env))
       logSafeOutcome(args.env, "failed", reason);
     else console.warn("[TIDB HONEYPOT] insert failed");
     return { state: "failed" };
