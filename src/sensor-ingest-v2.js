@@ -77,9 +77,12 @@ async function ledgerOperation(env,action,payload){
   if(!binding||typeof binding.idFromName!=="function"||
      typeof binding.get!=="function")return {status:503};
   try{
-    // A single private ledger avoids cross-shard race conditions. Bounded
-    // record count is enforced inside the Durable Object.
-    const id=binding.idFromName("vynalth-protocol-sensor-ledger-v2");
+    // Deterministic 16-way partitioning: the SAME keyed ref always reaches
+    // the SAME strongly consistent SQLite DO instance, even across dates
+    // or new signature nonces. Each shard has its own bounded row cap.
+    const ref=payload?.eventRef;
+    if(typeof ref!=="string"||!HEX64.test(ref))return {status:503};
+    const id=binding.idFromName("vynalth-protocol-sensor-ledger-v2-"+ref[0]);
     const stub=binding.get(id);
     const request=new Request("https://internal.vynalth.invalid/"+action,{
       method:"POST",
