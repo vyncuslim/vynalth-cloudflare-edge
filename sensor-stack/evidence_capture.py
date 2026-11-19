@@ -106,9 +106,9 @@ def local_artifact(directory: Path | None, source_name, max_size=MAX_BYTES):
     if directory is None or not isinstance(source_name, str):
         return None
     # Never trust a traversal path provided by a hostile client's JSON.
-    if (len(source_name) > 512 or "\\x00" in source_name or
+    if (len(source_name) > 512 or chr(0) in source_name or
             any(part in {".", ".."} for part in
-                source_name.replace("\\\\", "/").split("/"))):
+                source_name.replace(chr(92), "/").split("/"))):
         return None
     name = Path(source_name).name
     if name in {".", ".."} or not FILE_NAME.fullmatch(name):
