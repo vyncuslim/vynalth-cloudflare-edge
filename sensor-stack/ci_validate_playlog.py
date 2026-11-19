@@ -1,76 +1,64 @@
 #!/usr/bin/env python3
-"""CI-only Cowrie playlog verification, with all terminal bytes suppressed.
+"""CI-only local read-only Cowrie TTY frame replay, output never rendered.
 
-Reads a genuine local JSONL log copied from disposable Cowrie Docker and
-invokes the bundled Cowrie playlog command INSIDE that isolated container.
-Never renders terminal escapes, raw commands, passwords or URLs to CI logs.
+This validates Cowrie's binary recording against its UML-style framing.
+It does not claim the official Cowrie playlog CLI is installed or invoked.
 """
 import json
-import os
 from pathlib import Path
 import re
-import subprocess
 import sys
-import tempfile
+
+from safe_tty_replay import ReplayError, safe_replay
 
 
-def run(logfile: Path):
+def run(logfile: Path, tty_dir: Path):
     if logfile.is_symlink() or not logfile.is_file():
-        raise RuntimeError("missing local Cowrie audit")
-    tty_names=[]
+        raise RuntimeError("missing Cowrie audit")
+    if tty_dir.is_symlink() or not tty_dir.is_dir():
+        raise RuntimeError("missing approved TTY directory")
+    names=[]
     with logfile.open("rb") as stream:
         for i,line in enumerate(stream):
-            if i>=3000:
+            if i >= 3000:
                 break
             if len(line)>65536:
                 continue
             try:
-                row=json.loads(line)
+                record=json.loads(line)
             except (ValueError,UnicodeError):
                 continue
-            if not isinstance(row,dict) or row.get("eventid")!="cowrie.log.closed":
+            if not isinstance(record,dict) or record.get("eventid")!="cowrie.log.closed":
                 continue
-            ttylog=row.get("ttylog")
-            if not isinstance(ttylog,str) or len(ttylog)>500:
+            path=record.get("ttylog")
+            if not isinstance(path,str) or len(path)>500:
                 continue
-            name=Path(ttylog).name
-            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",name):
-                tty_names.append(name)
-    if not tty_names:
-        raise RuntimeError("no completed TTY recording in genuine Cowrie audit")
-    for name in tty_names[:3]:
-        location="/cowrie/cowrie-git/var/lib/cowrie/tty/"+name
-        # Run no shell. Both command forms are confined to the Cowrie container.
-        methods=[
-            ["docker","exec","vynalth-lab-cowrie","playlog",location],
-            ["docker","exec","vynalth-lab-cowrie",
-             "/cowrie/cowrie-git/bin/playlog",location],
-        ]
-        for cmd in methods:
-            with tempfile.TemporaryFile(mode="w+b") as output:
-                try:
-                    completed=subprocess.run(cmd,stdout=output,
-                        stderr=subprocess.DEVNULL,timeout=20,check=False)
-                except (OSError,subprocess.TimeoutExpired):
-                    continue
-                output.seek(0,os.SEEK_END)
-                length=output.tell()
-                if completed.returncode==0 and length>0:
-                    return {
-                      "source":"genuine_cowrie_tty",
-                      "playlog_exit_zero":True,
-                      "replay_emitted_bytes":True,
-                      "recordings_checked":1,
-                      "raw_terminal_output_printed":False,
-                      "public_attacker_sessions":False,
-                    }
-    raise RuntimeError("Cowrie playlog could not replay any completed TTY safely")
+            name=Path(path).name
+            if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}",name):
+                names.append(name)
+    if not names:
+        raise RuntimeError("no completed Cowrie TTY events")
+    for name in names[:3]:
+        try:
+            replay=safe_replay(tty_dir/name)
+        except (ReplayError,OSError):
+            continue
+        return {
+          "verified_tty_replay":True,
+          "parsed_frames":replay["frames"],
+          "decoded_stream_frames":replay["replayed_frames"],
+          "decoded_stream_nonempty":replay["replayed_bytes"]>0,
+          "terminal_output_suppressed":True,
+          "official_playlog_invoked":False,
+          "real_public_attack":False,
+        }
+    raise RuntimeError("no valid Cowrie TTY replay")
 
 
 if __name__=="__main__":
     try:
-        result=run(Path(sys.argv[1]))
-        print(json.dumps(result,sort_keys=True))
+        output=run(Path(sys.argv[1]),Path(sys.argv[2]))
+        print(json.dumps(output,sort_keys=True))
     except (RuntimeError,OSError,IndexError):
-        print("PLAYLOG_BLOCKED: no verifiable isolated replay",file=sys.stderr)
+        print("TTY_REPLAY_BLOCKED: unverifiable recording",file=sys.stderr)
         raise SystemExit(2)
