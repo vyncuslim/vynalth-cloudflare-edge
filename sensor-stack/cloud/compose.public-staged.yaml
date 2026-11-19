@@ -1,0 +1,72 @@
+# DEDICATED CLOUD VM ONLY; not launched by GitHub Actions.
+# Default bind is 127.0.0.1. Requires OCI firewall and DOCKER-USER
+# outbound deny verification before public ingress is approved.
+name: vynalth-dedicated-sensor
+x-sensor-common: &sensor-common
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 100
+  mem_limit: 512m
+  cpus: 1.0
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+services:
+  cowrie:
+    <<: *sensor-common
+    image: cowrie/cowrie@sha256:e7c4b4fe5fbb874e682c6c0c7a1daf1c3183c622d5cc2d281f453c1c4d9f97ac
+    environment:
+      COWRIE_TELNET_ENABLED: "yes"
+    volumes:
+      - cowrie_state:/cowrie/cowrie-git/var
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    networks: [sensor_core]
+  opencanary:
+    <<: *sensor-common
+    image: thinkst/opencanary@sha256:91e2e6c9260859f2469889daab29293a0d4112cde52b5cc9887857d691d71d41
+    volumes:
+      - ../opencanary.conf:/root/.opencanary.conf:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+      - /var/tmp:rw,nosuid,nodev,noexec,size=16m
+      - /run:rw,nosuid,nodev,noexec,size=8m
+    cap_add: [SETUID, SETGID]
+    networks: [sensor_core]
+  ingress:
+    # Digest-pin and ARM64-verify this image before a public release.
+    image: haproxy:3.4.8-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 50
+    mem_limit: 128m
+    cpus: 0.5
+    ports:
+      - "${HONEY_PUBLIC_BIND_IP:-127.0.0.1}:2222:2222"
+      - "${HONEY_PUBLIC_BIND_IP:-127.0.0.1}:2323:2323"
+      - "${HONEY_PUBLIC_BIND_IP:-127.0.0.1}:2121:2121"
+      - "${HONEY_PUBLIC_BIND_IP:-127.0.0.1}:13306:13306"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks: [sensor_core, proxy_front]
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+volumes:
+  cowrie_state: {}
+networks:
+  sensor_core:
+    driver: bridge
+    internal: true
+  proxy_front:
+    driver: bridge
+    # Frontend proxy is the ONLY non-internal bridge member. Public access
+    # is forbidden until host DOCKER-USER outgoing NEW traffic is blocked.
