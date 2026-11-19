@@ -15,11 +15,11 @@ from pathlib import Path
 
 
 def static_file_type(head: bytes):
-    if head.startswith(b"\\x7fELF"):
+    if head.startswith(b"\x7fELF"):
         return "ELF"
     if head.startswith(b"MZ"):
         return "PE_or_DOS"
-    if head.startswith(b"PK\\x03\\x04"):
+    if head.startswith(b"PK\x03\x04"):
         return "ZIP_or_Office"
     if head.startswith(b"#!"):
         return "SCRIPT"
