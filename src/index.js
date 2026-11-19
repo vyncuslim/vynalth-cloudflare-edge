@@ -16,6 +16,7 @@ import { scheduleEdgeAccessLogs } from "./dual-access-logs.js";
 import { handleVercelDrain } from "./vercel-log-drain.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { scheduleTidbHoneypotEvent } from "./tidb-honeypot.js";
+import { SENSOR_INTAKE_PATH, handleSensorIngest } from "./sensor-ingest.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleRootBrowserEndpoint, addRootBrowserToDocumentResponse } from "./global-browser-id.js";
@@ -159,6 +160,13 @@ export default {
 
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Dedicated, opt-in signed sensor-summary endpoint. No forwarded requests,
+    // no source secrets accepted and no production credentials exposed.
+    // Disabled until a separate sensor and secure ingress have passed tests.
+    if (hostname === VYNALTH_APEX && incomingUrl.pathname === SENSOR_INTAKE_PATH) {
+      return handleSensorIngest(request, env);
     }
 
     // Vercel Log Drains terminate at Cloudflare, not the Vercel origin.
