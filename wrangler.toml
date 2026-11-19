@@ -42,7 +42,7 @@ AXIOM_HONEYPOT_INGEST_ENABLED = "false"
 # Default OFF until a dedicated INSERT-only DB account and Worker secret exist.
 # Never use root credentials. Never store the connection string in this file.
 # No Vercel endpoint or new Cloudflare route is involved.
-TIDB_HONEYPOT_INGEST_ENABLED = "false"
+TIDB_HONEYPOT_INGEST_ENABLED = "true"
 TIDB_HONEYPOT_SAMPLE_RATE = "0.1"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "true"
