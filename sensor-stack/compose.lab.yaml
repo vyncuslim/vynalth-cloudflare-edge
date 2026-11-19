@@ -42,6 +42,12 @@ services:
       - /run:rw,nosuid,nodev,noexec,size=8m
     cap_drop:
       - ALL
+    # Official opencanaryd starts as root then drops to nobody/nogroup.
+    # Only SETUID/SETGID are retained for that one-way privilege drop.
+    # No DAC, NET_ADMIN, NET_RAW, SYS_ADMIN or other capabilities.
+    cap_add:
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     pids_limit: 100
