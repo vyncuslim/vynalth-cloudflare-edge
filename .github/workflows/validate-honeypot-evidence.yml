@@ -74,8 +74,11 @@ jobs:
           assert "raw_identifiers_uploaded" in outbox
           assert "network_alerts_sent" in alert
           assert 'if args.check:' in alert
-          for marker in ("Telegram", "smtp", "webhook"):
-              assert marker not in alert
+          # Documentation may discuss Telegram/SMTP as deliberately absent.
+          # The monitor implementation must not import a network client.
+          for marker in ("import socket", "import smtplib", "import requests",
+                         "import urllib", "subprocess.run(", "os.system("):
+              assert marker not in alert, marker
           tty = Path("sensor-stack/safe_tty_replay.py").read_text()
           assert "struct.Struct" in tty
           assert "rendered_to_terminal" in tty
