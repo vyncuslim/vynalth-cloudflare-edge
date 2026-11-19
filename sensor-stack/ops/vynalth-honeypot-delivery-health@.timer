@@ -1,0 +1,13 @@
+# REVIEW-ONLY: never enabled by CI or this pull request.
+[Unit]
+Description=Check honeypot local delivery health every 90 seconds (%i)
+
+[Timer]
+OnBootSec=120s
+OnUnitActiveSec=90s
+AccuracySec=10s
+Persistent=true
+Unit=vynalth-honeypot-delivery-health@%i.service
+
+[Install]
+WantedBy=timers.target
