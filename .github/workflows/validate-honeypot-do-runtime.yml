@@ -1,0 +1,54 @@
+name: Verify real local Cloudflare SQLite Durable Object persistence
+on:
+  pull_request:
+    paths:
+      - "src/sensor-replay-ledger.js"
+      - "src/sensor-replay-ledger-core.js"
+      - "src/sensor-ledger-runtime-probe.js"
+      - "sensor-stack/ci/do-runtime-wrangler.toml"
+      - "sensor-stack/ci/do_runtime_acceptance.py"
+      - "sensor-stack/ops/DO_RUNTIME_ACCEPTANCE.md"
+      - ".github/workflows/validate-honeypot-do-runtime.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cloudflare-local-workerd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: "false"
+    steps:
+      - name: Checkout test branch without retaining credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Node 22 runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install reviewed local Wrangler dependencies only
+        run: npm install --ignore-scripts --no-audit --no-fund --silent
+      - name: Verify no production bindings, secrets or remote runtime
+        run: |
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          cfg=tomllib.loads(Path("sensor-stack/ci/do-runtime-wrangler.toml").read_text())
+          assert cfg["name"]=="vynalth-do-sqlite-local-ci"
+          assert cfg["workers_dev"] is False
+          assert "routes" not in cfg and "route" not in cfg
+          assert "vars" not in cfg
+          assert "services" not in cfg
+          assert "TIDB" not in str(cfg) and "CLOUDFLARE_API_TOKEN" not in str(cfg)
+          assert cfg["durable_objects"]["bindings"][0]["name"]=="SENSOR_REPLAY_LEDGER"
+          assert cfg["migrations"][0]["new_sqlite_classes"]==["SensorReplayLedger"]
+          print("PASS: isolated, local-only Wrangler config without production bindings")
+          PY
+      - name: Run REAL local workerd SQLite Durable Object, restart persistence and concurrency
+        run: |
+          python3 sensor-stack/ci/do_runtime_acceptance.py
+      - name: Confirm no remote deployment, paid resources or sample telemetry uploads
+        run: |
+          echo "PASS: no Cloudflare API authentication, no deployment, no TiDB, no Oracle, no outbound event uploads."
