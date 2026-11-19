@@ -38,7 +38,7 @@ jobs:
           ):
               assert forbidden not in p, forbidden
           assert "os.O_EXCL" in p
-          assert "os.O_NOFOLLOW" in p
+          assert 'getattr(os, "O_NOFOLLOW", 0)' in p
           assert "hmac.compare_digest" in p
           print("PASS: offline restricted capture only; no network, no execution")
           PY
