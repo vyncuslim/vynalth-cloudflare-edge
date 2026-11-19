@@ -5,6 +5,11 @@ on:
       - "sensor-stack/evidence_capture.py"
       - "sensor-stack/test_evidence_capture.py"
       - "sensor-stack/EVIDENCE.md"
+      - "sensor-stack/spool_uplink.py"
+      - "sensor-stack/test_spool_uplink.py"
+      - "sensor-stack/delivery_monitor.py"
+      - "sensor-stack/test_delivery_monitor.py"
+      - "sensor-stack/ops/**"
       - ".github/workflows/validate-honeypot-evidence.yml"
   workflow_dispatch:
 permissions:
@@ -24,11 +29,13 @@ jobs:
           python-version: "3.12"
       - name: Verify evidence capture module
         run: |
-          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py sensor-stack/rotation_collector.py
+          python -m compileall -q sensor-stack/evidence_capture.py sensor-stack/durable_spool.py sensor-stack/safe_tty_replay.py sensor-stack/rotation_collector.py sensor-stack/spool_uplink.py sensor-stack/delivery_monitor.py
           python -m unittest -v sensor-stack/test_evidence_capture.py
           python -m unittest -v sensor-stack/test_durable_spool.py
           python -m unittest -v sensor-stack/test_safe_tty_replay.py
           python -m unittest -v sensor-stack/test_rotation_collector.py
+          python -m unittest -v sensor-stack/test_spool_uplink.py
+          python -m unittest -v sensor-stack/test_delivery_monitor.py
       - name: Assert evidence does not require production secrets or connect to cloud
         run: |
           python - <<'PY'
@@ -59,6 +66,16 @@ jobs:
           for forbidden in ("import requests", "import socket", "subprocess",
                             "urllib.request", "os.system("):
               assert forbidden not in rotations, forbidden
+          outbox = Path("sensor-stack/spool_uplink.py").read_text()
+          alert = Path("sensor-stack/delivery_monitor.py").read_text()
+          assert 'parser.add_argument("--send",action="store_true")' in outbox
+          assert "BEGIN IMMEDIATE" in outbox
+          assert "ambiguous delivery held without retry" in outbox
+          assert "raw_identifiers_uploaded" in outbox
+          assert "network_alerts_sent" in alert
+          assert 'if args.check:' in alert
+          for marker in ("Telegram", "smtp", "webhook"):
+              assert marker not in alert
           tty = Path("sensor-stack/safe_tty_replay.py").read_text()
           assert "struct.Struct" in tty
           assert "rendered_to_terminal" in tty
