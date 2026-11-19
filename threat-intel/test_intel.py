@@ -148,9 +148,11 @@ class IntelTests(unittest.TestCase):
             batch(row,grant)
         row["public_ip_release_approved"]=True
         grant["public_ip_release_approved"]=True
+        grant["signature"]=sign_approval(grant,KEY)
         with self.assertRaisesRegex(ReviewError,"public IP"):
             batch(row,grant)
         grant["second_reviewer_id"]="reviewer-C"
+        grant["signature"]=sign_approval(grant,KEY)
         self.assertEqual(len(batch(row,grant)),1)
 
     def test_no_private_or_documentation_ips(self):
