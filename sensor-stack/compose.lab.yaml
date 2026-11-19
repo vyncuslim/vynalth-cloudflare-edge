@@ -54,5 +54,6 @@ volumes:
 networks:
   sensor_lab:
     driver: bridge
-# A private bridge by itself does NOT prevent outbound internet connections.
-# Host firewall egress-deny rules and a dedicated VM are mandatory for public operation.
+    internal: true
+# Docker's internal bridge blocks ordinary external routing; confirm real
+# behavior with tests. Host-level egress firewall also required for public nodes.
