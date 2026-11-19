@@ -1,0 +1,37 @@
+# REVIEW-ONLY: do not install on any production VPN/Voice server.
+# Requires an isolated authorized honeypot host, restricted raw input
+# mount, dedicated service account and systemd secure credential.
+[Unit]
+Description=Vynalth isolated honeypot forensic collector (%i)
+Documentation=https://github.com/vyncuslim/vynalth-cloudflare-edge
+After=local-fs.target
+ConditionPathIsDirectory=/var/lib/vynalth-honeypot/raw/%i
+
+[Service]
+Type=oneshot
+User=vynalth-collector
+Group=vynalth-collector
+WorkingDirectory=/opt/vynalth-honeypot/sensor-stack
+LoadCredential=vynalth_evidence_hmac_key:/etc/vynalth-honeypot/evidence.key
+ExecStart=/usr/bin/python3 /opt/vynalth-honeypot/sensor-stack/rotation_collector.py --source %i --sensor-id vynalth-dedicated-%i --raw-dir /var/lib/vynalth-honeypot/raw/%i --active-name %i.json --db /var/lib/vynalth-honeypot/private/%i.db --health /var/lib/vynalth-honeypot/private/%i-health.json --batch-size 256 --max-rounds 4 --max-records 10000 --min-free-mb 128
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/var/lib/vynalth-honeypot/raw /opt/vynalth-honeypot
+ReadWritePaths=/var/lib/vynalth-honeypot/private
+UMask=0077
+MemoryMax=256M
+CPUQuota=40%
+TimeoutStartSec=45
