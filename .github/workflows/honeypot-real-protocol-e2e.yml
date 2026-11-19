@@ -48,6 +48,19 @@ jobs:
           python threat-intel/ci_full_chain.py
           npm install --ignore-scripts --no-audit --no-fund --silent
           node --test src/sensor-ingest.test.js
+      - name: Validate signed forensic index against REAL Cowrie connection log
+        env:
+          VYNALTH_EVIDENCE_HMAC_KEY: "ci-test-only-fresh-ephemeral-evidence-key-00000001"
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
+          python sensor-stack/evidence_capture.py \
+            --source cowrie --input "$scratch/cowrie.jsonl" --output "$scratch/restricted-evidence.json"
+          python sensor-stack/evidence_capture.py \
+            --source cowrie --input "$scratch/restricted-evidence.json" --verify
+          echo "PASS: authenticated offline metadata index from true Cowrie socket events"
       - name: Ensure test runner was isolated and production unchanged
         run: |
           echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."
