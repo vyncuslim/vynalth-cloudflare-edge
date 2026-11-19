@@ -89,7 +89,7 @@ test("enriched telemetry stores only validated Cloudflare metadata", async () =>
   assert.equal(result.schema, "v2");
   assert.equal(calls.length, 1);
   assert.match(calls[0].sql, /network_asn/);
-  assert.equal((calls[0].sql.match(/\\?/g)||[]).length,19);
+  assert.equal((calls[0].sql.match(/\?/g)||[]).length,19);
   const values=calls[0].params;
   assert.equal(values.length,19);
   assert.deepEqual(values.slice(0,7), [
