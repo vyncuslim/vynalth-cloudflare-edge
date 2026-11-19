@@ -86,6 +86,33 @@ jobs:
                             "public_attacks_captured":False}))
           PY
           echo "PASS: genuine Cowrie fake-shell session and locally hashed TTY evidence"
+      - name: Replay genuine Cowrie terminal tape without printing untrusted bytes
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
+          python sensor-stack/ci_validate_playlog.py "$scratch/cowrie.jsonl"
+      - name: Verify restart-safe restricted spool from genuine Cowrie events
+        env:
+          VYNALTH_EVIDENCE_HMAC_KEY: "ci-test-only-fresh-ephemeral-evidence-key-00000001"
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          docker cp vynalth-lab-cowrie:/cowrie/cowrie-git/var/log/cowrie/cowrie.json "$scratch/cowrie.jsonl"
+          python sensor-stack/durable_spool.py --source cowrie --sensor-id ci-cowrie-lab --input "$scratch/cowrie.jsonl" --db "$scratch/private/spool.db"
+          python sensor-stack/durable_spool.py --db "$scratch/private/spool.db" --verify
+          python - "$scratch/private/spool.db" <<'PY'
+          import json, sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              counts=dict(db.execute("SELECT event_class,COUNT(*) FROM sanitized_event GROUP BY event_class"))
+          assert counts.get("honeypot_login_accepted",0)>=1
+          assert counts.get("shell_command",0)>=1
+          assert counts.get("tty_finalized",0)>=1
+          print(json.dumps({"real_cowrie_durable_spool":True,"event_classes_verified":True,"public_ip_sensor":False}))
+          PY
+          python sensor-stack/durable_spool.py --source cowrie --sensor-id ci-cowrie-lab --input "$scratch/cowrie.jsonl" --db "$scratch/private/spool.db"
       - name: Ensure test runner was isolated and production unchanged
         run: |
           echo "CI only: NO Vercel/Cloudflare deploy; NO TiDB credentials; NO internet sensor; NO external event upload."
