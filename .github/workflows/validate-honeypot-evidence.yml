@@ -67,6 +67,23 @@ jobs:
               assert forbidden not in tty, forbidden
           print("PASS: offline restricted capture, spool, and read-only TTY format checks")
           PY
+      - name: Static systemd unit syntax verification, no enable/start
+        run: |
+          systemd-analyze verify \
+            sensor-stack/ops/vynalth-honeypot-collector@.service \
+            sensor-stack/ops/vynalth-honeypot-collector@.timer \
+            sensor-stack/ops/vynalth-honeypot-health@.service \
+            sensor-stack/ops/vynalth-honeypot-health@.timer
+          python - <<'PY'
+          from pathlib import Path
+          for path in Path("sensor-stack/ops").glob("*.service"):
+              content=path.read_text()
+              for required in ("NoNewPrivileges=yes","IPAddressDeny=any",
+                               "LoadCredential=vynalth_evidence_hmac_key:",
+                               "ProtectSystem=strict","User=vynalth-collector"):
+                  assert required in content,(path,required)
+          print("PASS: staged service units are network-denied and use private credentials")
+          PY
       - name: No production deploy
         run: |
           echo "No public VM, no cloud deploy, no TiDB DDL, no binary upload."
