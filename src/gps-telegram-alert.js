@@ -14,6 +14,29 @@ const BOT_TOKEN_PATTERN=/^[0-9]{5,20}:[A-Za-z0-9_-]{25,}$/;
 const CHAT_ID_PATTERN=/^(?:-?[0-9]{3,24}|@[A-Za-z0-9_]{5,32})$/;
 const encoder=new TextEncoder();
 
+// This is a best-effort backoff for the GPS path, which shares the Bot API
+// with other alert senders. It prevents repeated 429s within an isolate,
+// without a new paid binding or any persistence of user identifiers.
+// This is NOT globally atomic across Workers locations.
+export function createGpsTelegramFloodControl(){
+ let inFlight=false;
+ let retryUntil=0;
+ return {
+  enter(now=Date.now()){
+   if(inFlight||now<retryUntil)return false;
+   inFlight=true;
+   return true;
+  },
+  hold(retryAfterSeconds,now=Date.now()){
+   const seconds=Number.isInteger(retryAfterSeconds)
+    ?Math.max(1,Math.min(3600,retryAfterSeconds)):60;
+   retryUntil=Math.max(retryUntil,now+seconds*1000);
+  },
+  release(){inFlight=false;}
+ };
+}
+const defaultGpsFloodControl=createGpsTelegramFloodControl();
+
 export function telegramGpsStatus(env){
  const enabled=env?.GPS_TELEGRAM_ALERTS_ENABLED==="true";
  const token=env?.GPS_TELEGRAM_BOT_TOKEN||env?.TELEGRAM_BOT_TOKEN;
@@ -56,7 +79,8 @@ function buildMessage(event,host,ref){
  ].join("\n");
 }
 
-async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl}){
+async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl,
+ floodControl=defaultGpsFloodControl,now=Date.now}){
  const status=telegramGpsStatus(env);
  if(!status.enabled)return {state:"disabled"};
  if(!status.configured)return {state:"unconfigured"};
@@ -71,9 +95,11 @@ async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl}){
  try{
   const [recentGlobal,recentUser]=await Promise.all([kv.get(globalKey),kv.get(userKey)]);
   if(recentGlobal||recentUser)return {state:"throttled"};
-  // Cloudflare KV is eventually consistent. Do NOT set cooldown before
-  // confirmed delivery: a rejected or unreachable Telegram call must remain
-  // eligible for the next real GPS event.
+  // Cloudflare KV is eventually consistent. Do NOT set delivery cooldown
+  // before a confirmed ack. The separate per-isolate limiter only prevents
+  // simultaneous sends and respects explicit Bot API 429 retry_after.
+  if(!floodControl.enter(now()))return {state:"throttled"};
+  try {
   const token=env.GPS_TELEGRAM_BOT_TOKEN||env.TELEGRAM_BOT_TOKEN;
   const chat=env.GPS_TELEGRAM_CHAT_ID||env.TELEGRAM_CHAT_ID||env.ADMIN_TELEGRAM_CHAT_ID;
   const response=await fetchImpl("https://api.telegram.org/bot"+token+"/sendMessage",{
@@ -84,6 +110,12 @@ async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl}){
     disable_web_page_preview:true}),
    signal:AbortSignal.timeout(4500)
   });
+  if(response.status===429){
+   const denied=await response.json().catch(()=>null);
+   floodControl.hold(denied?.parameters?.retry_after,now());
+   console.warn("[GPS TELEGRAM] rate-limited; retry_after cooldown active");
+   return {state:"rate_limited"};
+  }
   if(!response.ok){
    console.warn("[GPS TELEGRAM] delivery rejected",response.status);
    return {state:"rejected"};
@@ -108,6 +140,9 @@ async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl}){
    console.warn("[GPS TELEGRAM] delivered, cooldown storage unavailable");
   }
   return {state:"sent"};
+  }finally{
+   floodControl.release();
+  }
  }catch(err){
   // Never log fetch errors or URL strings; Telegram Bot URL includes token.
   console.warn("[GPS TELEGRAM] delivery unavailable");
@@ -115,14 +150,15 @@ async function dispatchGpsAlert({env,request,url,event,requestId,fetchImpl}){
  }
 }
 
-export function scheduleGpsDenialAlert({env,request,url,event,requestId,ctx,fetchImpl=fetch}){
+export function scheduleGpsDenialAlert({env,request,url,event,requestId,ctx,
+ fetchImpl=fetch,floodControl=defaultGpsFloodControl,now=Date.now}){
  const status=telegramGpsStatus(env);
  if(!status.enabled||!GPS_ALERT_EVENTS.includes(event))return;
  if(!status.configured){
   console.warn("[GPS TELEGRAM] alert enabled but missing Bot/Chat/KV secrets");
   return;
  }
- const task=dispatchGpsAlert({env,request,url,event,requestId,fetchImpl});
+ const task=dispatchGpsAlert({env,request,url,event,requestId,fetchImpl,floodControl,now});
  if(typeof ctx?.waitUntil==="function")ctx.waitUntil(task);
  else void task.catch(()=>console.warn("[GPS TELEGRAM] dispatch failed"));
 }

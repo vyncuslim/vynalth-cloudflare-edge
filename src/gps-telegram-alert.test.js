@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
-import { scheduleGpsDenialAlert,telegramGpsStatus } from "./gps-telegram-alert.js";
+import { scheduleGpsDenialAlert,telegramGpsStatus,createGpsTelegramFloodControl } from "./gps-telegram-alert.js";
 
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const token="123456789:"+ "A".repeat(35);
@@ -19,6 +19,8 @@ const makeKV=()=>{
 };
 function setup(){
  const kv=makeKV(),tasks=[],sent=[];
+ const floodControl=createGpsTelegramFloodControl();
+ const clock={ms:100000};
  const env={GPS_TELEGRAM_ALERTS_ENABLED:"true",
   TELEGRAM_BOT_TOKEN:token,TELEGRAM_CHAT_ID:"-1001234567890",
   GPS_GATE_SESSION_SECRET:secret,CONSENT_KV:kv};
@@ -30,8 +32,8 @@ function setup(){
  const request=new Request("https://vynalthai.com/__shield/gps/verify?secret=discard",{
   headers:{"CF-Connecting-IP":"198.51.100.45",
    "Cookie":"__Host-vynalth-geo=private-access-token"}});
- const args={env,request,url:new URL(request.url),requestId:"11111111-2222-3333-4444-555555555555",ctx,fetchImpl};
- return {kv,tasks,sent,env,args};
+ const args={env,request,url:new URL(request.url),requestId:"11111111-2222-3333-4444-555555555555",ctx,fetchImpl,floodControl,now:()=>clock.ms};
+ return {kv,tasks,sent,env,args,clock};
 }
 const flush=async tasks=>{while(tasks.length){const copy=tasks.splice(0);await Promise.all(copy);}};
 test("Worker GPS alert status requires server-side Bot Chat and KV credentials",()=>{
@@ -136,4 +138,34 @@ test("acknowledged delivery is not mislabeled failed when KV cooldown write fail
  }});
  await flush(tasks);
  assert.equal(sends,1);
+});
+
+test("Telegram GPS 429 pauses repeat sends for retry_after, preserving privacy and no KV delivery mark",async()=>{
+ const {args,tasks,kv,clock}=setup();
+ let sends=0;
+ const denied=async()=>{
+  sends++;
+  return new Response(JSON.stringify({ok:false,parameters:{retry_after:30},description:"private-data"}),{status:429});
+ };
+ scheduleGpsDenialAlert({...args,event:"CAMPUS_RESTRICTED",fetchImpl:denied});
+ await flush(tasks);
+ assert.equal(sends,1);
+ assert.equal(kv.map.size,0,"429 is not a successful delivery");
+ scheduleGpsDenialAlert({...args,event:"CAMPUS_RESTRICTED",fetchImpl:denied});
+ await flush(tasks);
+ assert.equal(sends,1,"same isolate must respect Telegram retry_after");
+ clock.ms+=30001;
+ scheduleGpsDenialAlert({...args,event:"CAMPUS_RESTRICTED",fetchImpl:denied});
+ await flush(tasks);
+ assert.equal(sends,2,"after cooldown, a later real event may try again");
+});
+test("GPS flood limiter guards concurrent sends and defaults unknown 429 to 60s",()=>{
+ const limiter=createGpsTelegramFloodControl();
+ assert.equal(limiter.enter(100000),true);
+ assert.equal(limiter.enter(100000),false);
+ limiter.hold(undefined,100000);
+ limiter.release();
+ assert.equal(limiter.enter(159999),false);
+ assert.equal(limiter.enter(160000),true);
+ limiter.release();
 });
