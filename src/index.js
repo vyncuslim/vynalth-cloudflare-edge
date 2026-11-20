@@ -17,6 +17,7 @@ import { scheduleEdgeAccessLogs } from "./dual-access-logs.js";
 import { handleVercelDrain } from "./vercel-log-drain.js";
 import { scheduleAxiomSecurityEvent } from "./axiom-honeypot.js";
 import { scheduleTidbHoneypotEvent } from "./tidb-honeypot.js";
+import { handleTidbAcceptance } from "./tidb-acceptance.js";
 import { getRootDomain } from "./managed-domains.js";
 import { handleEdgeDeviceEndpoint, addEdgeDeviceToDocumentResponse } from "./domain-device-id.js";
 import { handleRootBrowserEndpoint, addRootBrowserToDocumentResponse } from "./global-browser-id.js";
@@ -334,6 +335,27 @@ export default {
     const temporaryOwnerPage=await handleTemporaryOwnerAccess(request,env,incomingUrl);
     if(temporaryOwnerPage){
       return observedResponse(temporaryOwnerPage,request,incomingUrl,requestId,rootDomain);
+    }
+
+    // Owner's TiDB acceptance console uses an existing signed IP-admin
+    // session (not an unauthenticated public SQL endpoint). Run the regular
+    // temporary IP / global device guards before this exact admin path and
+    // explicitly preserve School IP Policy and Cloudflare WAF. As with the
+    // existing /admin/ip UI, operators do not need GPS permission to sign in.
+    // No new routes, domains, Service Bindings or paid resources are added.
+    if (hostname === VYNALTH_APEX &&
+        [
+          "/__ops/tidb-acceptance",
+          "/__ops/tidb-acceptance/app.js",
+          "/__ops/tidb-acceptance/api/status",
+          "/__ops/tidb-acceptance/api/run",
+        ].includes(incomingUrl.pathname)) {
+      const opsPolicyDenial = await checkSchoolPolicy(request, env, rootDomain, ctx);
+      if (opsPolicyDenial)
+        return observedResponse(opsPolicyDenial, request, incomingUrl, requestId, rootDomain);
+      const opsResponse = await handleTidbAcceptance(request, env, incomingUrl);
+      if (opsResponse)
+        return observedResponse(opsResponse, request, incomingUrl, requestId, rootDomain);
     }
 
     // Keep School IP Policy enforcement for protected photo bytes. A guest's

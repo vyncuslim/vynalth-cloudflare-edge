@@ -153,6 +153,72 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
   }
 }
 
+
+/**
+ * Operator-only, explicitly requested TiDB acceptance probe. This produces
+ * event_type=acceptance_probe, not a forged hostile security observation.
+ * The sole write principal stays INSERT-only. Independent readback requires
+ * a distinct optional SELECT-only SQL credential; absence is never PASS.
+ */
+const ACCEPTANCE_MARKER_RE = new RegExp(
+  "^/__ops/tidb-acceptance/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$", "i"
+);
+const READBACK_SQL = `SELECT id FROM vynalth_honeypot.honeypot_events
+ WHERE source = ? AND event_type = ? AND request_path = ? LIMIT 1`;
+
+function acceptanceReadConfig(env, writer) {
+  const reader = validDatabaseConfig({
+    TIDB_HONEYPOT_DATABASE_URL: env?.TIDB_HONEYPOT_READONLY_DATABASE_URL,
+  });
+  // Readback must never try to SELECT using the INSERT-only writer principal.
+  return reader && writer && reader.username !== writer.username ? reader : null;
+}
+
+export function tidbAcceptanceConnectionStatus(env) {
+  const writer = validDatabaseConfig(env);
+  return {
+    writerConfigured: Boolean(writer),
+    readerConfigured: Boolean(acceptanceReadConfig(env, writer)),
+  };
+}
+
+export async function runTidbAcceptanceProbe(env, marker, connectImpl = connect) {
+  if (typeof marker !== "string" || !ACCEPTANCE_MARKER_RE.test(marker))
+    return { state: "invalid_marker" };
+  const writer = validDatabaseConfig(env);
+  if (!writer) return { state: "not_configured" };
+  let stage = "connect";
+  try {
+    const conn = connectImpl(writer);
+    stage = "execute";
+    await conn.execute(INSERT_SQL, [
+      "acceptance_probe", "cloudflare_worker", "HTTP", null, null, marker, "logged",
+    ]);
+  } catch (error) {
+    const summary = safeTiDBFailureSummary(error, stage);
+    return { state: "failed", reason: summary.reason, stage: summary.stage };
+  }
+  const reader = acceptanceReadConfig(env, writer);
+  if (!reader) return { state: "insert_acknowledged", readback: "manual_required" };
+  try {
+    const rows = await connectImpl(reader).execute(READBACK_SQL, [
+      "cloudflare_worker", "acceptance_probe", marker,
+    ]);
+    const found = Array.isArray(rows)
+      ? rows.length > 0
+      : Array.isArray(rows?.rows) && rows.rows.length > 0;
+    return found
+      ? { state: "verified", readback: "confirmed" }
+      : { state: "insert_acknowledged", readback: "not_found" };
+  } catch (error) {
+    return {
+      state: "insert_acknowledged",
+      readback: "failed",
+      readbackReason: safeTiDBFailureSummary(error, "execute").reason,
+    };
+  }
+}
+
 export function scheduleTidbHoneypotEvent(args) {
   // Only reached by an allowlisted honeypot route from src/index.js.
   // Every eligible event attempts an async INSERT; invalid configuration

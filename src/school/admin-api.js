@@ -108,6 +108,14 @@ async function bodyJson(req){
     return obj&&typeof obj==="object"&&!Array.isArray(obj)?obj:null;
   }catch{return null;}
 }
+// Reuse the existing signed, HttpOnly IP-admin cookie for the TiDB
+// operator page. No new shared secret, credentials in URLs, or public bypass.
+// This returns only a validated random CSRF token and expiry to server code.
+export async function authenticatedIpAdminSession(request,env){
+  if(!configured(env))return null;
+  return session(request,env.ADMIN_IP_SESSION_SECRET);
+}
+
 export function publicIp(input){
   const ip=normalizePolicyIp(input);
   if(!ip)return null;
