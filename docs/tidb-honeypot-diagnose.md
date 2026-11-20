@@ -1,3 +1,17 @@
+> **2026-11-20 production-safe failure follow-up**: With 100% eligible write
+> attempts enabled, the Worker emits only bounded error `reason` and `stage`
+> labels in a once-per-minute-per-isolate `[TIDB HONEYPOT] insert failed` warning.
+> It emits an occasional `[TIDB HONEYPOT] insert acknowledged` line on driver
+> acknowledgment; **a real SQL read-back row is still required** to mark
+> persistence PASS. Never share DB URL or raw driver errors. This change
+> does not rotate secrets or change grants.
+>
+> **Telegram flood reduction**: normal 2xx/3xx and routine 4xx no longer
+> send per-request Telegram alerts. Known sensitive probes and high-severity
+> responses remain eligible, with 6-second minimum spacing per isolate and
+> a Telegram `retry_after` hold on 429. Different Cloudflare isolates do not
+> share limiter state; delivery is therefore best-effort, not guaranteed.
+
 > **Current implementation update (2026-11-20)**: Per owner request, TiDB
 > honeypot ingestion for allowlisted events is built in and attempts **100%** of
 > eligible events; there is no ingestion feature flag or random-sampling setting.

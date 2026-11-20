@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyEdgeAlert, edgeTelegramStatus, scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
+import { classifyEdgeAlert, createEdgeTelegramLimiter, edgeTelegramStatus, scheduleEdgeTelegramAlert } from "./edge-telegram-alert.js";
 
 const bot = "123456789:" + "A".repeat(35);
 function fixture() {
@@ -11,15 +11,18 @@ function fixture() {
     method: "POST", headers: { Cookie: "auth=secret",
       "CF-Connecting-IP": "198.51.100.11" }, body: "secret password" });
   const ctx = { waitUntil: p => tasks.push(p) };
+  const clock = { ms: 1000000 };
+  const limiter = createEdgeTelegramLimiter();
   const fetchImpl = async (url, options) => {
     sent.push({ url, options });
     return new Response(JSON.stringify({ ok: true, result:{message_id:77} }), { status: 200 });
   };
   const args = { env, request, response: new Response(null, { status: 503 }),
     ctx, url: new URL(request.url),
-    requestId: "11111111-2222-3333-4444-555555555555", fetchImpl };
+    requestId: "11111111-2222-3333-4444-555555555555", fetchImpl,
+    limiter, now: () => clock.ms };
   const flush = async () => { while (tasks.length) await Promise.all(tasks.splice(0)); };
-  return { env, sent, tasks, args, flush };
+  return { env, sent, tasks, args, flush, clock };
 }
 test("requires valid bot and chat secrets, not client or KV", () => {
   const { env } = fixture();
@@ -29,7 +32,7 @@ test("requires valid bot and chat secrets, not client or KV", () => {
   assert.deepEqual(edgeTelegramStatus({ ...env, EDGE_TELEGRAM_ALERTS_ENABLED: "false" }),
     { enabled: false, configured: true });
 });
-test("reports every HTTP 4xx or 5xx including authentication and missing pages", () => {
+test("classifies HTTP 4xx or 5xx for observability including authentication and missing pages", () => {
   const { args } = fixture();
   for (const status of [400, 401, 403, 404, 429, 500, 502, 503, 504]) {
     const issue = classifyEdgeAlert(args.request, new Response(null, { status }));
@@ -42,10 +45,12 @@ test("reports every HTTP 4xx or 5xx including authentication and missing pages",
   const probe = new Request("https://vynalthai.com/.env?secret=private");
   assert.equal(classifyEdgeAlert(probe, new Response(null, { status: 404 })).code, "SUSPICIOUS_PROBE");
 });
-test("reports each individual failure, without cross-event suppression", async () => {
-  const { args, sent, flush } = fixture();
+test("throttles repeated failures without suppressing future important alerts", async () => {
+  const { args, sent, flush, clock } = fixture();
   assert.equal(scheduleEdgeTelegramAlert(args), true);
   await flush();
+  assert.equal(scheduleEdgeTelegramAlert(args), false);
+  clock.ms += 6001;
   assert.equal(scheduleEdgeTelegramAlert(args), true);
   await flush();
   assert.equal(sent.length, 2);
@@ -83,12 +88,14 @@ test("never sends if disabled, missing secrets, or no lifecycle queue", () => {
 test("INFO notification for each 2xx/3xx after explicit notify-all opt-in",async()=>{
  const {args,sent,flush}=fixture();
  const env={...args.env,EDGE_TELEGRAM_NOTIFY_ALL_REQUESTS:"true"};
+ const testLimiter={acquire:()=>true,complete:()=>{}};
  for(const status of [200,201,204,301,307]){
   const response=new Response(null,{status});
   const issue=classifyEdgeAlert(args.request,response,env);
   assert.equal(issue.code,"HTTP_REQUEST");
   assert.equal(issue.severity,"Info");
-  assert.equal(scheduleEdgeTelegramAlert({...args,env,response,responseTimeMs:101}),true);
+  assert.equal(scheduleEdgeTelegramAlert({...args,env,response,responseTimeMs:101,
+    limiter:testLimiter}),true);
  }
  await flush();
  assert.equal(sent.length,5);
@@ -188,4 +195,36 @@ test("sensitive path identifiers and content-type parameters are removed from Te
   "SecretMultipartBoundary","another-private","token=private"]){
   assert.equal(m.includes(bad),false,bad);
  }
+});
+
+test("routine 404 is not a Telegram incident, but a known sensitive probe is", async () => {
+  const { args, sent, flush } = fixture();
+  const routine = new Request("https://vynalthai.com/nonexistent-file.txt");
+  assert.equal(scheduleEdgeTelegramAlert({...args,request:routine,
+    response:new Response(null,{status:404})}),false);
+  assert.equal(sent.length,0);
+  const probe = new Request("https://vynalthai.com/.env");
+  assert.equal(scheduleEdgeTelegramAlert({...args,request:probe,
+    response:new Response(null,{status:404})}),true);
+  await flush();
+  assert.equal(sent.length,1);
+});
+
+test("Telegram 429 retry_after suppresses subsequent sends without retry storms", async () => {
+  const { args, flush, clock } = fixture();
+  let attempts=0;
+  const denied=async () => {
+    attempts++;
+    return new Response(JSON.stringify({ok:false,parameters:{retry_after:45}}),{
+      status:429, headers:{"Content-Type":"application/json"}});
+  };
+  assert.equal(scheduleEdgeTelegramAlert({...args,fetchImpl:denied}),true);
+  await flush();
+  clock.ms+=7000;
+  assert.equal(scheduleEdgeTelegramAlert({...args,fetchImpl:denied}),false);
+  assert.equal(attempts,1);
+  clock.ms+=45001;
+  assert.equal(scheduleEdgeTelegramAlert({...args,fetchImpl:denied}),true);
+  await flush();
+  assert.equal(attempts,2);
 });

@@ -61,6 +61,29 @@ function safeErrorCategory(error) {
   return "other";
 }
 
+export function safeTiDBFailureSummary(error, stage = "unknown") {
+  const known = new Set(["normalization", "connect", "execute"]);
+  return {
+    event: "tidb_honeypot_write_failure",
+    reason: safeErrorCategory(error),
+    stage: known.has(stage) ? stage : "unknown",
+  };
+}
+const lastFailureLogAt = new Map();
+let lastInsertAckLogAt = 0;
+function logLimitedTiDBFailure(summary, now = Date.now()) {
+  const key = summary.stage + ":" + summary.reason;
+  if (now - (lastFailureLogAt.get(key) || 0) < 60000) return;
+  lastFailureLogAt.set(key, now);
+  // Never log the exception, SQL text, DB URL, IP or request details.
+  console.warn("[TIDB HONEYPOT] insert failed", JSON.stringify(summary));
+}
+function logLimitedTiDBSuccess(now = Date.now()) {
+  if (now - lastInsertAckLogAt < 60000) return;
+  lastInsertAckLogAt = now;
+  console.info("[TIDB HONEYPOT] insert acknowledged");
+}
+
 function validDatabaseUrl(env) {
   const raw = env?.TIDB_HONEYPOT_DATABASE_URL;
   if (typeof raw !== "string" || raw.length > 1024) return null;
@@ -109,13 +132,14 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
       observation.action === "block" ? "blocked" : "logged",
     ]);
     logSafeOutcome(args.env, "inserted", "insert");
+    if (!honeypotDiagnosticsEnabled(args.env)) logLimitedTiDBSuccess();
     return { state: "inserted" };
   } catch (error) {
     // Sanitized fixed categories only; no raw connection URL or exception text.
-    const reason = safeErrorCategory(error);
+    const summary = safeTiDBFailureSummary(error, failureStage);
     if (honeypotDiagnosticsEnabled(args?.env))
-      logSafeOutcome(args.env, "failed", reason, failureStage);
-    else console.warn("[TIDB HONEYPOT] insert failed");
+      logSafeOutcome(args.env, "failed", summary.reason, summary.stage);
+    else logLimitedTiDBFailure(summary);
     return { state: "failed" };
   }
 }

@@ -2,21 +2,44 @@ import { isObservedSecurityProbe } from "./threat-telemetry.js";
 import { formatEdgeSecurityAlert } from "./edge-alert-details.js";
 
 /**
- * Nonblocking, privacy-minimized Cloudflare edge alerts for all hosts that
- * actually pass through this Worker. The Bot token never enters the browser.
- *
- * Every 4xx/5xx response (including expected denials) is reported per request.
- * When EDGE_TELEGRAM_NOTIFY_ALL_REQUESTS=true, also report 2xx/3xx,
- * including 200 responses, as INFO. Telegram can rate-limit large volumes.
- * This is intentionally noisy; do not mislabel ordinary 4xx as outages.
+ * Nonblocking Cloudflare edge security notifications. Normal 2xx/3xx and
+ * routine 4xx are not Telegram incidents; those remain in access/security logs.
+ * Only known sensitive-path probes, observed 5xx and HTTP 429 are notified.
+ * A per-isolate best-effort cooldown prevents alert storms without extra
+ * databases, Durable Objects or paid broadcasting. Other Workers may have
+ * their own isolates: this is NOT a globally guaranteed Telegram queue.
  * Specific GPS denials have their own independent notification pipeline.
- * This is not Cloudflare WAF analytics, a client-side error collector, or
- * proof of a successful Telegram delivery until Telegram acknowledges it.
  */
 const TOKEN_RE = /^[0-9]{5,20}:[A-Za-z0-9_-]{25,}$/;
 const CHAT_RE = /^(?:-?[0-9]{3,24}|@[A-Za-z0-9_]{5,32})$/;
-// Each HTTP failure is an independent event. Do not suppress other failures just
-// because their path family/status matches a previous failure.
+// A single Cloudflare isolate may handle many requests at once. Bound outbound
+// Telegram attempts even when attackers send floods of suspicious-path GETs.
+export function createEdgeTelegramLimiter({ spacingMs = 6000 } = {}) {
+  const gap = Number.isFinite(spacingMs) && spacingMs >= 0 ? spacingMs : 6000;
+  let nextAllowedAt = 0;
+  let inFlight = false;
+  return {
+    acquire(now = Date.now()) {
+      if (inFlight || now < nextAllowedAt) return false;
+      inFlight = true;
+      nextAllowedAt = now + gap;
+      return true;
+    },
+    complete(result, now = Date.now()) {
+      inFlight = false;
+      if (result?.state === "rate_limited") {
+        const seconds = Number.isInteger(result.retryAfterSeconds)
+          ? Math.min(3600, Math.max(1, result.retryAfterSeconds)) : 60;
+        nextAllowedAt = Math.max(nextAllowedAt, now + seconds * 1000);
+      } else if (result?.state === "failed" || result?.state === "rejected" ||
+                 result?.state === "unconfirmed") {
+        // Failed fetches and non-429 API errors must not be retried per request.
+        nextAllowedAt = Math.max(nextAllowedAt, now + 60 * 1000);
+      }
+    }
+  };
+}
+const defaultTelegramLimiter = createEdgeTelegramLimiter();
 
 export function edgeTelegramStatus(env) {
   const enabled = env?.EDGE_TELEGRAM_ALERTS_ENABLED === "true";
@@ -81,6 +104,13 @@ async function dispatch({ env, request, url, response, requestId, responseTimeMs
       body: JSON.stringify({ chat_id: chat, text: message, disable_web_page_preview: true }),
       signal: AbortSignal.timeout(4500)
     });
+    if (ack.status === 429) {
+      // Official Bot API retry_after is advisory; never log raw response.
+      const denied = await ack.json().catch(() => null);
+      const retryAfterSeconds = denied?.parameters?.retry_after;
+      console.warn("[EDGE TELEGRAM] rate-limited; suppressing more alerts");
+      return { state: "rate_limited", retryAfterSeconds };
+    }
     if (!ack.ok) {
       console.warn("[EDGE TELEGRAM] Telegram rejected alert; HTTP", ack.status);
       return { state: "rejected" };
@@ -99,7 +129,8 @@ async function dispatch({ env, request, url, response, requestId, responseTimeMs
 }
 
 export function scheduleEdgeTelegramAlert({
-  env, ctx, request, url, response, requestId, responseTimeMs, fetchImpl = fetch
+  env, ctx, request, url, response, requestId, responseTimeMs, fetchImpl = fetch,
+  limiter = defaultTelegramLimiter, now = Date.now
 }) {
   const config = edgeTelegramStatus(env);
   if (!config.enabled) return false;
@@ -107,8 +138,25 @@ export function scheduleEdgeTelegramAlert({
     console.warn("[EDGE TELEGRAM] enabled but Bot/Chat credentials are incomplete");
     return false;
   }
-  if (!ctx || typeof ctx.waitUntil !== "function" ||
-      !issueFor(request, response, env)) return false;
-  ctx.waitUntil(dispatch({ env, request, url, response, requestId, responseTimeMs, fetchImpl }));
-  return true;
+  if (!ctx || typeof ctx.waitUntil !== "function") return false;
+  const issue = issueFor(request, response, env);
+  if (!issue) return false;
+  // Routine 4xx are not emergencies. Suspicious probes are separately tagged.
+  if (issue.code === "HTTP_4XX" && issue.status !== 429) return false;
+  if (!limiter.acquire(now())) return false;
+  try {
+    ctx.waitUntil(Promise.resolve().then(() =>
+      dispatch({ env, request, url, response, requestId, responseTimeMs, fetchImpl })
+    ).then(result => {
+      limiter.complete(result, now());
+      return result;
+    }, () => {
+      limiter.complete({ state: "failed" }, now());
+      return { state: "failed" };
+    }));
+    return true;
+  } catch {
+    limiter.complete({ state: "failed" }, now());
+    return false;
+  }
 }

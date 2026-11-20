@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatchTidbHoneypotEvent, scheduleTidbHoneypotEvent, honeypotDiagnosticsEnabled } from "./tidb-honeypot.js";
+import { dispatchTidbHoneypotEvent, scheduleTidbHoneypotEvent, honeypotDiagnosticsEnabled, safeTiDBFailureSummary } from "./tidb-honeypot.js";
 const DIAG_UNTIL = new Date(Date.now() + 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 
 const DUMMY_URL = "mysql://instance.honey_writer:fake_password@gateway01.ap-southeast-1.prod.aws.tidbcloud.com/vynalth_honeypot";
@@ -194,4 +194,18 @@ test("short-term diagnostic window auto-expires, fails closed on missing or malf
   assert.equal(honeypotDiagnosticsEnabled({...valid,TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:"bad-data"},now),false);
   assert.equal(honeypotDiagnosticsEnabled({TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true"},now),false);
   assert.equal(honeypotDiagnosticsEnabled({...valid,TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"false"},now),false);
+});
+
+test("always-on diagnostic summary is fixed-label and strips raw error secrets", () => {
+  const detail = safeTiDBFailureSummary(
+    Error("access denied mysql://writer:passwordSecret@internal.example/?token=sensitive"),
+    "execute"
+  );
+  assert.deepEqual(detail, {
+    event:"tidb_honeypot_write_failure",reason:"auth",stage:"execute"
+  });
+  const serialized=JSON.stringify(detail);
+  for(const value of ["passwordSecret","internal.example","sensitive","mysql://"])
+    assert.equal(serialized.includes(value),false,value);
+  assert.equal(safeTiDBFailureSummary(Error("fetch failed"),"untrusted").stage,"unknown");
 });
