@@ -6,6 +6,8 @@
  * IMPORTANT: DB account must be INSERT-only on honeypot_events. A root
  * connection URL is explicitly rejected. Only known honeypot routes invoke it.
  * No opt-in or random sampling flag; missing/invalid secret fails closed.
+ * URL components are validated and decoded once before passing as separate
+ * serverless-driver credential fields; no secret values are logged.
  */
 import { connect } from "@tidbcloud/serverless";
 import { buildAxiomSecurityEvent } from "./axiom-honeypot.js";
@@ -84,24 +86,31 @@ function logLimitedTiDBSuccess(now = Date.now()) {
   console.info("[TIDB HONEYPOT] insert acknowledged");
 }
 
-function validDatabaseUrl(env) {
+function validDatabaseConfig(env) {
   const raw = env?.TIDB_HONEYPOT_DATABASE_URL;
   if (typeof raw !== "string" || raw.length > 1024) return null;
   try {
     const u = new URL(raw);
     if (u.protocol !== "mysql:" || u.hostname !== HOST || u.port ||
         u.pathname !== "/vynalth_honeypot" || u.search || u.hash ||
-        !u.username || !u.password || u.username.toLowerCase().endsWith(".root") ||
-        u.username.toLowerCase() === "root") return null;
-    return raw;
+        !u.username || !u.password) return null;
+    // The public TiDB serverless driver supports discrete credential fields.
+    // Decode a properly percent-encoded URL exactly once to avoid ambiguous
+    // special-character treatment at the HTTP authentication boundary.
+    // Never log or expose these fields; malformed escapes fail closed.
+    const username = decodeURIComponent(u.username);
+    const password = decodeURIComponent(u.password);
+    if (!username || !password || username.toLowerCase().endsWith(".root") ||
+        username.toLowerCase() === "root") return null;
+    return { host: HOST, username, password, database: "vynalth_honeypot" };
   } catch {
     return null;
   }
 }
 
 export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
-  const url = validDatabaseUrl(args.env);
-  if (!url) {
+  const config = validDatabaseConfig(args.env);
+  if (!config) {
     logSafeOutcome(args.env, "not_configured", "bad_url");
     return { state: "not_configured" };
   }
@@ -120,7 +129,7 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
       return { state: "invalid_event" };
     }
     failureStage = "connect";
-    const connection = connectImpl({ url });
+    const connection = connectImpl(config);
     failureStage = "execute";
     await connection.execute(INSERT_SQL, [
       "suspicious_probe",
@@ -152,7 +161,7 @@ export function scheduleTidbHoneypotEvent(args) {
     logSafeOutcome(args?.env, "no_lifecycle", "missing_ctx");
     return false;
   }
-  if (!validDatabaseUrl(args.env)) {
+  if (!validDatabaseConfig(args.env)) {
     logSafeOutcome(args.env, "not_configured", "bad_url");
     return false;
   }

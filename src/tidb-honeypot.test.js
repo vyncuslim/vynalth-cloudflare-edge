@@ -34,8 +34,13 @@ test("TiDB honeypot fails closed without a secret, rejects root and bad URLs", a
 
 test("TiDB honeypot uses parameterized INSERT, safe fields, no secret leakage", async () => {
   const calls = [];
-  const result = await dispatchTidbHoneypotEvent(makeArgs(), ({url}) => {
-    assert.equal(url, DUMMY_URL);
+  const result = await dispatchTidbHoneypotEvent(makeArgs(), (config) => {
+    assert.deepEqual(config, {
+      host: "gateway01.ap-southeast-1.prod.aws.tidbcloud.com",
+      username: "instance.honey_writer",
+      password: "fake_password",
+      database: "vynalth_honeypot",
+    });
     return { execute(sql, params) { calls.push({sql,params}); return Promise.resolve({}); } };
   });
   assert.equal(result.state, "inserted");
@@ -208,4 +213,29 @@ test("always-on diagnostic summary is fixed-label and strips raw error secrets",
   for(const value of ["passwordSecret","internal.example","sensitive","mysql://"])
     assert.equal(serialized.includes(value),false,value);
   assert.equal(safeTiDBFailureSummary(Error("fetch failed"),"untrusted").stage,"unknown");
+});
+
+test("percent-encoded special characters are decoded once into separate driver credentials", async () => {
+  const password = "percent% / @ ? # : Unicode☃";
+  const encoded = encodeURIComponent(password);
+  const url = DUMMY_URL.replace("fake_password", encoded);
+  const env = { ...enabled, TIDB_HONEYPOT_DATABASE_URL: url };
+  const result = await dispatchTidbHoneypotEvent(makeArgs(env), config => {
+    assert.equal(config.username, "instance.honey_writer");
+    assert.equal(config.password, password);
+    assert.equal(config.host, "gateway01.ap-southeast-1.prod.aws.tidbcloud.com");
+    assert.equal(config.database, "vynalth_honeypot");
+    assert.equal("url" in config, false);
+    return { execute() { return Promise.resolve({}); } };
+  });
+  assert.equal(result.state, "inserted");
+});
+test("invalid percent-encoded password fails closed without contacting TiDB", async () => {
+  const url = DUMMY_URL.replace("fake_password", "%FF");
+  let connected = false;
+  const result = await dispatchTidbHoneypotEvent(
+    makeArgs({ ...enabled, TIDB_HONEYPOT_DATABASE_URL: url }),
+    () => { connected = true; throw Error("must not connect"); });
+  assert.equal(result.state, "not_configured");
+  assert.equal(connected, false);
 });
