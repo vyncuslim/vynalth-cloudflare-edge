@@ -38,16 +38,17 @@ POSTHOG_LOGS_ENDPOINT = "https://us.i.posthog.com/i/v1/logs"
 # Actor ID, if enabled, is a daily HMAC of edge-observed network IP.
 # No security enforcement is based on a single honeypot hit.
 AXIOM_HONEYPOT_INGEST_ENABLED = "false"
-# Optional TiDB Cloud Starter sink for a small, sampled set of static PHP probes.
+# Optional TiDB Cloud Starter sink for eligible allowlisted honeypot probes.
 # Default OFF until a dedicated INSERT-only DB account and Worker secret exist.
 # Never use root credentials. Never store the connection string in this file.
 # No Vercel endpoint or new Cloudflare route is involved.
 TIDB_HONEYPOT_INGEST_ENABLED = "true"
-TIDB_HONEYPOT_SAMPLE_RATE = "0.1"
+TIDB_HONEYPOT_SAMPLE_RATE = "1"
 # Owner-approved ONE 2026-11-20 production diagnosis, automatically stops
 # at 2026-11-20 07:02:00 UTC (15:02 MYT) without another deployment.
 # A short rollout delay can only shorten the live log window; never extend it.
-# TiDB INSERT remains 10% sampled. Fixed labels only; no sensitive data.
+# Sampling is now 100% by explicit owner request; diagnostics deadline remains expired.
+# Fixed labels only; no sensitive data. Verify free-tier spending limit separately.
 TIDB_HONEYPOT_DIAGNOSTICS_ENABLED = "true"
 TIDB_HONEYPOT_DIAGNOSTICS_UNTIL = "2026-11-20T07:02:00Z"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
