@@ -32,18 +32,23 @@ export function honeypotDiagnosticsEnabled(env, now = Date.now()) {
   const end = Date.parse(until);
   return Number.isFinite(end) && end > now && end - now <= 2 * 60 * 60 * 1000;
 }
-function logSafeOutcome(env, state, reason = "none") {
+function logSafeOutcome(env, state, reason = "none", stage = "unknown") {
   if (!honeypotDiagnosticsEnabled(env) || !SAFE_OUTCOMES.has(state)) return;
   const allowedReasons = new Set([
     "none", "disabled", "missing_ctx", "sampling", "bad_url", "event", "insert", "schema", "auth",
     "quota", "transport", "timeout", "other",
   ]);
-  console.info("[HONEY TIDB OUTCOME]", JSON.stringify({
+  const allowedStages = new Set(["normalization", "connect", "execute", "unknown"]);
+  const outcome = {
     event: "tidb_honeypot_write_result",
     state,
     reason: allowedReasons.has(reason) ? reason : "other",
     event_version: "tidb-sampled-result-v1",
-  }));
+  };
+  // Stage is a bounded, non-sensitive label. Never log error objects or SQL.
+  if (state === "failed")
+    outcome.stage = allowedStages.has(stage) ? stage : "unknown";
+  console.info("[HONEY TIDB OUTCOME]", JSON.stringify(outcome));
 }
 function safeErrorCategory(error) {
   const message = typeof error?.message === "string" ? error.message : "";
@@ -86,6 +91,7 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
     logSafeOutcome(args.env, "not_configured", "bad_url");
     return { state: "not_configured" };
   }
+  let failureStage = "normalization";
   try {
     const observation = await buildAxiomSecurityEvent(args);
     if (!observation || observation.source !== "cloudflare_worker") {
@@ -99,7 +105,9 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
       logSafeOutcome(args.env, "invalid_event", "event");
       return { state: "invalid_event" };
     }
+    failureStage = "connect";
     const connection = connectImpl({ url });
+    failureStage = "execute";
     await connection.execute(INSERT_SQL, [
       "suspicious_probe",
       "cloudflare_worker",
@@ -115,7 +123,7 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
     // Sanitized fixed categories only; no raw connection URL or exception text.
     const reason = safeErrorCategory(error);
     if (honeypotDiagnosticsEnabled(args?.env))
-      logSafeOutcome(args.env, "failed", reason);
+      logSafeOutcome(args.env, "failed", reason, failureStage);
     else console.warn("[TIDB HONEYPOT] insert failed");
     return { state: "failed" };
   }

@@ -154,6 +154,50 @@ test("diagnostics do not run for a sampled-out decoy and never schedule with inv
   } finally { console.info=originalInfo; }
 });
 
+test("bounded failed-stage labels identify normalizer, connect and execute without leaking secrets", async () => {
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  const lines = [];
+  console.info = (...xs) => lines.push(xs.map(String).join(" "));
+  console.warn = (...xs) => lines.push(xs.map(String).join(" "));
+  const monitored = {
+    ...enabled,
+    TIDB_HONEYPOT_DIAGNOSTICS_ENABLED: "true",
+    TIDB_HONEYPOT_DIAGNOSTICS_UNTIL: DIAG_UNTIL,
+  };
+  const expectOnlySafeStage = (stage, reason) => {
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /"state":"failed"/);
+    assert.match(lines[0], new RegExp('"stage":"' + stage + '"'));
+    assert.match(lines[0], new RegExp('"reason":"' + reason + '"'));
+    for (const sensitive of ["SENSITIVE", DUMMY_URL, "fake_password", "/admin.php", "198.51.100.41"])
+      assert.equal(lines[0].includes(sensitive), false, sensitive);
+    lines.length = 0;
+  };
+  try {
+    // Throw before connect is ever constructed.
+    const badRequest = makeArgs(monitored);
+    badRequest.request = { get method() { throw Error("SENSITIVE normalization error"); } };
+    assert.equal((await dispatchTidbHoneypotEvent(badRequest, () => {
+      throw Error("connect should not run");
+    })).state, "failed");
+    expectOnlySafeStage("normalization", "other");
+
+    assert.equal((await dispatchTidbHoneypotEvent(makeArgs(monitored), () => {
+      throw Error("fetch failed: mysql://fake_password:SENSITIVE@evil.invalid");
+    })).state, "failed");
+    expectOnlySafeStage("connect", "transport");
+
+    assert.equal((await dispatchTidbHoneypotEvent(makeArgs(monitored), () => ({
+      execute() { throw Error("access denied SENSITIVE credentials"); },
+    }))).state, "failed");
+    expectOnlySafeStage("execute", "auth");
+  } finally {
+    console.info = originalInfo;
+    console.warn = originalWarn;
+  }
+});
+
 test("short-term diagnostic window auto-expires, fails closed on missing or malformed UTC deadline", () => {
   const now=Date.parse("2026-11-19T10:30:00Z");
   const valid={TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",

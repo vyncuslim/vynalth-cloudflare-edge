@@ -44,12 +44,12 @@ AXIOM_HONEYPOT_INGEST_ENABLED = "false"
 # No Vercel endpoint or new Cloudflare route is involved.
 TIDB_HONEYPOT_INGEST_ENABLED = "true"
 TIDB_HONEYPOT_SAMPLE_RATE = "0.1"
-# One owner-approved production diagnosis only. Automatically stops
-# producing diagnostic logs at 2026-11-19 11:50:00 UTC (19:50 MYT),
-# without another deployment. TiDB INSERT remains 10% sampled.
-# Fixed, privacy-safe labels only; no IP, credentials, query or SQL text.
+# Owner-approved ONE 2026-11-20 production diagnosis, automatically stops
+# at 2026-11-20 07:02:00 UTC (15:02 MYT) without another deployment.
+# A short rollout delay can only shorten the live log window; never extend it.
+# TiDB INSERT remains 10% sampled. Fixed labels only; no sensitive data.
 TIDB_HONEYPOT_DIAGNOSTICS_ENABLED = "true"
-TIDB_HONEYPOT_DIAGNOSTICS_UNTIL = "2026-11-19T11:50:00Z"
+TIDB_HONEYPOT_DIAGNOSTICS_UNTIL = "2026-11-20T07:02:00Z"
 # Migration gate: disabled until parity tests, admin endpoints and KV binding verified.
 SCHOOL_POLICY_INLINE_ENABLED = "true"
 SCHOOL_MANAGEMENT_INLINE_ENABLED = "true"

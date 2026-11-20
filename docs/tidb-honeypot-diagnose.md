@@ -56,3 +56,33 @@ No Oracle quota verification or VM creation is required for this phase. Cloudfla
 - One authorized production deployment only, after CI passes and secrets/cost controls are confirmed.
 - New diagnostics are off by default until explicitly enabled in that single release.
 - No changes to TiDB US$0 monthly cap or Vercel.
+
+
+## 2026-11-20 production incident: confirmed sampled INSERT failure
+
+Owner-provided runtime evidence on 2026-11-20 at approximately 13:48 MYT:
+
+- A genuine Worker-observed decoy GET reached the PHP honeypot and was logged as `[EDGE HONEYPOT]`.
+- `[TIDB HONEYPOT] insert failed` appeared in the actual Worker production log.
+- The TiDB owner ran a read-only query for `source='cloudflare_worker'`; it returned no rows.
+- `SHOW CREATE TABLE` showed all seven INSERT columns exist with compatible types and defaults.
+- The dedicated non-root `honeypot_writer` account has `INSERT` on only `vynalth_honeypot.honeypot_events`; its authentication string is configured. This does **not** prove the Worker secret matches its password.
+- The gateway hostname matched the instance, and its public IPv4 allowlist covers the internet. This does **not** prove serverless HTTP execution or correct credentials.
+- Cloudflare shows the production secret **binding name** exists, ingestion `true`, 10% sampling, and detailed diagnostics `false`.
+
+This issue remains **unresolved**. Do not guess that password or grant is the cause or represent an empty SQL result as production success. See issue #107.
+
+### Proposed stage-only diagnostics (review branch; not deployed)
+
+If a **separately authorized** time-limited release enables diagnostic output, the existing fixed-label `[HONEY TIDB OUTCOME]` event would include an extra allowlisted `stage` **only when `state=failed`**:
+
+| stage | interpretation |
+|---|---|
+| `normalization` | Unexpected error while constructing a privacy-safe observation |
+| `connect` | `connect({url})` raised an exception synchronously |
+| `execute` | Error when calling or awaiting the serverless driver's `execute(INSERT_SQL, params)` |
+| `unknown` | Unexpected label, replaced with a safe default |
+
+These labels do not expose exception contents, raw SQL, username, password, URL, IP, headers, or query strings. `stage=execute` **does not identify** whether the problem was credentials, remote network, server rejection, or SQL. The existing fixed `reason` label may help separate those classes but is heuristic, not a verified backend diagnosis.
+
+New code **does not activate diagnostics**, extend the previously expired UTC deadline, or change sampling/SQL. A future production diagnostic requires an explicit approval, a fresh short UTC expiry, confirming all existing production security checks and no auto-created preview builds. No unlimited request loops, automatic credential rotation, new fees or public sensor activation. Finish by verifying a newly inserted TiDB row with a read-only SELECT; an SDK acknowledgment is not enough.
