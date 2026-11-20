@@ -4,8 +4,8 @@
 
 ## 权限与安全
 
-- 使用现有 `/admin/ip` 管理密码和签名的 `__Host-vynalth-ip-admin` HttpOnly/Secure/SameSite=Strict 会话。未登录只能看到不含敏感数据的 UI；不能调用诊断 API。
-- POST 需要同源 Origin、合法 CSRF token、明确确认字样 `RUN_SINGLE_PROBE`。全局 Workers KV 尝试冷却 300 秒，单 isolate 禁止并发；KV 最终一致性意味着该限制不是严格全局原子计数器。
+- **独立密码**：由 Cloudflare Secret `TIDB_ACCEPTANCE_ADMIN_PASSWORD` 验证，不复用 `/admin/ip` 的密码或会话。页面使用单独的 `__Host-vynalth-tidb-acceptance` HttpOnly/Secure/SameSite=Strict Cookie，随机 256-bit 会话 Token 仅以 SHA-256 索引保存在现有 `SCHOOL_IP_KV`，20 分钟自动过期。只有管理员登录才能访问状态和测试 API。
+- 独立登录 POST 必须同源，密码仅在 Worker 环境加密 Secret 中验证（比较 SHA-256 摘要）；会话独立于 IP Admin；会话退出时从 KV 撤销。错误登录 5 次/15 分钟限速，Cloudflare WAF 仍是额外的保护。诊断 POST 需要同源 Origin、合法 CSRF token、明确确认字样 `RUN_SINGLE_PROBE`。全局 Workers KV 尝试冷却 300 秒，单 isolate 禁止并发；KV 最终一致性意味着该限制不是严格全局原子计数器。
 - 严格限制在 `vynalthai.com` 的四条路径内。Cloudflare WAF、临时 IP 限制、设备策略和 School IP Policy 原有拦截仍保留。管理页依照现有 `/admin/ip` 路由，不要求浏览器 GPS 提示；未扩大其他业务路径的 GPS 例外。
 - 无公开 SQL 控制台、无任意参数 SQL、无原始 IP、无用户 Cookie、无数据字段回显、无数据库 URL 或明文错误输出。
 - 请求结果只返回固定枚举状态和异常类别 `auth/schema/quota/transport/timeout/other`、阶段和随机 UUID 标记。
@@ -13,11 +13,12 @@
 ## 使用步骤
 
 1. 验证当前生产 Worker 的正确版本已经 Ready、100% 流量。
-2. 访问上述页面并使用原有 IP 管理密码登录；如无法登录，先检查原有 `ADMIN_IP_PASSWORD` / `ADMIN_IP_SESSION_SECRET` 和 `SCHOOL_IP_KV`，不得将密码粘贴到公开日志。
-3. 勾选一次性写入确认，点击 **运行真实入库验收**；每次 POST 仅尝试写入一条到现有表。页面返回 `state`、固定错误类型和唯一 `request_path` UUID。
-4. 若 `state=failed`：INSERT 未通过，查看 `reason/stage`，而非重复点击或升级付费。
-5. 若 `state=insert_acknowledged`：仅说明驱动没有报错，**不算最终 PASS**。复制页面生成的精确 SQL，在 TiDB SQL Editor 运行并核对是否出现同一 UUID 的 `acceptance_probe` 记录。
-6. 若独立 SQL readback 返回匹配行，才允许判定端到端 **PASS**。
+2. 在 Cloudflare Dashboard > Workers & Pages > `vynalth-cloudflare-edge` > Settings > Variables and Secrets，新增类型为 **Secret** 的 `TIDB_ACCEPTANCE_ADMIN_PASSWORD`。在控制台私下输入独立密码（长度至少 12 字符）；**不要**写入 GitHub、`wrangler.toml`、公开 Issue、提交消息、页面源码或聊天截图。确认原有 `SCHOOL_IP_KV` 仍绑定。修改 Secret 可能导致一次新的 Production 版本；不要反复部署。
+3. 访问上述页面并使用新的 TiDB 专用密码登录。连续 5 次失败的登录会按 Cloudflare 已观察来源 IP 暂停 15 分钟；原始 IP 不保存到 KV。
+4. 勾选一次性写入确认，点击 **运行真实入库验收**；每次 POST 仅尝试写入一条到现有表。页面返回 `state`、固定错误类型和唯一 `request_path` UUID。
+5. 若 `state=failed`：INSERT 未通过，查看 `reason/stage`，而非重复点击或升级付费。
+6. 若 `state=insert_acknowledged`：仅说明驱动没有报错，**不算最终 PASS**。复制页面生成的精确 SQL，在 TiDB SQL Editor 运行并核对是否出现同一 UUID 的 `acceptance_probe` 记录。
+7. 若独立 SQL readback 返回匹配行，才允许判定端到端 **PASS**。
 
 受控 INSERT 写入固定字段：
 

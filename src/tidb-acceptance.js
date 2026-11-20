@@ -4,7 +4,11 @@
  * existing HMAC-signed IP administration session. POST is CSRF protected,
  * body-limited and bounded by existing KV; no public SQL execution.
  */
-import { authenticatedIpAdminSession } from "./school/admin-api.js";
+import {
+  tidbAcceptanceSession,
+  tidbAcceptanceLogin,
+  tidbAcceptanceLogout,
+} from "./tidb-acceptance-auth.js";
 import {
   runTidbAcceptanceProbe,
   tidbAcceptanceConnectionStatus,
@@ -14,6 +18,8 @@ import { TIDB_ACCEPTANCE_HTML, TIDB_ACCEPTANCE_SCRIPT } from "./tidb-acceptance-
 const ROOT = "/__ops/tidb-acceptance";
 const API_STATUS = ROOT + "/api/status";
 const API_RUN = ROOT + "/api/run";
+const API_LOGIN = ROOT + "/api/login";
+const API_LOGOUT = ROOT + "/api/logout";
 const JS_ROUTE = ROOT + "/app.js";
 const COOLDOWN_KEY = "ops:tidb-acceptance:cooldown:v1";
 const COOLDOWN_SECONDS = 300;
@@ -82,13 +88,16 @@ function safeProbeResult(result, marker) {
 
 export async function handleTidbAcceptance(
   request, env, url,
-  { authenticate = authenticatedIpAdminSession,
+  { authenticate = tidbAcceptanceSession,
+    login = tidbAcceptanceLogin,
+    logout = tidbAcceptanceLogout,
     runProbe = runTidbAcceptanceProbe } = {}
 ) {
   if (url.hostname !== "vynalthai.com") return null;
   const path = url.pathname;
   if (path !== ROOT && path !== JS_ROUTE &&
-      path !== API_STATUS && path !== API_RUN) return null;
+      path !== API_STATUS && path !== API_RUN &&
+      path !== API_LOGIN && path !== API_LOGOUT) return null;
   if (path === ROOT && request.method === "GET") {
     return new Response(TIDB_ACCEPTANCE_HTML, {
       status: 200, headers: {
@@ -107,11 +116,16 @@ export async function handleTidbAcceptance(
         ...commonHeaders, "Content-Type": "text/javascript; charset=utf-8",
       },
     });
-  if (path !== API_STATUS && path !== API_RUN)
+  if (path === API_LOGIN) {
+    if (request.method !== "POST")
+      return json(405, { error: "METHOD_NOT_ALLOWED" }, { Allow: "POST" });
+    return login(request, env, url);
+  }
+  if (path !== API_STATUS && path !== API_RUN && path !== API_LOGOUT)
     return json(405, { error: "METHOD_NOT_ALLOWED" }, { Allow: "GET" });
   if (path === API_STATUS && request.method !== "GET")
     return json(405, { error: "METHOD_NOT_ALLOWED" }, { Allow: "GET" });
-  if (path === API_RUN && request.method !== "POST")
+  if ((path === API_RUN || path === API_LOGOUT) && request.method !== "POST")
     return json(405, { error: "METHOD_NOT_ALLOWED" }, { Allow: "POST" });
 
   let auth;
@@ -128,6 +142,7 @@ export async function handleTidbAcceptance(
   }
   if (!sameOriginPost(request, url, auth.csrf))
     return json(403, { error: "CSRF_OR_ORIGIN_REJECTED" });
+  if (path === API_LOGOUT) return logout(request, env);
   if (!await confirmation(request))
     return json(400, { error: "EXPLICIT_CONFIRMATION_REQUIRED" });
   if (busy) return json(429, { error: "PROBE_ALREADY_RUNNING" });
