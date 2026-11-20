@@ -4,7 +4,8 @@
  * bodies, raw IP, query strings, cookies or untrusted paths.
  *
  * IMPORTANT: DB account must be INSERT-only on honeypot_events. A root
- * connection URL is explicitly rejected. This feature is disabled by default.
+ * connection URL is explicitly rejected. Only known honeypot routes invoke it.
+ * No opt-in or random sampling flag; missing/invalid secret fails closed.
  */
 import { connect } from "@tidbcloud/serverless";
 import { buildAxiomSecurityEvent } from "./axiom-honeypot.js";
@@ -14,11 +15,10 @@ const INSERT_SQL = `INSERT INTO vynalth_honeypot.honeypot_events
   (event_type, source, protocol, source_ip_hash, country_code, request_path, action_taken)
   VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
-// Privacy-safe sampled outcome telemetry. No raw IP, request URL, credentials,
+// Privacy-safe time-limited outcome telemetry. No raw IP, request URL, credentials,
 // SQL parameters, error messages, device IDs or raw HTTP headers are logged.
-// Disabled until the owner explicitly enables it for ONE planned release.
 const SAFE_OUTCOMES = new Set([
-  "disabled", "no_lifecycle", "sampled_out", "not_configured",
+  "no_lifecycle", "not_configured",
   "invalid_event", "inserted", "failed",
 ]);
 // Single-deployment short observation window. Expiration is evaluated per
@@ -35,7 +35,7 @@ export function honeypotDiagnosticsEnabled(env, now = Date.now()) {
 function logSafeOutcome(env, state, reason = "none", stage = "unknown") {
   if (!honeypotDiagnosticsEnabled(env) || !SAFE_OUTCOMES.has(state)) return;
   const allowedReasons = new Set([
-    "none", "disabled", "missing_ctx", "sampling", "bad_url", "event", "insert", "schema", "auth",
+    "none", "missing_ctx", "bad_url", "event", "insert", "schema", "auth",
     "quota", "transport", "timeout", "other",
   ]);
   const allowedStages = new Set(["normalization", "connect", "execute", "unknown"]);
@@ -76,16 +76,7 @@ function validDatabaseUrl(env) {
   }
 }
 
-function shouldSample(env, random = Math.random) {
-  const value = env?.TIDB_HONEYPOT_SAMPLE_RATE ?? "0.1";
-  const rate = Number(value);
-  return Number.isFinite(rate) && rate > 0 && rate <= 1 &&
-    (rate === 1 || random() < rate);
-}
-
 export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
-  if (args?.env?.TIDB_HONEYPOT_INGEST_ENABLED !== "true")
-    return { state: "disabled" };
   const url = validDatabaseUrl(args.env);
   if (!url) {
     logSafeOutcome(args.env, "not_configured", "bad_url");
@@ -129,24 +120,16 @@ export async function dispatchTidbHoneypotEvent(args, connectImpl = connect) {
   }
 }
 
-export function scheduleTidbHoneypotEvent(args, random = Math.random) {
+export function scheduleTidbHoneypotEvent(args) {
   // Only reached by an allowlisted honeypot route from src/index.js.
-  // These fixed outcome labels diagnose why a successful decoy GET
-  // may not produce a new row, without reflecting any request attributes.
-  if (args?.env?.TIDB_HONEYPOT_INGEST_ENABLED !== "true") {
-    logSafeOutcome(args?.env, "disabled", "disabled");
-    return false;
-  }
+  // Every eligible event attempts an async INSERT; invalid configuration
+  // fails closed, and database failure never blocks the decoy response.
   if (typeof args?.ctx?.waitUntil !== "function") {
-    logSafeOutcome(args.env, "no_lifecycle", "missing_ctx");
+    logSafeOutcome(args?.env, "no_lifecycle", "missing_ctx");
     return false;
   }
   if (!validDatabaseUrl(args.env)) {
     logSafeOutcome(args.env, "not_configured", "bad_url");
-    return false;
-  }
-  if (!shouldSample(args.env, random)) {
-    logSafeOutcome(args.env, "sampled_out", "sampling");
     return false;
   }
   args.ctx.waitUntil(dispatchTidbHoneypotEvent(args));

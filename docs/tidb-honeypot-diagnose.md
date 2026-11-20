@@ -1,3 +1,12 @@
+> **Current implementation update (2026-11-20)**: Per owner request, TiDB
+> honeypot ingestion for allowlisted events is built in and attempts **100%** of
+> eligible events; there is no ingestion feature flag or random-sampling setting.
+> It still requires the existing encrypted non-root TiDB URL and fails closed
+> if absent/invalid; async errors never block the website response. This is
+> not proof of successful database persistence: read-back SQL is required.
+> The remaining sections document earlier 10% sampled diagnostic releases and
+> must be interpreted as historical, not instructions for current production.
+
 # TiDB Worker honeypot: production write verification
 
 **Status: production write NOT proven.** SQL Editor returned `Query OK; empty set` for source IN ('cloudflare_worker','cowrie','opencanary') as reported by the operator on Nov 19, 2026. The prior `local_test` row is not real Worker evidence. The operator reports no known `[TIDB HONEYPOT] insert failed` warning; absence of this warning is inconclusive.

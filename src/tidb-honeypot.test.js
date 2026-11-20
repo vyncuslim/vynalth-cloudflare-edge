@@ -5,9 +5,7 @@ const DIAG_UNTIL = new Date(Date.now() + 60 * 60 * 1000).toISOString().replace(/
 
 const DUMMY_URL = "mysql://instance.honey_writer:fake_password@gateway01.ap-southeast-1.prod.aws.tidbcloud.com/vynalth_honeypot";
 const enabled = {
-  TIDB_HONEYPOT_INGEST_ENABLED: "true",
   TIDB_HONEYPOT_DATABASE_URL: DUMMY_URL,
-  TIDB_HONEYPOT_SAMPLE_RATE: "1",
 };
 const makeArgs = (env = enabled, path = "/admin.php", kind = "login") => {
   const request = new Request("https://vynalthai.com" + path + "?session=SENSITIVE", {
@@ -19,8 +17,8 @@ const makeArgs = (env = enabled, path = "/admin.php", kind = "login") => {
     path, requestId: "11111111-2222-3333-4444-555555555555" };
 };
 
-test("TiDB honeypot is off by default, rejects root and bad URLs", async () => {
-  assert.deepEqual(await dispatchTidbHoneypotEvent(makeArgs({})), { state: "disabled" });
+test("TiDB honeypot fails closed without a secret, rejects root and bad URLs", async () => {
+  assert.deepEqual(await dispatchTidbHoneypotEvent(makeArgs({})), { state: "not_configured" });
   const invalidUrls = [
     DUMMY_URL.replace("instance.honey_writer", "instance.root"),
     DUMMY_URL.replace("tidbcloud.com", "attacker.example"),
@@ -66,15 +64,16 @@ test("TiDB honeypot rejects arbitrary event kinds and remains non-blocking on fa
   } finally { console.warn = oldWarn; }
 });
 
-test("sampling and disabled flag do not schedule database calls", () => {
+test("all eligible events schedule without feature flags or random sampling", async () => {
   const tasks = [];
-  const ctx = {waitUntil(p){tasks.push(p)}};
-  assert.equal(scheduleTidbHoneypotEvent({...makeArgs({}),ctx}), false);
-  assert.equal(scheduleTidbHoneypotEvent({...makeArgs({...enabled,TIDB_HONEYPOT_SAMPLE_RATE:"0.1"}),ctx},()=>0.9),false);
-  assert.equal(scheduleTidbHoneypotEvent({...makeArgs({...enabled,TIDB_HONEYPOT_SAMPLE_RATE:"0"}),ctx},()=>0),false);
-  assert.equal(tasks.length,0);
+  const ctx = { waitUntil(p) { tasks.push(p); } };
+  assert.equal(scheduleTidbHoneypotEvent({ ...makeArgs({}), ctx }), false);
+  assert.equal(scheduleTidbHoneypotEvent(makeArgs()), false);
+  // Unknown kind deliberately prevents a real network write after scheduling.
+  assert.equal(scheduleTidbHoneypotEvent({ ...makeArgs(enabled, "/admin.php", "unknown"), ctx }), true);
+  assert.equal(tasks.length, 1);
+  await Promise.all(tasks);
 });
-
 
 test("privacy-safe diagnostic logs only sampled write result, never sensitive payload", async () => {
   const originalInfo=console.info;
@@ -117,40 +116,25 @@ test("privacy-safe diagnostic logs only sampled write result, never sensitive pa
   }
 });
 
-test("diagnostics do not run for a sampled-out decoy and never schedule with invalid URL", () => {
+test("invalid URL and missing lifecycle remain fail-closed with safe diagnostic labels", () => {
   const logged=[];
   const originalInfo=console.info;
   console.info=(...xs)=>logged.push(xs.map(String).join(" "));
   try {
     const scheduled=[];
-    const ctx={waitUntil(p){scheduled.push(p)}};
-    const noSample={...enabled,TIDB_HONEYPOT_SAMPLE_RATE:"0.1",
-      TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",
-      TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:DIAG_UNTIL};
-    assert.equal(scheduleTidbHoneypotEvent({...makeArgs(noSample),ctx},()=>0.99),false);
-    assert.equal(scheduled.length,0);
-    assert.equal(logged.length,1);
-    assert.match(logged[0],/"state":"sampled_out"/);
-    assert.match(logged[0],/"reason":"sampling"/);
-    logged.length=0;
+    const ctx={waitUntil(p){scheduled.push(p);}};
     const missing={...enabled,TIDB_HONEYPOT_DIAGNOSTICS_ENABLED:"true",
       TIDB_HONEYPOT_DIAGNOSTICS_UNTIL:DIAG_UNTIL,
       TIDB_HONEYPOT_DATABASE_URL:"mysql://not-a-real-url"};
-    // Incorrect credentials/config are identified without depending on RNG.
-    assert.equal(scheduleTidbHoneypotEvent({...makeArgs(missing),ctx},()=>0.99),false);
+    assert.equal(scheduleTidbHoneypotEvent({...makeArgs(missing),ctx}),false);
     assert.equal(scheduled.length,0);
     assert.equal(logged.length,1);
     assert.match(logged[0],/"state":"not_configured"/);
     logged.length=0;
-    const disabled={...noSample,TIDB_HONEYPOT_INGEST_ENABLED:"false"};
-    assert.equal(scheduleTidbHoneypotEvent({...makeArgs(disabled),ctx},()=>0),false);
-    assert.match(logged[0],/"state":"disabled"/);
-    logged.length=0;
-    assert.equal(scheduleTidbHoneypotEvent(makeArgs(noSample),()=>0),false);
+    assert.equal(scheduleTidbHoneypotEvent(makeArgs(missing)),false);
     assert.match(logged[0],/"state":"no_lifecycle"/);
-    for(const sensitive of [DUMMY_URL,"fake_password","198.51.100.41","SENSITIVE","/admin.php"]) {
+    for(const sensitive of [DUMMY_URL,"fake_password","198.51.100.41","SENSITIVE","/admin.php"])
       assert.equal(logged.join(" ").includes(sensitive),false);
-    }
   } finally { console.info=originalInfo; }
 });
 
