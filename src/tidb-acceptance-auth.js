@@ -1,11 +1,17 @@
 /**
- * Isolated TiDB Acceptance Console login.
- * Uses a dedicated Cloudflare secret; NEVER embeds the admin password or
- * verifier in GitHub/browser assets. A random 256-bit cookie token is stored
- * only as a SHA-256 lookup key in existing SCHOOL_IP_KV.
- * This does not authorize /admin/ip or any other management route.
+ * Short-lived operator-only TiDB acceptance page. No plaintext password,
+ * no additional Cloudflare Secret and no reuse of IP Administration login.
+ *
+ * Fixed password checked against a salted PBKDF2-SHA256 verifier; only the
+ * salt and derived verifier are committed to source. This is a temporary
+ * operator-requested convenience, not the recommended permanent credential
+ * storage model. The route expires after 25 November 2026, 23:59 MYT.
  */
-const PASSWORD_BINDING = "TIDB_ACCEPTANCE_ADMIN_PASSWORD";
+export const TIDB_ACCEPTANCE_EXPIRES_AT = "2026-11-25T15:59:59Z";
+export const TIDB_ACCEPTANCE_CLOSE_KEY = "ops:tidb-acceptance:closed:v1";
+const PASSWORD_SALT_HEX = "a3322a4b0f26ff783b94f2729271d864509e38b83da7f175";
+const PASSWORD_VERIFIER_HEX = "05b2311343a9987608cbf8bc068bb0e5b2fa1bc168dc070ba1eb125515d92200";
+const PASSWORD_ITERATIONS = 25000;
 const SESSION_COOKIE = "__Host-vynalth-tidb-acceptance";
 const SESSION_PREFIX = "ops:tidb-acceptance:session:v1:";
 const FAILURE_PREFIX = "ops:tidb-acceptance:login-fail:v1:";
@@ -24,12 +30,22 @@ const HEADERS = Object.freeze({
 const reply = (status, payload, extra = {}) =>
   new Response(JSON.stringify(payload), { status, headers: { ...HEADERS, ...extra } });
 
+export function tidbAcceptanceWithinWindow(now = Date.now()) {
+  return Number.isFinite(now) &&
+    now < Date.parse(TIDB_ACCEPTANCE_EXPIRES_AT);
+}
 const configured = (env) =>
-  typeof env?.[PASSWORD_BINDING] === "string" &&
-  env[PASSWORD_BINDING].length >= 12 &&
+  tidbAcceptanceWithinWindow() &&
   typeof env?.SCHOOL_IP_KV?.get === "function" &&
   typeof env.SCHOOL_IP_KV.put === "function" &&
   typeof env.SCHOOL_IP_KV.delete === "function";
+
+export async function tidbAcceptanceClosed(env) {
+  // Fail closed when KV cannot confirm the page has not been disabled.
+  if (!configured(env)) return true;
+  try { return Boolean(await env.SCHOOL_IP_KV.get(TIDB_ACCEPTANCE_CLOSE_KEY)); }
+  catch { return true; }
+}
 
 function safeOrigin(request, url) {
   const origin = request.headers.get("Origin");
@@ -53,15 +69,26 @@ async function digest(value) {
   const result = await crypto.subtle.digest("SHA-256", TEXT.encode(value));
   return hex(new Uint8Array(result));
 }
-async function equalPasswords(a, b) {
-  const [first, second] = await Promise.all([
-    crypto.subtle.digest("SHA-256", TEXT.encode(a)),
-    crypto.subtle.digest("SHA-256", TEXT.encode(b)),
-  ]);
-  const x = new Uint8Array(first);
-  const y = new Uint8Array(second);
+function fromHex(value) {
+  const out = new Uint8Array(value.length / 2);
+  for (let i = 0; i < out.length; i++)
+    out[i] = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+async function fixedPasswordMatches(candidate) {
+  if (typeof candidate !== "string" || candidate.length > 256) return false;
+  const key = await crypto.subtle.importKey(
+    "raw", TEXT.encode(candidate), "PBKDF2", false, ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits({
+    name: "PBKDF2", salt: fromHex(PASSWORD_SALT_HEX),
+    iterations: PASSWORD_ITERATIONS, hash: "SHA-256",
+  }, key, 256);
+  const derived = new Uint8Array(bits);
+  const expected = fromHex(PASSWORD_VERIFIER_HEX);
   let different = 0;
-  for (let i = 0; i < x.length; i++) different |= x[i] ^ y[i];
+  for (let i = 0; i < expected.length; i++)
+    different |= derived[i] ^ expected[i];
   return different === 0;
 }
 async function failureKey(env, request) {
@@ -69,7 +96,7 @@ async function failureKey(env, request) {
   const ip = request.headers.get("CF-Connecting-IP");
   if (!ip || ip.length > 60) return null;
   const key = await crypto.subtle.importKey(
-    "raw", TEXT.encode(env[PASSWORD_BINDING]),
+    "raw", fromHex(PASSWORD_VERIFIER_HEX),
     { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
   );
   const sig = new Uint8Array(await crypto.subtle.sign(
@@ -105,9 +132,10 @@ function sessionToken(request) {
 export function tidbAcceptanceAuthConfigured(env) {
   return configured(env);
 }
-export async function tidbAcceptanceLogin(request, env, url) {
+export async function tidbAcceptanceLogin(request, env, url, matches = fixedPasswordMatches) {
   if (request.method !== "POST") return reply(405, { error: "METHOD_NOT_ALLOWED" });
-  if (!configured(env)) return reply(503, { error: "DEDICATED_ADMIN_SECRET_NOT_CONFIGURED" });
+  if (!tidbAcceptanceWithinWindow()) return reply(410, { error: "TEMPORARY_PAGE_EXPIRED" });
+  if (!configured(env)) return reply(503, { error: "ACCEPTANCE_STORAGE_NOT_CONFIGURED" });
   if (!safeOrigin(request, url)) return reply(403, { error: "INVALID_ORIGIN" });
   const key = await failureKey(env, request);
   if (!key) return reply(403, { error: "CLIENT_NETWORK_UNAVAILABLE" });
@@ -117,7 +145,7 @@ export async function tidbAcceptanceLogin(request, env, url) {
       return reply(429, { error: "TOO_MANY_ATTEMPTS" });
     const supplied = await bodyPassword(request);
     if (supplied === null) return reply(400, { error: "PASSWORD_REQUIRED" });
-    if (!await equalPasswords(supplied, env[PASSWORD_BINDING])) {
+    if (!await matches(supplied)) {
       await env.SCHOOL_IP_KV.put(key, String(count + 1), { expirationTtl: FAILURE_TTL });
       return reply(401, { error: "INVALID_CREDENTIALS" });
     }

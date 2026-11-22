@@ -6,6 +6,7 @@ import {
   tidbAcceptanceLogin,
   tidbAcceptanceSession,
   tidbAcceptanceLogout,
+  tidbAcceptanceWithinWindow,
 } from "./tidb-acceptance-auth.js";
 import { handleTidbAcceptance } from "./tidb-acceptance.js";
 
@@ -13,6 +14,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 const ROOT = "https://vynalthai.com/__ops/tidb-acceptance";
 const PASSWORD = "EXAMPLE_ONLY_AUTH_PASSWORD_22";
 const COOKIE = "__Host-vynalth-tidb-acceptance";
+const dummyMatch = async candidate => candidate === PASSWORD;
 function createEnv() {
   const kvMap = new Map();
   const kv = {
@@ -23,7 +25,7 @@ function createEnv() {
     },
     async delete(key) { kvMap.delete(key); },
   };
-  return { TIDB_ACCEPTANCE_ADMIN_PASSWORD: PASSWORD, SCHOOL_IP_KV: kv, kvMap };
+  return { SCHOOL_IP_KV: kv, kvMap };
 }
 function loginRequest(password = PASSWORD, origin = "https://vynalthai.com") {
   return new Request(ROOT + "/api/login", {
@@ -37,18 +39,20 @@ function loginRequest(password = PASSWORD, origin = "https://vynalthai.com") {
     body: JSON.stringify({ password }),
   });
 }
-test("dedicated password is a separate Cloudflare Secret, fails closed if missing", async () => {
+test("temporary fixed verifier needs no Cloudflare password Secret, but fails closed without KV", async () => {
   const env = createEnv();
   assert.equal(tidbAcceptanceAuthConfigured(env), true);
-  const missing = { SCHOOL_IP_KV: env.SCHOOL_IP_KV };
+  const missing = {};
   assert.equal(tidbAcceptanceAuthConfigured(missing), false);
   const res = await tidbAcceptanceLogin(loginRequest(), missing, new URL(ROOT));
   assert.equal(res.status, 503);
   assert.equal(JSON.stringify(await res.json()).includes(PASSWORD), false);
+  assert.equal(tidbAcceptanceWithinWindow(Date.parse("2026-11-25T15:59:59Z")-1),true);
+  assert.equal(tidbAcceptanceWithinWindow(Date.parse("2026-11-25T15:59:59Z")),false);
 });
 test("login issues independent secure HttpOnly cookie, no password in response or KV", async () => {
   const env = createEnv(), request = loginRequest();
-  const res = await tidbAcceptanceLogin(request, env, new URL(request.url));
+  const res = await tidbAcceptanceLogin(request, env, new URL(request.url), dummyMatch);
   assert.equal(res.status, 200);
   const cookie = res.headers.get("Set-Cookie") || "";
   assert.match(cookie, /^__Host-vynalth-tidb-acceptance=v1\.[A-Za-z0-9_-]{43};/);
@@ -71,34 +75,36 @@ test("wrong dedicated password blocks after five failures, cannot silently creat
   const env = createEnv();
   for (let i = 0; i < 5; i++) {
     const req = loginRequest("incorrect" + i);
-    const response = await tidbAcceptanceLogin(req, env, new URL(req.url));
+    const response = await tidbAcceptanceLogin(req, env, new URL(req.url), dummyMatch);
     assert.equal(response.status, 401);
     assert.equal(response.headers.get("Set-Cookie"), null);
   }
   const correct = loginRequest();
-  const locked = await tidbAcceptanceLogin(correct, env, new URL(correct.url));
+  const locked = await tidbAcceptanceLogin(correct, env, new URL(correct.url), dummyMatch);
   assert.equal(locked.status, 429);
 });
 test("cross-site requests, malformed JSON and missing Cloudflare IP fail closed", async () => {
   const env = createEnv();
   const cross = loginRequest(PASSWORD, "https://untrusted.example");
-  assert.equal((await tidbAcceptanceLogin(cross, env, new URL(cross.url))).status, 403);
+  assert.equal((await tidbAcceptanceLogin(cross, env, new URL(cross.url), dummyMatch)).status, 403);
   const missingIp = new Request(ROOT + "/api/login", { method: "POST",
     headers: {"Origin":"https://vynalthai.com","Content-Type":"application/json"},
     body: JSON.stringify({password:PASSWORD}),
   });
-  assert.equal((await tidbAcceptanceLogin(missingIp, env, new URL(missingIp.url))).status, 403);
+  assert.equal((await tidbAcceptanceLogin(missingIp, env, new URL(missingIp.url), dummyMatch)).status, 403);
   const malformed = new Request(ROOT + "/api/login", { method: "POST",
     headers: {"Origin":"https://vynalthai.com","Content-Type":"application/json",
       "CF-Connecting-IP":"198.51.100.10"},
     body: '{"password":',
   });
-  assert.equal((await tidbAcceptanceLogin(malformed, env, new URL(malformed.url))).status, 400);
+  assert.equal((await tidbAcceptanceLogin(malformed, env, new URL(malformed.url), dummyMatch)).status, 400);
 });
 test("authenticated dedicated session permits status but CSRF and origin still block writes", async () => {
   const env = createEnv();
   const login = loginRequest();
-  const logged = await handleTidbAcceptance(login, env, new URL(login.url));
+  const logged = await handleTidbAcceptance(login, env, new URL(login.url), {
+    login: (r,e,u) => tidbAcceptanceLogin(r,e,u,dummyMatch),
+  });
   assert.equal(logged.status, 200);
   const cookie = logged.headers.get("Set-Cookie").split(";")[0];
   const statusReq = new Request(ROOT + "/api/status", { headers: { Cookie: cookie } });
@@ -118,9 +124,9 @@ test("authenticated dedicated session permits status but CSRF and origin still b
   assert.equal(denied.status, 403);
   assert.equal(writes, 0);
 });
-test("logout revokes just the dedicated session", async () => {
+test("logout revokes just the temporary session", async () => {
   const env = createEnv(), req = loginRequest();
-  const res = await tidbAcceptanceLogin(req, env, new URL(req.url));
+  const res = await tidbAcceptanceLogin(req, env, new URL(req.url), dummyMatch);
   assert.equal(res.status, 200);
   const cookie = res.headers.get("Set-Cookie").split(";")[0];
   const statusReq = new Request(ROOT+"/api/status",{headers:{Cookie:cookie}});

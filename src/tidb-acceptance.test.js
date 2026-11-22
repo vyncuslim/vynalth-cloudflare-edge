@@ -17,7 +17,8 @@ const makeEnv=()=>{
  return {TIDB_HONEYPOT_DATABASE_URL:writer,
   SCHOOL_IP_KV:{
    async get(k){return store.get(k)||null;},
-   async put(k,v,options){assert.ok(options.expirationTtl>=60);store.set(k,v);}
+   async put(k,v,options){if(options)assert.ok(options.expirationTtl>=60);store.set(k,v);},
+   async delete(k){store.delete(k);}
   }
  };
 };
@@ -143,4 +144,18 @@ test("TiDB rejection returns only fixed-label stage/reason and not raw credentia
  assert.equal(JSON.stringify(result).includes("SUPER_SECRET"),false);
  assert.deepEqual(tidbAcceptanceConnectionStatus({}),{
   writerConfigured:false,readerConfigured:false});
+});
+
+test("temporary acceptance page can be closed by authorized operator and returns HTTP 410",async()=>{
+ const env=makeEnv();
+ const endpoint=BASE+"/api/close";
+ const request=new Request(endpoint,{method:"POST",headers:{
+   "Origin":"https://vynalthai.com","Sec-Fetch-Site":"same-origin",
+   "Content-Type":"application/json","X-CSRF-Token":CSRF
+ },body:JSON.stringify({confirm:"CLOSE_TEMP_PAGE"})});
+ const response=await handleTidbAcceptance(request,env,new URL(endpoint),{authenticate:auth});
+ assert.equal(response.status,200);
+ assert.equal((await response.json()).state,"closed");
+ const again=await handleTidbAcceptance(new Request(BASE),env,new URL(BASE));
+ assert.equal(again.status,410);
 });

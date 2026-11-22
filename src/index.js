@@ -351,6 +351,7 @@ export default {
           "/__ops/tidb-acceptance/api/run",
           "/__ops/tidb-acceptance/api/login",
           "/__ops/tidb-acceptance/api/logout",
+          "/__ops/tidb-acceptance/api/close",
         ].includes(incomingUrl.pathname)) {
       const opsPolicyDenial = await checkSchoolPolicy(request, env, rootDomain, ctx);
       if (opsPolicyDenial)
