@@ -31,6 +31,16 @@ VALUES ('acceptance_probe','cloudflare_worker','HTTP',NULL,NULL,
 
 其中 `<uuid>` 为安全生成的 UUID，SQL 实际执行使用参数化绑定。
 
+## 2026-11-24 实际 auth/execute 拒绝后的只读故障定位
+
+- 生产真实测试标记已发生多次 `failed / auth / execute`，精确 SQL 读回仍为 `empty set`，不得声称已写入成功。
+- 本次新增独立 **只读验证 TiDB 连接** 按钮；仅由已有临时密码登录的会话、CSRF、同源请求及明确 `CHECK_TIDB_AUTH` 确认调用 `POST /__ops/tidb-acceptance/api/check-auth`，全局 KV 最少 120 秒冷却。使用同一个 INSERT-only writer 的连接配置调用 `SELECT 1 AS vynalth_connection_ok`，不读取表数据、不修改数据库、不需要扩张 writer 的表级 SELECT 权限。不运行原始异常及敏感字段的输出/日志。
+- 若返回 `authenticated`，只证明**网关接受登录并执行无表的 SELECT 1**，不证明 INSERT 或持久化。如果再次 INSERT 被拒绝，则需要继续检查 SQL 级授权/请求编码及服务端诊断；不要给账户添加 SELECT 表权限。
+- 若返回 `failed`，只回传固定 `reason`、`stage` 和受控枚举中的 `httpStatus` 与 `dbErrorCode`。不返回具体错误正文、用户名、密钥、连接字符串、SQL、Headers 或响应正文。HTTP 401/403 更偏向 HTTP/gateway 身份拒绝；SQL 1142/1143 指向授权问题；此推断仍要与厂商日志结合确认。
+- 已有实际 INSERT 的 `failed` 响应也会附带这些**受控**可选码，不修改参数化写入与读回标准。测试仍受 300 秒冷却，只许在正确变更后单次重试。
+- TiDB 上游 `@tidbcloud/serverless@0.3.0` 的 `DatabaseError` 定义含数值 `status` 和可选 `details.code`，其独立连接参数 `{host,username,password,database}` 是官方支持的方式；不盲目改回非验证的 URL 连接。
+- **不要重复部署。** 将本次诊断合并成一个 GitHub main 提交、避免 Preview。需等待 Cloudflare 新 Production 版本 Ready，管理员可先运行只读检查，再决定是否再次 INSERT。临时页面 **2026-11-25T15:59:59Z** 自动到期；到期后若仍失败，不应擅自延长临时管理页。
+
 ## 页面关闭与临时性
 
 - 管理员在核对 SQL 实际读回并记录结果后，点击页面底部 **完成并关闭临时页面**，再次明确确认。系统通过现有 `SCHOOL_IP_KV` 记录永久关闭标志，此后页面及全部验收 API 返回 **HTTP 410**。由于 KV 最终一致性，跨地区关闭传播可能存在短暂延迟。保护仍由密码、CSRF 和 WAF 共同提供。

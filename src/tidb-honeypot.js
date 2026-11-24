@@ -63,13 +63,32 @@ function safeErrorCategory(error) {
   return "other";
 }
 
+// The official @tidbcloud/serverless DatabaseError exposes numeric `status`
+// and an optional `details.code`. NEVER return details/message/stack/headers.
+// Report only globally-known HTTP statuses and a strict SQL-error allowlist.
+const SAFE_TIDB_HTTP_STATUSES = new Set([
+  400, 401, 402, 403, 404, 408, 409, 422, 429, 500, 502, 503, 504,
+]);
+const SAFE_TIDB_SQL_CODES = new Set([
+  "1044", "1045", "1049", "1054", "1064", "1142", "1143", "1146",
+  "ER_ACCESS_DENIED_ERROR", "ER_DBACCESS_DENIED_ERROR",
+  "ER_TABLEACCESS_DENIED_ERROR", "ER_COLUMNACCESS_DENIED_ERROR",
+]);
 export function safeTiDBFailureSummary(error, stage = "unknown") {
   const known = new Set(["normalization", "connect", "execute"]);
-  return {
+  const result = {
     event: "tidb_honeypot_write_failure",
     reason: safeErrorCategory(error),
     stage: known.has(stage) ? stage : "unknown",
   };
+  // Do not coerce strings: attacker-supplied text must not become telemetry.
+  if (Number.isInteger(error?.status) && SAFE_TIDB_HTTP_STATUSES.has(error.status))
+    result.httpStatus = error.status;
+  const code = error?.details?.code;
+  if ((typeof code === "string" || Number.isSafeInteger(code)) &&
+      SAFE_TIDB_SQL_CODES.has(String(code)))
+    result.dbErrorCode = String(code);
+  return result;
 }
 const lastFailureLogAt = new Map();
 let lastInsertAckLogAt = 0;
@@ -182,6 +201,33 @@ export function tidbAcceptanceConnectionStatus(env) {
   };
 }
 
+/**
+ * Authenticated operator-only non-mutating gateway check. SQL has no FROM,
+ * does not inspect any application data and does not require a table SELECT
+ * grant. Never log or return authentication/response payloads.
+ */
+export async function runTidbAcceptanceAuthCheck(env, connectImpl = connect) {
+  const writer = validDatabaseConfig(env);
+  if (!writer) return { state: "not_configured" };
+  let stage = "connect";
+  try {
+    const conn = connectImpl(writer);
+    stage = "execute";
+    const rows = await conn.execute("SELECT 1 AS vynalth_connection_ok");
+    if (!Array.isArray(rows) || rows.length !== 1 ||
+        Number(rows[0]?.vynalth_connection_ok) !== 1)
+      return { state: "unexpected_response" };
+    return { state: "authenticated" };
+  } catch (error) {
+    const summary = safeTiDBFailureSummary(error, stage);
+    return {
+      state: "failed", reason: summary.reason, stage: summary.stage,
+      ...(summary.httpStatus ? { httpStatus: summary.httpStatus } : {}),
+      ...(summary.dbErrorCode ? { dbErrorCode: summary.dbErrorCode } : {}),
+    };
+  }
+}
+
 export async function runTidbAcceptanceProbe(env, marker, connectImpl = connect) {
   if (typeof marker !== "string" || !ACCEPTANCE_MARKER_RE.test(marker))
     return { state: "invalid_marker" };
@@ -196,7 +242,11 @@ export async function runTidbAcceptanceProbe(env, marker, connectImpl = connect)
     ]);
   } catch (error) {
     const summary = safeTiDBFailureSummary(error, stage);
-    return { state: "failed", reason: summary.reason, stage: summary.stage };
+    return {
+      state: "failed", reason: summary.reason, stage: summary.stage,
+      ...(summary.httpStatus ? { httpStatus: summary.httpStatus } : {}),
+      ...(summary.dbErrorCode ? { dbErrorCode: summary.dbErrorCode } : {}),
+    };
   }
   const reader = acceptanceReadConfig(env, writer);
   if (!reader) return { state: "insert_acknowledged", readback: "manual_required" };

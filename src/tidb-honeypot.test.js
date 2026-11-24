@@ -239,3 +239,23 @@ test("invalid percent-encoded password fails closed without contacting TiDB", as
   assert.equal(result.state, "not_configured");
   assert.equal(connected, false);
 });
+
+
+test("TiDB DatabaseError metadata is whitelisted; raw errors, credentials and unknown codes are never returned",()=>{
+ const err=new Error("Access denied mysql://user:SENSITIVE@private.internal");
+ err.status=403;err.details={code:"1142",message:"Bearer SECRET_RESPONSE"};
+ const safe=safeTiDBFailureSummary(err,"execute");
+ assert.deepEqual(safe,{event:"tidb_honeypot_write_failure",reason:"auth",stage:"execute",
+   httpStatus:403,dbErrorCode:"1142"});
+ for(const bad of ["SENSITIVE","SECRET_RESPONSE","private.internal"])
+   assert.equal(JSON.stringify(safe).includes(bad),false);
+ const unknown=new Error("no longer authorized");unknown.status=418;
+ unknown.details={code:"SECRET-SESSION",message:"SENSITIVE"};
+ const safeUnknown=safeTiDBFailureSummary(unknown,"execute");
+ assert.equal("httpStatus" in safeUnknown,false);
+ assert.equal("dbErrorCode" in safeUnknown,false);
+ const spoofed=new Error("irrelevant");spoofed.status="403";spoofed.details={code:{secret:"SENSITIVE"}};
+ const safeSpoof=safeTiDBFailureSummary(spoofed,"execute");
+ assert.equal("httpStatus" in safeSpoof,false);
+ assert.equal("dbErrorCode" in safeSpoof,false);
+});

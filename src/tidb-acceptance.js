@@ -14,6 +14,7 @@ import {
 } from "./tidb-acceptance-auth.js";
 import {
   runTidbAcceptanceProbe,
+  runTidbAcceptanceAuthCheck,
   tidbAcceptanceConnectionStatus,
 } from "./tidb-honeypot.js";
 import { TIDB_ACCEPTANCE_HTML, TIDB_ACCEPTANCE_SCRIPT } from "./tidb-acceptance-html.js";
@@ -24,9 +25,12 @@ const API_RUN = ROOT + "/api/run";
 const API_LOGIN = ROOT + "/api/login";
 const API_LOGOUT = ROOT + "/api/logout";
 const API_CLOSE = ROOT + "/api/close";
+const API_CHECK_AUTH = ROOT + "/api/check-auth";
 const JS_ROUTE = ROOT + "/app.js";
 const COOLDOWN_KEY = "ops:tidb-acceptance:cooldown:v1";
 const COOLDOWN_SECONDS = 300;
+const AUTH_CHECK_COOLDOWN_KEY = "ops:tidb-acceptance:auth-check:v1";
+const AUTH_CHECK_COOLDOWN_SECONDS = 120;
 let busy = false;
 let locallyClosed = false;
 
@@ -55,14 +59,14 @@ function sameOriginPost(request, url, csrf) {
   const site = request.headers.get("Sec-Fetch-Site");
   return !site || site === "same-origin";
 }
-async function confirmation(request) {
+async function confirmation(request, expected = "RUN_SINGLE_PROBE") {
   if (!request.headers.get("Content-Type")?.toLowerCase().startsWith("application/json") ||
       Number(request.headers.get("Content-Length") || 0) > 128) return false;
   try {
     const raw = await request.text();
     if (raw.length > 128) return false;
     const input = JSON.parse(raw);
-    return input && !Array.isArray(input) && input.confirm === "RUN_SINGLE_PROBE" &&
+    return input && !Array.isArray(input) && input.confirm === expected &&
       Object.keys(input).length === 1;
   } catch { return false; }
 }
@@ -70,14 +74,40 @@ const allowedStates = new Set([
   "verified", "insert_acknowledged", "failed", "not_configured", "invalid_marker",
 ]);
 const allowedReasons = new Set(["auth", "schema", "quota", "transport", "timeout", "other"]);
+const allowedHttpStatuses = new Set([400,401,402,403,404,408,409,422,429,500,502,503,504]);
+const allowedDbErrorCodes = new Set([
+  "1044", "1045", "1049", "1054", "1064", "1142", "1143", "1146",
+  "ER_ACCESS_DENIED_ERROR", "ER_DBACCESS_DENIED_ERROR",
+  "ER_TABLEACCESS_DENIED_ERROR", "ER_COLUMNACCESS_DENIED_ERROR",
+]);
 const allowedStages = new Set(["connect", "execute", "normalization", "unknown"]);
 const allowedReadback = new Set(["confirmed", "not_found", "manual_required", "failed"]);
+const allowedAuthStates = new Set(["authenticated", "failed", "not_configured", "unexpected_response"]);
+function safeAuthCheckResult(result) {
+  const state = allowedAuthStates.has(result?.state) ? result.state : "failed";
+  const out = { state };
+  if (state === "failed") {
+    out.reason = allowedReasons.has(result?.reason) ? result.reason : "other";
+    out.stage = allowedStages.has(result?.stage) ? result.stage : "unknown";
+    if (Number.isInteger(result?.httpStatus) && allowedHttpStatuses.has(result.httpStatus))
+      out.httpStatus = result.httpStatus;
+    if (typeof result?.dbErrorCode === "string" && allowedDbErrorCodes.has(result.dbErrorCode))
+      out.dbErrorCode = result.dbErrorCode;
+  }
+  return out;
+}
+
 function safeProbeResult(result, marker) {
   const state = allowedStates.has(result?.state) ? result.state : "failed";
   const output = { state, marker };
   if (state === "failed") {
     output.reason = allowedReasons.has(result?.reason) ? result.reason : "other";
     output.stage = allowedStages.has(result?.stage) ? result.stage : "unknown";
+    if (Number.isInteger(result?.httpStatus) && allowedHttpStatuses.has(result.httpStatus))
+      output.httpStatus = result.httpStatus;
+    if (typeof result?.dbErrorCode === "string" &&
+        allowedDbErrorCodes.has(result.dbErrorCode))
+      output.dbErrorCode = result.dbErrorCode;
   }
   if (state === "verified") output.readback = "confirmed";
   if (state === "insert_acknowledged") {
@@ -96,14 +126,15 @@ export async function handleTidbAcceptance(
   { authenticate = tidbAcceptanceSession,
     login = tidbAcceptanceLogin,
     logout = tidbAcceptanceLogout,
-    runProbe = runTidbAcceptanceProbe } = {}
+    runProbe = runTidbAcceptanceProbe,
+    checkAuth = runTidbAcceptanceAuthCheck } = {}
 ) {
   if (url.hostname !== "vynalthai.com") return null;
   const path = url.pathname;
   if (path !== ROOT && path !== JS_ROUTE &&
       path !== API_STATUS && path !== API_RUN &&
       path !== API_LOGIN && path !== API_LOGOUT &&
-      path !== API_CLOSE) return null;
+      path !== API_CLOSE && path !== API_CHECK_AUTH) return null;
   // A manual shutdown disables the page and all management endpoints.
   // The hard UTC deadline guarantees expiry even if KV propagation is slow.
   if (locallyClosed || await tidbAcceptanceClosed(env))
@@ -134,12 +165,13 @@ export async function handleTidbAcceptance(
     return login(request, env, url);
   }
   if (path !== API_STATUS && path !== API_RUN &&
-      path !== API_LOGOUT && path !== API_CLOSE)
+      path !== API_LOGOUT && path !== API_CLOSE &&
+      path !== API_CHECK_AUTH)
     return json(405, { error: "METHOD_NOT_ALLOWED" }, { Allow: "GET" });
   if (path === API_STATUS && request.method !== "GET")
     return json(405, { error: "METHOD_NOT_ALLOWED" }, { Allow: "GET" });
   if ((path === API_RUN || path === API_LOGOUT ||
-       path === API_CLOSE) && request.method !== "POST")
+       path === API_CLOSE || path === API_CHECK_AUTH) && request.method !== "POST")
     return json(405, { error: "METHOD_NOT_ALLOWED" }, { Allow: "POST" });
 
   let auth;
@@ -184,6 +216,23 @@ export async function handleTidbAcceptance(
     } catch {
       return json(503, { error: "CLOSE_STORAGE_UNAVAILABLE" });
     }
+  }
+  if (path === API_CHECK_AUTH) {
+    if (!await confirmation(request, "CHECK_TIDB_AUTH"))
+      return json(400, { error: "EXPLICIT_AUTH_CHECK_CONFIRMATION_REQUIRED" });
+    if (busy) return json(429, { error: "PROBE_ALREADY_RUNNING" });
+    const kv = env?.SCHOOL_IP_KV;
+    if (!kv || typeof kv.get !== "function" || typeof kv.put !== "function")
+      return json(503, { error: "RATE_LIMIT_STORE_UNAVAILABLE" });
+    busy = true;
+    try {
+      if (await kv.get(AUTH_CHECK_COOLDOWN_KEY))
+        return json(429, { error: "AUTH_CHECK_COOLDOWN_ACTIVE", retryAfterSeconds: AUTH_CHECK_COOLDOWN_SECONDS });
+      await kv.put(AUTH_CHECK_COOLDOWN_KEY, "1", { expirationTtl: AUTH_CHECK_COOLDOWN_SECONDS });
+      return json(200, safeAuthCheckResult(await checkAuth(env)));
+    } catch {
+      return json(503, { error: "AUTH_CHECK_FAILED_SAFE" });
+    } finally { busy = false; }
   }
   if (!await confirmation(request))
     return json(400, { error: "EXPLICIT_CONFIRMATION_REQUIRED" });

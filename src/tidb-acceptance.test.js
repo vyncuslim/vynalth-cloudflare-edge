@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleTidbAcceptance } from "./tidb-acceptance.js";
 import {
-  runTidbAcceptanceProbe, tidbAcceptanceConnectionStatus,
+  runTidbAcceptanceProbe, runTidbAcceptanceAuthCheck, tidbAcceptanceConnectionStatus,
 } from "./tidb-honeypot.js";
 
 const HOST="gateway01.ap-southeast-1.prod.aws.tidbcloud.com";
@@ -158,4 +158,52 @@ test("temporary acceptance page can be closed by authorized operator and returns
  assert.equal((await response.json()).state,"closed");
  const again=await handleTidbAcceptance(new Request(BASE),env,new URL(BASE));
  assert.equal(again.status,410);
+});
+
+
+test("safe read-only auth probe validates actual SELECT 1 response, never emits SQL data", async()=>{
+ const env=makeEnv();let reads=0;
+ const good=await runTidbAcceptanceAuthCheck(env,(_config)=>({
+   async execute(sql){reads++;assert.equal(sql,"SELECT 1 AS vynalth_connection_ok");
+     return [{vynalth_connection_ok:1}];}
+ }));
+ assert.deepEqual(good,{state:"authenticated"});assert.equal(reads,1);
+ const unexpected=await runTidbAcceptanceAuthCheck(env,()=>({async execute(){return []}}));
+ assert.deepEqual(unexpected,{state:"unexpected_response"});
+ const bad=await runTidbAcceptanceAuthCheck(env,()=>({async execute(){
+   const e=Error("Access denied; mysql://secret:VERY_SENSITIVE@private.example");
+   e.status=401;e.details={code:"1045",message:"SENSITIVE"};throw e;
+ }}));
+ assert.deepEqual(bad,{state:"failed",reason:"auth",stage:"execute",httpStatus:401,dbErrorCode:"1045"});
+ assert.equal(JSON.stringify(bad).includes("SENSITIVE"),false);
+});
+
+test("private read-only auth endpoint requires CSRF, explicit intent and throttles",async()=>{
+ const env=makeEnv(),url=new URL(BASE+"/api/check-auth");
+ let checks=0;
+ const opts={authenticate:auth,checkAuth:async()=>{checks++;return {state:"authenticated"};}};
+ const bad=new Request(url,{method:"POST",headers:{"Origin":"https://vynalthai.com",
+  "Content-Type":"application/json"},body:JSON.stringify({confirm:"CHECK_TIDB_AUTH"})});
+ const denied=await handleTidbAcceptance(bad,env,url,opts);
+ assert.equal(denied.status,403);assert.equal(checks,0);
+ const wrong=new Request(url,{method:"POST",headers:{"Origin":"https://vynalthai.com",
+  "X-CSRF-Token":CSRF,"Content-Type":"application/json"},body:JSON.stringify({confirm:"RUN_SINGLE_PROBE"})});
+ const rejected=await handleTidbAcceptance(wrong,env,url,opts);
+ assert.equal(rejected.status,400);assert.equal(checks,0);
+ const make=()=>new Request(url,{method:"POST",headers:{"Origin":"https://vynalthai.com",
+  "X-CSRF-Token":CSRF,"Content-Type":"application/json"},body:JSON.stringify({confirm:"CHECK_TIDB_AUTH"})});
+ const first=await handleTidbAcceptance(make(),env,url,opts);
+ assert.equal(first.status,200);assert.deepEqual(await first.json(),{state:"authenticated"});
+ const second=await handleTidbAcceptance(make(),env,url,opts);
+ assert.equal(second.status,429);assert.equal(checks,1);
+});
+
+test("auth diagnostics output drops unknown codes/statuses and secret error fields",async()=>{
+ const env=makeEnv(),url=new URL(BASE+"/api/check-auth");
+ const req=new Request(url,{method:"POST",headers:{"Origin":"https://vynalthai.com",
+  "X-CSRF-Token":CSRF,"Content-Type":"application/json"},body:JSON.stringify({confirm:"CHECK_TIDB_AUTH"})});
+ const res=await handleTidbAcceptance(req,env,url,{authenticate:auth,
+  checkAuth:async()=>({state:"failed",reason:"auth",stage:"execute",
+    httpStatus:418,dbErrorCode:"TOPSECRET",password:"SENSITIVE"})});
+ assert.equal(res.status,200);assert.deepEqual(await res.json(),{state:"failed",reason:"auth",stage:"execute"});
 });
