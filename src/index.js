@@ -1,3 +1,4 @@
+import { documentReferrerPolicy } from "./workspace-referrer.js";
 import { signedVisitorOriginRequest } from "./signed-visitor-ip.js";
 import { applyRuntimeConfigCacheHeaders } from "./runtime-config-cache.js";
 import { handleUniversalConsent, shieldAccountExempt } from "./universal-consent.js";
@@ -525,7 +526,7 @@ export default {
         originResponse.headers.get("Content-Type")?.includes("text/html")) {
       const safeHeaders = new Headers(originResponse.headers);
       safeHeaders.set("Cache-Control", "private, no-store, max-age=0");
-      safeHeaders.set("Referrer-Policy", "no-referrer");
+      safeHeaders.set("Referrer-Policy", documentReferrerPolicy(incomingUrl, originResponse.status));
       originResponse = new Response(originResponse.body, {
         status: originResponse.status,
         statusText: originResponse.statusText,

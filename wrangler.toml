@@ -15,7 +15,7 @@ workers_dev = true
 
 # Independent supplemental application abuse guard. Initial rollout is limited
 # to two explicitly reviewed first-party hosts. Existing WAF is unchanged.
-SECURITY_SITE_ABUSE_MODE = "observe"
+SECURITY_SITE_ABUSE_MODE = "enforce"
 SECURITY_SITE_ABUSE_HOSTS = "search.vynalthai.com,vynalthai.com"
 # Explicit operator-approved, narrow suspicious-probe event forwarding.
 # Never send IP, cookies, request body or query strings. Sender is async,
