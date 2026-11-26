@@ -152,19 +152,7 @@ test("TiDB rejection returns only fixed-label stage/reason and not raw credentia
   writerConfigured:false,readerConfigured:false});
 });
 
-test("temporary acceptance page can be closed by authorized operator and returns HTTP 410",async()=>{
- const env=makeEnv();
- const endpoint=BASE+"/api/close";
- const request=new Request(endpoint,{method:"POST",headers:{
-   "Origin":"https://vynalthai.com","Sec-Fetch-Site":"same-origin",
-   "Content-Type":"application/json","X-CSRF-Token":CSRF
- },body:JSON.stringify({confirm:"CLOSE_TEMP_PAGE"})});
- const response=await handleTidbAcceptance(request,env,new URL(endpoint),{authenticate:auth});
- assert.equal(response.status,200);
- assert.equal((await response.json()).state,"closed");
- const again=await handleTidbAcceptance(new Request(BASE),env,new URL(BASE));
- assert.equal(again.status,410);
-});
+
 
 
 test("safe read-only auth probe validates actual SELECT 1 response, never emits SQL data", async()=>{
@@ -212,4 +200,19 @@ test("auth diagnostics output drops unknown codes/statuses and secret error fiel
   checkAuth:async()=>({state:"failed",reason:"auth",stage:"execute",
     httpStatus:418,dbErrorCode:"TOPSECRET",password:"SENSITIVE"})});
  assert.equal(res.status,200);assert.deepEqual(await res.json(),{state:"failed",reason:"auth",stage:"execute"});
+});
+
+// Closing is intentionally irreversible within one Worker isolate; run last.
+test("temporary acceptance page can be closed by authorized operator and returns HTTP 410",async()=>{
+ const env=makeEnv();
+ const endpoint=BASE+"/api/close";
+ const request=new Request(endpoint,{method:"POST",headers:{
+   "Origin":"https://vynalthai.com","Sec-Fetch-Site":"same-origin",
+   "Content-Type":"application/json","X-CSRF-Token":CSRF
+ },body:JSON.stringify({confirm:"CLOSE_TEMP_PAGE"})});
+ const response=await handleTidbAcceptance(request,env,new URL(endpoint),{authenticate:auth});
+ assert.equal(response.status,200);
+ assert.equal((await response.json()).state,"closed");
+ const again=await handleTidbAcceptance(new Request(BASE),env,new URL(BASE));
+ assert.equal(again.status,410);
 });
