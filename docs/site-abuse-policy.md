@@ -1,0 +1,8 @@
+# Supplemental site abuse control
+
+Initial mode: observe on search.vynalthai.com and vynalthai.com. Do not enforce until preview, existing regression suite, Wrangler validation and normal-user smoke tests pass. Rollback: SECURITY_SITE_ABUSE_MODE=off.
+
+- 120 HTML navigations/minute; 15 search/minute; 3 image/minute; 3 signup/minute for matching proxied endpoint; per host, per Cloudflare location, independent IP and validated host-cookie counters. Direct Supabase Auth signups remain outside the Worker and require origin-side controls. No raw IP/device keys logged, no forwarded header trust, no browser fingerprints.
+- Device risk: repeated requests to existing private static decoys only, five unique observations across three categories within ten minutes, signed cookie required; 72-hour temporary restriction, no extension on blocked traffic. Applies to decoys and controlled expensive routes/documents on the same host, across IP changes, using a private SQLite Durable Object. Existing explicit-consent federation remains separate. No identification of individuals, no inferred cross-host linkage, no cookie reset evasion claims.
+- Keep normal auth callbacks, recovery, validation, assets and verified public crawler HTML routes unaffected. No admin authorization change. Direct origin addresses and WAF-preblocked requests are outside this module.
+- Check Worker free-tier and Durable Object quota before enabling, and verify per-host counters, mobile browsers, normal search/image workflows, and 403/429 responses before promotion. Never deploy an untested changeset directly via API; existing Workers Builds is production deployer.
