@@ -1,5 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+
+// Test the historical operator-approved window without extending the live gate.
+// Node runs test files in isolated processes; restore the clock afterward.
+const originalTestNow = Date.now;
+test.before(() => { Date.now = () => Date.parse("2026-11-25T14:00:00Z"); });
+test.after(() => { Date.now = originalTestNow; });
 import { webcrypto } from "node:crypto";
 import {
   tidbAcceptanceAuthConfigured,
