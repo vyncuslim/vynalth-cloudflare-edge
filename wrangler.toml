@@ -12,6 +12,11 @@ workers_dev = true
 # Preserve existing Dashboard > Settings > Domains & Routes assignments.
 # Never automatically delete or seize another Worker's route.
 [vars]
+
+# Independent supplemental application abuse guard. Initial rollout is limited
+# to two explicitly reviewed first-party hosts. Existing WAF is unchanged.
+SECURITY_SITE_ABUSE_MODE = "observe"
+SECURITY_SITE_ABUSE_HOSTS = "search.vynalthai.com,vynalthai.com"
 # Explicit operator-approved, narrow suspicious-probe event forwarding.
 # Never send IP, cookies, request body or query strings. Sender is async,
 # non-blocking, and automatically fails closed when the secret is absent.
@@ -163,3 +168,43 @@ enabled = true
 [[kv_namespaces]]
 binding = "SCHOOL_IP_KV"
 id = "afbc03d02494467e8f39b63f755de44d"
+
+
+# Application rate limits are per Cloudflare location, not a global exact quota.
+# No new WAF rate-limit rules, and no raw visitor identity in counter keys.
+[[ratelimits]]
+name = "SECURITY_DOC_RATE"
+namespace_id = "892611201"
+[ratelimits.simple]
+limit = 120
+period = 60
+
+[[ratelimits]]
+name = "SECURITY_IMAGE_RATE"
+namespace_id = "892611202"
+[ratelimits.simple]
+limit = 3
+period = 60
+
+[[ratelimits]]
+name = "SECURITY_SEARCH_RATE"
+namespace_id = "892611203"
+[ratelimits.simple]
+limit = 15
+period = 60
+
+[[ratelimits]]
+name = "SECURITY_SIGNUP_RATE"
+namespace_id = "892611204"
+[ratelimits.simple]
+limit = 3
+period = 60
+
+# No public route; only host-signed device credential pseudonyms.
+[[durable_objects.bindings]]
+name = "SECURITY_DEVICE_RISK"
+class_name = "SecurityDeviceRisk"
+
+[[migrations]]
+tag = "security-device-risk-v1"
+new_sqlite_classes = ["SecurityDeviceRisk"]
