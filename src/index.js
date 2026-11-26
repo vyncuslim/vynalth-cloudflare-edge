@@ -25,6 +25,8 @@ import { handleAnonymousBrowserBridge } from "./anonymous-browser-bridge.js";
 import { applyVpnPageGradient } from "./vpn-page-gradient.js";
 import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
 import { checkFederatedDeviceAccess } from "./global-device-policy.js";
+import { enforceSiteAbuse } from "./site-abuse-policy.js";
+export { SecurityDeviceRisk } from "./site-abuse-policy.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
 import { adminPage } from "./school/admin-page.js";
@@ -170,6 +172,10 @@ export default {
         incomingUrl.pathname === "/__observability/vercel-drain") {
       return handleVercelDrain(request, env);
     }
+
+    // Supplemental, host-scoped rate and signed-device risk policy. Existing WAF and auth remain.
+    const siteAbuseDenial = await enforceSiteAbuse(request, env, requestId);
+    if (siteAbuseDenial) return observedResponse(siteAbuseDenial, request, incomingUrl, requestId, rootDomain);
 
     // Immediately deny WordPress installation endpoint probes on every
     // managed hostname routed to this Worker, before GPS, origin requests,
