@@ -17,6 +17,10 @@ workers_dev = true
 # to two explicitly reviewed first-party hosts. Existing WAF is unchanged.
 SECURITY_SITE_ABUSE_MODE = "enforce"
 SECURITY_SITE_ABUSE_HOSTS = "search.vynalthai.com,vynalthai.com"
+
+# First-party Vynalth WAF Core: observe before enabling deterministic denies.
+VYNALTH_WAF_MODE = "observe"
+VYNALTH_WAF_HOSTS = "vynalthai.com,search.vynalthai.com"
 # Explicit operator-approved, narrow suspicious-probe event forwarding.
 # Never send IP, cookies, request body or query strings. Sender is async,
 # non-blocking, and automatically fails closed when the secret is absent.
