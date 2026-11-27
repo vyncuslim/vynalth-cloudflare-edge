@@ -3,11 +3,11 @@ import {applyVynalthWaf,CORE_HOSTS} from "./vynalth-waf-core.js";
 import {inspectWafContent,isWafContentCandidate} from "./vwaf-content.js";
 import {schemaResponse} from "./vwaf-schema.js";
 import {sanitizeEvent} from "./vwaf-policy.js";
-export function createPortableWaf({hosts,mode="enforce",schemaMode="enforce",onEvent=()=>{},maxContentInflight=16}={}){
+export function createPortableWaf({hosts,mode="enforce",schemaMode="enforce",structuredMode="observe",onEvent=()=>{},maxContentInflight=16}={}){
  if(!Array.isArray(hosts)||!hosts.length||hosts.some(h=>!CORE_HOSTS.includes(h))||
-  !["observe","enforce"].includes(mode)||!["observe","enforce"].includes(schemaMode)||
+  !["observe","enforce"].includes(mode)||!["observe","enforce"].includes(schemaMode)||!["observe","enforce"].includes(structuredMode)||
   !Number.isInteger(maxContentInflight)||maxContentInflight<1||maxContentInflight>64)throw Error("Invalid explicit VWAF configuration");
- const allowed=new Set(hosts),env={VYNALTH_WAF_MODE:mode,VYNALTH_WAF_HOSTS:[...allowed].join(",")};
+ const allowed=new Set(hosts),env={VYNALTH_WAF_MODE:mode,VYNALTH_WAF_HOSTS:[...allowed].join(","),VYNALTH_WAF_STRUCTURED_MODE:structuredMode};
  let inflight=0;
  function emit(event){const safe=sanitizeEvent(event);if(safe)try{onEvent(safe)}catch{}}
  return async function guard(request,next){

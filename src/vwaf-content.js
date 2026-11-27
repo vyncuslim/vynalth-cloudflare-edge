@@ -6,7 +6,7 @@ import {isLocalDestination} from "./vwaf-network.js";
 import {inspectApiSchema} from "./vwaf-schema.js";
 const MAX_BYTES=8192, MAX_FIELDS=32, MAX_VALUE=512;
 // Never clone login/signup bodies: they may carry credentials.
-const ROUTES=new Set(["/api/web-search","/api/ai/image"]);
+const ROUTES=new Set(["/api/web-search","/api/ai/image","/api/cloud-browser-live"]);
 const FIELDS=new Set(["id","page","limit","offset","sort","order","file","path","redirect","return","next","url"]);
 const RULES=[
  ["VWAF-301","sql_body_signal",/\bunion\s+(?:all\s+)?select\b|['"]\s*(?:or|and)\s+\d+\s*=\s*\d+/i],
@@ -60,7 +60,11 @@ export async function inspectWafContent(request){
   if(total!==Number(raw))return [];
   const bytes=new Uint8Array(total);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.byteLength}
   const value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));
-  const signals=[...inspectStructuredContent(value),...inspectApiSchema(new URL(request.url).pathname.replace(/\/+$/,""),value)];
+  const route=new URL(request.url).pathname.replace(/\/+$/,"");
+  // The live-browser route is scanned only for its explicit navigation URL
+  // contract. No session/stream identifiers, credentials or generic body scan.
+  const signals=route==="/api/cloud-browser-live"?inspectApiSchema(route,value):
+    [...inspectStructuredContent(value),...inspectApiSchema(route,value)];
   return [...new Map(signals.map(s=>[s.id,s])).values()];
  }catch{return []}finally{
   clearTimeout(timer);
