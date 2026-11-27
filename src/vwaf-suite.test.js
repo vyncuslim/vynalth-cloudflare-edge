@@ -7,7 +7,10 @@ import {verifiedActors,rateCategory,enforceVynalthWaf} from "./vwaf-runtime.js";
 import {VynalthWafState,evidenceDigest} from "./vwaf-state.js";
 import {SecurityDeviceRisk} from "./site-abuse-policy.js";
 import {stateCall} from "./vwaf-runtime.js";
-import {handleWafConsole} from "./vwaf-console.js";
+import {handleWafHoneypot} from "./vwaf-honeypot.js";
+import {archiveRestriction} from "./vwaf-archive.js";
+import {canonicalRestriction,reserveArchive} from "./vwaf-policy.js";
+import {restrictionScope} from "./vwaf-runtime.js";
 const now=Date.UTC(2026,10,27),id=n=>"00000000-0000-4000-8000-"+String(n).padStart(12,"0");
 const req=(path,init={})=>new Request("https://vynalthai.com"+path,init);
 const input=(n,over={})=>({id:id(n),kind:"device",mode:"enforce",host:"vynalthai.com",category:null,rules:[["VWAF-101","VWAF-102","VWAF-103"][n%3]],...over});
@@ -45,11 +48,12 @@ test("replay, stale and heuristic signals cannot trigger a device restriction",(
  for(let i=1;i<=5;i++){r=actorTransition(s,input(1,{rules:["VWAF-101","VWAF-102","VWAF-103"]}),now+i+WINDOW);s=r.state}
  assert.equal(s.blockedUntil,0);
 });
-test("rate buckets enforce explicit category and reset at minute boundary",()=>{
+test("sliding rate buckets enforce explicit category without minute boundary bursts",()=>{
  let s,r;for(let i=1;i<=4;i++){r=actorTransition(s,input(i,{category:"IMAGE",rules:[]}),now+i);s=r.state}
  assert.equal(r.decision.rateExceeded,true);assert.equal(r.decision.newRate,true);
  assert.equal(actorTransition(s,input(5,{category:"IMAGE",rules:[]}),now+5).decision.newRate,false);
- assert.equal(actorTransition(s,input(6,{category:"IMAGE",rules:[]}),now+60000).decision.rateExceeded,false);
+ assert.equal(actorTransition(s,input(6,{category:"IMAGE",rules:[]}),now+60000).decision.rateExceeded,true);
+ assert.equal(actorTransition(s,input(7,{category:"IMAGE",rules:[]}),now+60005).decision.rateExceeded,false);
 });
 test("mode transition does not promote historical observations into a ban",()=>{
  let s;for(let i=1;i<=4;i++)s=actorTransition(s,input(i,{mode:"observe"}),now+i).state;
@@ -108,15 +112,19 @@ test("DO restriction is persisted with evidence digest in the same state",async(
  const {sha256,...record}=(await storage.get("actor")).evidence;
  assert.equal(sha256,await evidenceDigest(record));
 });
-test("console fails closed, no query token, read-only and never returns state to invalid auth",async()=>{
- const path="/__ops/vwaf/api/status",env={VYNALTH_WAF_CONSOLE_ENABLED:"true",VWAF_CONSOLE_TOKEN:"A".repeat(43)};
- assert.equal((await handleWafConsole(req(path),{},new URL(req(path).url))).status,404);
- assert.equal((await handleWafConsole(req(path),env,new URL(req(path).url))).status,401);
- const r=req(path+"?token=bad",{headers:{Authorization:"Bearer "+"A".repeat(43)}});
- assert.equal((await handleWafConsole(r,env,new URL(r.url))).status,403);
- const q=req(path,{method:"POST"});assert.equal((await handleWafConsole(q,env,new URL(q.url))).status,405);
- const yes=req(path,{headers:{Authorization:"Bearer "+"A".repeat(43)}});
- assert.equal((await handleWafConsole(yes,env,new URL(yes.url))).status,503);
+test("former console is static, no credentials, state or origin access",async()=>{
+ const events=[],env={VYNALTH_WAF_HONEYPOT_ENABLED:"true",VWAF_CONSOLE_TOKEN:"A".repeat(43)};
+ const marker="SYNTHETIC_PRIVATE_TEST";
+ for(const path of ["/__ops/vwaf","/__ops/vwaf/api/status","/__ops/vwaf/anything","/__ops/%76waf/api/status"]){
+  const r=req(path+"?secret="+marker,{method:"POST",headers:{Authorization:"Bearer "+marker,Cookie:"fake="+marker},body:marker});
+  const res=handleWafHoneypot(r,env,new URL(r.url),{},id(1),(e,c,v)=>events.push(v));
+  assert.equal(res.status,404);assert.equal(await res.text(),"Resource unavailable.");assert.equal(await r.text(),marker);
+  assert.ok(!JSON.stringify(events).includes(marker));assert.ok(!res.headers.has("set-cookie"));
+ }
+ assert.equal(events.length,4);assert.ok(events.every(e=>e.action==="honeypot"));
+ const r=req("/__ops/vwaf");
+ assert.equal(handleWafHoneypot(r,{},new URL(r.url),{},id(2)).status,404);
+ assert.equal(handleWafHoneypot(req("/robots.txt"),env,new URL(req("/robots.txt").url)),null);
 });
 test("state and telemetry outage cannot bypass deterministic core protection",async()=>{
  const env={VYNALTH_WAF_MODE:"enforce",VYNALTH_WAF_HOSTS:"vynalthai.com",VYNALTH_WAF_STATE_MODE:"enforce"};
@@ -146,4 +154,55 @@ test("runtime uses disjoint object names and does not alter old device bindings"
  }})}};
  assert.deepEqual(await stateCall(env,"ledger-v1",{op:"status"}),{sequence:0});
  assert.equal(named,"vwaf:v1:ledger-v1");
+});
+
+test("content inspection scans bounded metadata containers, never auth bodies",async()=>{
+ assert.ok(inspectStructuredContent({options:{filters:{id:"union select"}}}).some(x=>x.id==="VWAF-301"));
+ assert.equal(inspectStructuredContent({prompt:{id:"union select"},password:{id:"union select"}}).length,0);
+ const body=JSON.stringify({id:"union select",password:"fixture"});
+ const r=req("/api/auth/signup",{method:"POST",headers:{"content-type":"application/json","content-length":String(body.length)},body});
+ assert.deepEqual(await inspectWafContent(r),[]);assert.equal(await r.text(),body);
+});
+test("restriction checks expand to ordinary authenticated APIs but exclude recovery and services",()=>{
+ assert.equal(restrictionScope(req("/api/account/profile")),true);
+ for(const path of ["/api/health","/api/security/device/federation/status","/api/webhooks/payment","/__ops/vwaf","/recover","/robots.txt","/en/contact","/assets/main.js"])assert.equal(restrictionScope(req(path)),false);
+});
+test("new device restrictions retain canonical per-request evidence; R2 only accepts verified records",async()=>{
+ let s,r;for(let i=1;i<=5;i++){r=actorTransition(s,input(i),now+i);s=r.state}
+ const record=canonicalRestriction(s.evidence,now+10);assert.ok(record);assert.equal(record.observations.length,5);
+ const sha256=await evidenceDigest(record);let key,bytes,puts=0;
+ const env={VYNALTH_WAF_ARCHIVE_ENABLED:"true",VWAF_EVIDENCE:{put:async(k,b)=>{key=k;bytes=b.slice();puts++},get:async()=>({size:bytes.length,arrayBuffer:async()=>bytes.buffer})}};
+ const result=await archiveRestriction(env,{record,sha256},now+10);
+ assert.equal(result.state,"archived");assert.ok(key.endsWith(sha256+".json"));assert.equal(puts,1);
+ assert.equal((await archiveRestriction(env,{record,sha256:"0".repeat(64)},now+10)).state,"invalid");assert.equal(puts,1);
+ const bad={...record,observations:record.observations.map(x=>({...x,id:record.observations[0].id}))};
+ assert.equal(canonicalRestriction(bad,now+10),null);
+ assert.equal((await archiveRestriction({}, {record,sha256},now+10)).state,"not_configured");
+});
+test("archive attempts are reserved before writing, capped globally",()=>{
+ const s=freshLedger(null,now);s.archive.pending=[{record:{expiresAt:now+RETAIN},sha256:"0".repeat(64),tries:0}];
+ for(let i=0;i<12;i++)assert.ok(reserveArchive(s,now+i*900000));
+ assert.equal(reserveArchive(s,now+12*900000),null);
+});
+test("multi-rule requests cannot manufacture multiple primary categories",()=>{
+ let s,r;for(let i=1;i<=6;i++){r=actorTransition(s,input(i,{rules:["VWAF-101","VWAF-102","VWAF-103"]}),now+i);s=r.state}
+ assert.equal(r.decision.newRestriction,false);assert.equal(s.blockedUntil,0);
+});
+test("actor status read checks active signed device restriction without mutation",async()=>{
+ const storage=fakeStorage(),d=new VynalthWafState({storage},{});
+ for(let i=1;i<=5;i++)await call(d,{op:"actor",...input(i)});
+ const prior=await storage.get("actor");
+ const r=await(await call(d,{op:"actor-status",host:"vynalthai.com",kind:"device"})).json();
+ assert.equal(r.blockedUntil,prior.blockedUntil);assert.deepEqual(await storage.get("actor"),prior);
+});
+test("ledger keeps core and content events with same correlation ID and queues only verified restriction",async()=>{
+ const store=fakeStorage(),d=new VynalthWafState({storage:store},{});
+ const e={host:"vynalthai.com",request_id:id(1),mode:"observe",action:"observe",rule_ids:["VWAF-101"],score:100};
+ assert.equal((await(await call(d,{op:"event",event:e})).json()).saved,true);
+ assert.equal((await(await call(d,{op:"event",event:{...e,rule_ids:["VWAF-301"]}})).json()).saved,true);
+ let s,r;const t=Date.now();for(let i=1;i<=5;i++){r=actorTransition(s,input(i),t+i-10);s=r.state}
+ const record=s.evidence,sha256=await evidenceDigest(record);
+ const restriction={host:"vynalthai.com",request_id:id(5),mode:"enforce",action:"restriction",rule_ids:["VWAF-402"],score:100,actor_kind:"device",evidence_sha256:sha256};
+ assert.equal((await(await call(d,{op:"event",event:restriction,evidence:record})).json()).saved,true);
+ const out=await(await call(d,{op:"status"})).json();assert.equal(out.sequence,3);assert.equal(out.archive.pending,1);
 });

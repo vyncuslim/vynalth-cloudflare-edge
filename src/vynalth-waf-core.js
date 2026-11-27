@@ -3,7 +3,7 @@
  * Provider-independent matching; no outbound calls, body reads, fingerprinting,
  * external rule feeds, raw request logging, or implicit authentication bypass.
  */
-export const WAF_VERSION = "1.0.0";
+export const WAF_VERSION = "1.2.0";
 export const PILOT_HOSTS = Object.freeze(["vynalthai.com", "search.vynalthai.com"]);
 const PATH_LIMIT = 8192;
 const QUERY_LIMIT = 4096;
@@ -17,9 +17,15 @@ const HARD_RULES = Object.freeze([
   { id:"VWAF-105", score:100, category:"private_development", re:/^\/@fs(?:\/|$)|^\/\.changeset\/config\.json$/i, hosts:["search.vynalthai.com"] },
   { id:"VWAF-106", score:100, category:"private_runtime_diagnostics", re:/(?:^|\/)actuator\/(?:env|heapdump)(?:\/|$)|^\/server-(?:status|info)\/?$/i },
 ]);
+const EXTRA_HARD_RULES = Object.freeze([
+  { id:"VWAF-107",score:100,category:"private_backup",re:/(?:^|\/)(?:\.terraform(?:\/|$)|\.git(?:\.zip|\.tar\.gz|\.bak)$|\.env~$)/i },
+  { id:"VWAF-108",score:100,category:"private_system_files",re:/^\/(?:etc\/(?:passwd|shadow|gshadow)|proc\/(?:self|thread-self|[0-9]+)\/(?:cmdline|maps))(?:\/|$)/i },
+  { id:"VWAF-109",score:100,category:"private_tool_credentials",re:/^\/(?:\.vscode\/sftp\.json|\.idea\/dataSources\.local\.xml|\.gitlab-runner\/config\.toml|\.config\/gcloud\/application_default_credentials\.json|\.config\/gh\/hosts\.yml)$/i },
+]);
 const QUERY_RULES = Object.freeze([
   { id:"VWAF-201", score:45, category:"sql_injection_signal", re:/\bunion\s+(?:all\s+)?select\b|(?:['"]\s*(?:or|and)\s+[0-9]+\s*=\s*[0-9]+)|\b(?:sleep|benchmark)\s*\(/i },
   { id:"VWAF-202", score:45, category:"script_injection_signal", re:/<\s*script(?:\s|>|\/)|\bon(?:error|load)\s*=|javascript\s*:/i },
+  { id:"VWAF-207", score:35, category:"template_expression_signal", re:/\{\{[^{}]{1,128}\}\}|\$\{[^{}]{1,128}\}/ },
   { id:"VWAF-203", score:45, category:"file_inclusion_signal", re:/(?:^|[\\/])\.\.(?:[\\/]|$)|(?:file|php):\/\//i },
 ]);
 const STRUCTURED_PARAMS = new Set(["id","page","limit","offset","sort","order","file","path","redirect","return","next"]);
@@ -30,10 +36,17 @@ function pathVariants(path) {
   const variants = new Set();
   let current=path;
   for(let i=0;i<3;i++) {
-    variants.add(current.replace(/\\/g,"/").replace(/\/{2,}/g,"/"));
+    const normalized=current.replace(/\\/g,"/").replace(/\/{2,}/g,"/");
+    variants.add(normalized);
+    // Some origin routers interpret segment parameters independently of paths.
+    // Only fixed sensitive-file rules can turn this normalization into a denial.
+    variants.add(normalized.replace(/;[^/]*/g,""));
     if(i===2) break;
     let decoded;
-    try { decoded=decodeURIComponent(current); } catch { break; }
+    try { decoded=decodeURIComponent(current); } catch {
+      // Preserve malformed and non-ASCII bytes; decode only well-formed ASCII escapes.
+      decoded=current.replace(/%([0-9a-f]{2})/gi,(m,h)=>parseInt(h,16)<128?String.fromCharCode(parseInt(h,16)):m);
+    }
     if(decoded===current) break;
     current=decoded;
   }
@@ -48,6 +61,12 @@ export function inspectWafRequest(request) {
   if(!PILOT_HOSTS.includes(host)) return {score:0,block:false,signals:[]};
   if(["TRACE","TRACK"].includes(request.method.toUpperCase()))
     push(signal("VWAF-001",100,"unsafe_http_method",true));
+  // Framing is owned by the trusted HTTP runtime. Ambiguity is an observation,
+  // not a claim that a request-smuggling attempt reached an origin parser.
+  const length=request.headers?.get("content-length");
+  const encoding=request.headers?.get("transfer-encoding");
+  if((length!=null&&!/^\d{1,16}$/.test(length))||(length!=null&&encoding))
+    push(signal("VWAF-208",35,"http_framing_signal"));
   // Very large inputs are observed, not silently truncated and hard-blocked.
   if(url.pathname.length>PATH_LIMIT) {
     push(signal("VWAF-204",15,"path_inspection_budget"));
@@ -57,7 +76,7 @@ export function inspectWafRequest(request) {
       push(signal("VWAF-002",100,"invalid_path_control",true));
     if(variants.some(p=>/(?:^|\/)\.\.(?:\/|$)/.test(p)))
       push(signal("VWAF-205",60,"path_traversal_signal"));
-    for(const rule of HARD_RULES) {
+    for(const rule of [...HARD_RULES,...EXTRA_HARD_RULES]) {
       if(rule.hosts&&!rule.hosts.includes(host))continue;
       if(variants.some(p=>rule.re.test(p)))push(signal(rule.id,rule.score,rule.category,true));
     }

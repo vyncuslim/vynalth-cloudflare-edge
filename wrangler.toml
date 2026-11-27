@@ -19,11 +19,12 @@ SECURITY_SITE_ABUSE_MODE = "enforce"
 SECURITY_SITE_ABUSE_HOSTS = "search.vynalthai.com,vynalthai.com"
 
 # First-party Vynalth WAF Core: observe before enabling deterministic denies.
-VYNALTH_WAF_MODE = "observe"
+VYNALTH_WAF_MODE = "enforce"
 VYNALTH_WAF_HOSTS = "vynalthai.com,search.vynalthai.com"
 VYNALTH_WAF_CONTENT_ENABLED = "true"
-VYNALTH_WAF_STATE_MODE = "observe"
-VYNALTH_WAF_CONSOLE_ENABLED = "true"
+VYNALTH_WAF_STATE_MODE = "enforce"
+VYNALTH_WAF_HONEYPOT_ENABLED = "true"
+VYNALTH_WAF_ARCHIVE_ENABLED = "true"
 VYNALTH_WAF_ALERTS_ENABLED = "false"
 # Explicit operator-approved, narrow suspicious-probe event forwarding.
 # Never send IP, cookies, request body or query strings. Sender is async,
@@ -235,3 +236,8 @@ namespace_id = "892611206"
 [ratelimits.simple]
 limit = 120
 period = 60
+
+# Private existing evidence bucket; only bounded redacted VWAF restriction records.
+[[r2_buckets]]
+binding = "VWAF_EVIDENCE"
+bucket_name = "vynalth-security-evidence"
