@@ -41,7 +41,7 @@ const samples=[];for(let i=0;i<20000;i++){const n=i%cases.length,t=performance.n
 samples.sort((a,b)=>a-b);const p95=samples[Math.ceil(samples.length*.95)-1];
 const gaChecklist=readGaChecklist();
 const report={gaChecklist,suite:"vwaf-v2-rc2-original-corpus",structuredMode,missedByClass,runtime:process.version,attack:{tested:attack,blocked,rate:blocked/attack},benign:{tested:benign,falsePositive,rate:falsePositive/benign},contract:{tested:contract,rejected:contractRejected},performance:{samples:samples.length,p95Ms:p95},regressions:regression,
- goals:{knownAttackBlock:blocked/attack>=.99,benignFalsePositive:falsePositive/benign<.001,localP95:p95<5,productionAvailability:null,independentSecurityAudit:null,all17RecordedQualified:gaChecklist.allRecordedQualified},
+ goals:{knownAttackBlock:blocked/attack>=.99,benignFalsePositive:falsePositive/benign<.001,localP95:p95<5,independentAttackHoldout:null,representativeBenignFalsePositive:null,productionInspectionP95:null,productionAvailability:null,independentSecurityAudit:null,zeroKnownUnfixedCritical:null,all17RecordedQualified:gaChecklist.allRecordedQualified},
  limitations:"Synthetic selected scenarios, not real traffic, not independent corpus, no distributed load or production SLA evidence."};
 console.log("VWAF_ACCEPTANCE "+JSON.stringify(report));
 if(regression||falsePositive)process.exitCode=1;

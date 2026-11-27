@@ -24,8 +24,13 @@ function localV4(ip){
 }
 export function isLocalDestination(value){
  if(typeof value!=="string"||value.length>512)return false;
+ try{return isLocalDestinationUrl(new URL(value))}catch{return false}
+}
+// For already-parsed, bounded, explicitly reviewed destination fields only.
+// The generic advisory string wrapper retains its existing 512-char budget.
+export function isLocalDestinationUrl(u){
+ if(!(u instanceof URL))return false;
  try{
-  const u=new URL(value);
   if(["file:","ftp:"].includes(u.protocol))return true;
   const hostname=u.hostname.toLowerCase().replace(/\.$/,"");
   if(hostname==="localhost"||hostname.endsWith(".localhost"))return true;

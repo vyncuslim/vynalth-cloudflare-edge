@@ -7,8 +7,9 @@ const lines=(result.stdout||"").split(/\r?\n/).filter(x=>x.startsWith("VWAF_ACCE
 if(lines.length!==1)throw Error("GA report missing or ambiguous");
 const report=JSON.parse(lines[0].slice("VWAF_ACCEPTANCE ".length));
 if(report.gaChecklist?.total!==17||typeof report.gaChecklist.allRecordedQualified!=="boolean"||
- !report.goals||!Object.hasOwn(report.goals,"all17RecordedQualified")||
- !Object.hasOwn(report.goals,"productionAvailability")||!Object.hasOwn(report.goals,"independentSecurityAudit"))
+ !report.goals||!["knownAttackBlock","benignFalsePositive","localP95","independentAttackHoldout",
+ "representativeBenignFalsePositive","productionInspectionP95","productionAvailability",
+ "independentSecurityAudit","zeroKnownUnfixedCritical","all17RecordedQualified"].every(k=>Object.hasOwn(report.goals,k)))
  throw Error("GA report missing mandatory conditions");
 if(report.regressions!==0||report.benign?.falsePositive!==0||result.status===1)
  throw Error("Acceptance regression; not a valid qualification result");

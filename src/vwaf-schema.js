@@ -3,7 +3,7 @@
  * Free-text input is never treated as injection. Reject only conditions the
  * reviewed handler already rejects; tighter typing remains advisory.
  */
-import {isLocalDestination} from "./vwaf-network.js";
+import {isLocalDestinationUrl} from "./vwaf-network.js";
 export const CONTRACT_REVISION="0fb9f74407c69f584002726d225b04dbd91497fc";
 const IMAGE_RATIOS=new Set(["1:1","16:9","9:16"]);
 function sig(id,category,blocking=false,score=blocking?70:20){return {id,category,blocking,score}}
@@ -16,10 +16,10 @@ export function inspectApiSchema(path,value){
   // Source-verified: only action=navigate invokes safeUrl(body.url).
   // The backend must still validate every resolved address and actual egress.
   // A syntactic edge check never substitutes for authorization or DNS checks.
-  if(own("action")&&value.action==="navigate"&&own("url")&&typeof value.url==="string"){
+  if(own("action")&&value.action==="navigate"&&own("url")&&typeof value.url==="string"&&value.url.length<=8192){
    let target;
    try{target=new URL(value.url)}catch{return result}
-   if(["http:","https:"].includes(target.protocol)&&isLocalDestination(value.url))
+   if(["http:","https:"].includes(target.protocol)&&isLocalDestinationUrl(target))
     result.push(sig("VWAF-606","browser_private_destination_contract",true,0));
   }
   return result;
