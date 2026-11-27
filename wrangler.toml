@@ -218,14 +218,9 @@ tag = "security-device-risk-v1"
 new_sqlite_classes = ["SecurityDeviceRisk"]
 
 
-# VWAF private state and bounded per-colo admission controls; no route changes.
-[[durable_objects.bindings]]
-name = "VWAF_STATE"
-class_name = "VynalthWafState"
-
-[[migrations]]
-tag = "vwaf-state-v1"
-new_sqlite_classes = ["VynalthWafState"]
+# VWAF uses disjoint object names in the existing SECURITY_DEVICE_RISK namespace.
+# No new Durable Object migration; preserve the original class and stored device state.
+# Bounded per-colo admission controls; no route changes.
 
 [[ratelimits]]
 name = "VWAF_STATE_BUDGET"

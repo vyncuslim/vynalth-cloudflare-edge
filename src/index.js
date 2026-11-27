@@ -29,7 +29,6 @@ import { checkFederatedDeviceAccess } from "./global-device-policy.js";
 import { enforceSiteAbuse } from "./site-abuse-policy.js";
 import { enforceVynalthWaf } from "./vwaf-runtime.js";
 import { isWafConsolePath, handleWafConsole } from "./vwaf-console.js";
-export { VynalthWafState } from "./vwaf-state.js";
 export { SecurityDeviceRisk } from "./site-abuse-policy.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";

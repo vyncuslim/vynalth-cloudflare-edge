@@ -1,4 +1,5 @@
 import { verifyEdgeDevice } from './domain-device-id.js';
+import { VynalthWafState } from './vwaf-state.js';
 import { matchPhpHoneypot } from './php-honeypots.js';
 import { isPhpInfoHoneypotPath } from './phpinfo-honeypot.js';
 
@@ -55,8 +56,18 @@ export function advanceDeviceRisk(prior, probe, now) {
 }
 
 export class SecurityDeviceRisk {
-  constructor(state) { this.state = state; }
+  constructor(state, env) { this.state = state; this.vwaf = new VynalthWafState(state,env); }
   async fetch(request) {
+    // Internal, disjoint VWAF objects share this deployed class to avoid a migration.
+    // Legacy device-risk objects use hex HMAC names and the device-risk.internal URL.
+    const url = new URL(request.url);
+    if (url.origin === 'https://vwaf.internal' && url.pathname === '/' && !url.search) {
+      if (await this.state.storage.get('risk')) return new Response(null,{status:409});
+      return this.vwaf.fetch(request);
+    }
+    // Never allow the legacy protocol to modify a VWAF object.
+    if (await this.state.storage.get('actor') || await this.state.storage.get('ledger'))
+      return new Response(null,{status:409});
     if (request.method !== 'POST') return new Response(null, { status: 405 });
     let body;
     try { body = await request.json(); } catch { return new Response(null, { status: 400 }); }
@@ -79,6 +90,9 @@ export class SecurityDeviceRisk {
     return Response.json({ blockedUntil: next.blockUntil });
   }
   async alarm() {
+    // Only the new disjoint object names can have actor or ledger keys.
+    if (await this.state.storage.get('actor') || await this.state.storage.get('ledger'))
+      return this.vwaf.alarm();
     const now = Date.now();
     const state = await this.state.storage.get('risk');
     if (state?.blockUntil > now) return this.state.storage.setAlarm(state.blockUntil);

@@ -40,8 +40,9 @@ export function rateCategory(request){
  return null;
 }
 export async function stateCall(env,name,value){
- const ns=env?.VWAF_STATE;if(!ns?.idFromName)return null;
- const r=await ns.get(ns.idFromName(name)).fetch("https://vwaf.internal/",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(value)});
+ const ns=env?.SECURITY_DEVICE_RISK;if(!ns?.idFromName)return null;
+ // Domain-separated names cannot collide with the legacy hex-only HMAC names.
+ const r=await ns.get(ns.idFromName("vwaf:v1:"+name)).fetch("https://vwaf.internal/",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(value),signal:AbortSignal.timeout(1200)});
  if(!r.ok)throw Error("VWAF state unavailable");return r.json();
 }
 async function budget(env,name,host){

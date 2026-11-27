@@ -5,6 +5,8 @@ import {actorTransition,BAN,WINDOW,RETAIN,freshLedger,reserveChannel,retryDeadli
 import {sendDigest,configuredChannels} from "./vwaf-alert.js";
 import {verifiedActors,rateCategory,enforceVynalthWaf} from "./vwaf-runtime.js";
 import {VynalthWafState,evidenceDigest} from "./vwaf-state.js";
+import {SecurityDeviceRisk} from "./site-abuse-policy.js";
+import {stateCall} from "./vwaf-runtime.js";
 import {handleWafConsole} from "./vwaf-console.js";
 const now=Date.UTC(2026,10,27),id=n=>"00000000-0000-4000-8000-"+String(n).padStart(12,"0");
 const req=(path,init={})=>new Request("https://vynalthai.com"+path,init);
@@ -120,4 +122,28 @@ test("state and telemetry outage cannot bypass deterministic core protection",as
  const env={VYNALTH_WAF_MODE:"enforce",VYNALTH_WAF_HOSTS:"vynalthai.com",VYNALTH_WAF_STATE_MODE:"enforce"};
  assert.equal((await enforceVynalthWaf(req("/.env"),env,{},id(1))).status,403);
  assert.equal(await enforceVynalthWaf(req("/robots.txt"),env,{},id(2)),null);
+});
+
+test("existing deployed namespace isolates legacy device state and VWAF objects",async()=>{
+ const old=fakeStorage(),fresh=fakeStorage();
+ const legacy=new SecurityDeviceRisk({storage:old},{}),next=new SecurityDeviceRisk({storage:fresh},{});
+ const legacyReq=body=>new Request("https://device-risk.internal/",{method:"POST",body:JSON.stringify(body)});
+ const original={blockUntil:Date.now()+60000,probes:[]};await old.put("risk",original);
+ assert.ok((await(await legacy.fetch(legacyReq({op:"status"}))).json()).blockedUntil>Date.now());
+ assert.equal((await call(legacy,{op:"actor",...input(1)})).status,409);
+ assert.deepEqual(await old.get("risk"),original);
+ assert.equal((await call(next,{op:"actor",...input(1)})).status,200);
+ assert.equal((await next.fetch(legacyReq({op:"status"}))).status,409);
+ assert.equal(await fresh.get("risk"),undefined);
+ await next.alarm();assert.ok(await fresh.get("actor"));
+ await legacy.alarm();assert.deepEqual(await old.get("risk"),original);
+});
+test("runtime uses disjoint object names and does not alter old device bindings",async()=>{
+ let named;
+ const env={SECURITY_DEVICE_RISK:{idFromName:n=>{named=n;return n},get:()=>({fetch:async(url,options)=>{
+  assert.equal(url,"https://vwaf.internal/");assert.ok(options.signal);
+  return Response.json({sequence:0})
+ }})}};
+ assert.deepEqual(await stateCall(env,"ledger-v1",{op:"status"}),{sequence:0});
+ assert.equal(named,"vwaf:v1:ledger-v1");
 });
