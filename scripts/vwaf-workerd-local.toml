@@ -1,0 +1,10 @@
+# Local test harness, never deploy. No routes or account bindings.
+name = "vwaf-local-qualification-only"
+main = "vwaf-workerd-fixture.js"
+compatibility_date = "2026-09-19"
+workers_dev = false
+preview_urls = false
+[dev]
+ip = "127.0.0.1"
+port = 18765
+local_protocol = "http"

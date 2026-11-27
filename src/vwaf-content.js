@@ -1,6 +1,6 @@
 /**
- * VWAF Core content inspection. Observation only. No forwarding, persistence,
- * or logging of input. Small explicitly framed JSON on known routes only.
+ * VWAF bounded content and reviewed schema inspection. No forwarding,
+ * persistence or logging of input. Only known JSON routes; unframed opt-in.
  */
 import {isLocalDestination} from "./vwaf-network.js";
 import {inspectApiSchema} from "./vwaf-schema.js";
@@ -17,12 +17,13 @@ function hit(id,category,score=40){return {id,category,score,blocking:false}}
 export function inspectStructuredContent(value){
  const signals=new Map();const add=x=>signals.set(x.id,x);
  const containers=new Set(["options","filters","pagination","parameters"]);
- let visited=0;
+ let visited=0,exhausted=false;
  function scan(node,depth){
-  if(!node||typeof node!=="object"||Array.isArray(node)||depth>2)return;
+  if(exhausted||!node||typeof node!=="object"||Array.isArray(node)||depth>2)return;
   const keys=Object.keys(node);
   for(const key of keys){
-   if(++visited>MAX_FIELDS){add(hit("VWAF-304","content_budget",10));return}
+   if(exhausted)return;
+   if(++visited>MAX_FIELDS){exhausted=true;add(hit("VWAF-304","content_budget",10));return}
    if(["__proto__","constructor","prototype"].includes(key))add(hit("VWAF-305","object_key_signal"));
    const k=key.toLowerCase(),v=node[key];
    if(containers.has(k)){if(depth<2)scan(v,depth+1);continue}
@@ -35,31 +36,35 @@ export function inspectStructuredContent(value){
  }
  scan(value,0);return [...signals.values()];
 }
-export function isWafContentCandidate(request){
+export function isWafContentCandidate(request,{allowUnframed=false}={}){
  const u=new URL(request.url);
  if(u.hostname!=="vynalthai.com"||request.method!=="POST"||!ROUTES.has(u.pathname.replace(/\/+$/,"")))return false;
  if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type")||""))return false;
  const coding=request.headers.get("content-encoding");if(coding&&coding.toLowerCase()!=="identity")return false;
  const raw=request.headers.get("content-length");
- return !!raw&&/^\d{1,5}$/.test(raw)&&Number(raw)>=1&&Number(raw)<=MAX_BYTES;
+ if(raw===null)return allowUnframed===true&&request.body!==null;
+ return /^\d{1,5}$/.test(raw)&&Number(raw)>=1&&Number(raw)<=MAX_BYTES;
 }
-export async function inspectWafContent(request){
- if(!isWafContentCandidate(request))return [];
- const raw=request.headers.get("content-length");
+export async function inspectWafContent(request,options={}){
+ if(!isWafContentCandidate(request,options))return [];
+ const raw=request.headers.get("content-length"),declared=raw===null?null:Number(raw);
  let reader,timer;
  try{
   reader=request.clone().body?.getReader();if(!reader)return [];
   const deadline=new Promise(resolve=>{timer=setTimeout(()=>resolve({timeout:true}),75)});
-  const chunks=[];let total=0;
+  // One fixed-size buffer, global byte and empty-chunk budget. The deadline
+  // also applies to completion, not just the first chunk. Never parse partial JSON.
+  const cap=declared??MAX_BYTES,bytes=new Uint8Array(cap);let total=0,empty=0;
   for(;;){
    const r=await Promise.race([reader.read(),deadline]);if(r.timeout)return [];
    if(r.done)break;
-   total+=r.value.byteLength;if(total>MAX_BYTES||total>Number(raw))return [];
-   chunks.push(r.value);
+   if(!(r.value instanceof Uint8Array))return [];
+   if(!r.value.byteLength){if(++empty>32)return [];continue}
+   if(total+r.value.byteLength>cap)return [];
+   bytes.set(r.value,total);total+=r.value.byteLength;
   }
-  if(total!==Number(raw))return [];
-  const bytes=new Uint8Array(total);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.byteLength}
-  const value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));
+  if(total===0||(declared!==null&&total!==declared))return [];
+  const value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes.subarray(0,total)));
   const route=new URL(request.url).pathname.replace(/\/+$/,"");
   // The live-browser route is scanned only for its explicit navigation URL
   // contract. No session/stream identifiers, credentials or generic body scan.

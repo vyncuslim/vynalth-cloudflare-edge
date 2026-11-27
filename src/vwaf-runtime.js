@@ -125,8 +125,9 @@ export async function enforceVynalthWaf(request,env,ctx,id){
  }
  const denial=hardDenial||restriction||rate;if(denial)return denial;
  // Only eligible, admitted metadata requests may spend content-inspection work.
- if(env.VYNALTH_WAF_CONTENT_ENABLED==="true"&&isWafContentCandidate(request)&&await budget(env,"VWAF_EVENT_BUDGET","content:"+host)){
-  const signals=await inspectWafContent(request);
+ const contentOptions={allowUnframed:env.VYNALTH_WAF_UNFRAMED_CONTENT_ENABLED==="true"};
+ if(env.VYNALTH_WAF_CONTENT_ENABLED==="true"&&isWafContentCandidate(request,contentOptions)&&await budget(env,"VWAF_EVENT_BUDGET","content:"+host)){
+  const signals=await inspectWafContent(request,contentOptions);
   const schemaDenial=schemaResponse(request,signals,mode==="enforce"?env.VYNALTH_WAF_SCHEMA_MODE:"observe");
   if(signals.length)recordEvent(env,ctx,{host,mode,action:schemaDenial?"block":"observe",request_id:id,rule_ids:signals.map(x=>x.id),score:Math.min(100,signals.reduce((n,s)=>n+s.score,0))});
   if(schemaDenial)return schemaDenial;
