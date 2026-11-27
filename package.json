@@ -7,7 +7,9 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "test": "node --test"
+    "test": "node --test",
+    "vwaf:acceptance": "node scripts/vwaf-acceptance.mjs",
+    "vwaf:release-gate": "node scripts/vwaf-acceptance.mjs --release"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

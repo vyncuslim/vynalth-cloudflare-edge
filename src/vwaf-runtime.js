@@ -1,6 +1,7 @@
 /** Request orchestration: Core + content + actor state + evidence. */
 import {applyVynalthWaf,CORE_HOSTS,PILOT_HOSTS} from "./vynalth-waf-core.js";
 import {inspectWafContent,isWafContentCandidate} from "./vwaf-content.js";
+import {schemaResponse} from "./vwaf-schema.js";
 import {classifySiteRequest} from "./site-abuse-policy.js";
 import {verifyExistingEdgeDevice} from "./domain-device-id.js";
 import {classifyNetworkAttribution} from "./axiom-honeypot.js";
@@ -126,7 +127,9 @@ export async function enforceVynalthWaf(request,env,ctx,id){
  // Only eligible, admitted metadata requests may spend content-inspection work.
  if(env.VYNALTH_WAF_CONTENT_ENABLED==="true"&&isWafContentCandidate(request)&&await budget(env,"VWAF_EVENT_BUDGET","content:"+host)){
   const signals=await inspectWafContent(request);
-  if(signals.length)recordEvent(env,ctx,{host,mode,action:"observe",request_id:id,rule_ids:signals.map(x=>x.id),score:Math.min(100,signals.reduce((n,s)=>n+s.score,0))});
+  const schemaDenial=schemaResponse(request,signals,mode==="enforce"?env.VYNALTH_WAF_SCHEMA_MODE:"observe");
+  if(signals.length)recordEvent(env,ctx,{host,mode,action:schemaDenial?"block":"observe",request_id:id,rule_ids:signals.map(x=>x.id),score:Math.min(100,signals.reduce((n,s)=>n+s.score,0))});
+  if(schemaDenial)return schemaDenial;
  }
  return null;
 }
