@@ -21,7 +21,7 @@ export async function sendDigest(channel,env,digest,fetchImpl=fetch,now=Date.now
   url="https://api.telegram.org/bot"+env.VWAF_TELEGRAM_BOT_TOKEN+"/sendMessage";
   body=JSON.stringify({chat_id:env.VWAF_TELEGRAM_CHAT_ID,text:msg,disable_web_page_preview:true});
  }else{url=AXIOM;headers.Authorization="Bearer "+env.VWAF_AXIOM_INGEST_TOKEN;
-  body=JSON.stringify([{event:"VYNALTH_WAF_DIGEST",_time:new Date(now).toISOString(),version:"2.0.0-rc.1",count:digest.count,
+  body=JSON.stringify([{event:"VYNALTH_WAF_DIGEST",_time:new Date(now).toISOString(),version:"2.0.0-rc.2",count:digest.count,
    mode:digest.mode,rule_ids:digest.rules,sequence:digest.sequence,intrusion_verified:false}]);}
  try{
   const r=await fetchImpl(url,{method:"POST",headers,body,redirect:"error",signal:AbortSignal.timeout(4500)});

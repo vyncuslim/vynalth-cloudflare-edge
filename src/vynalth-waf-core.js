@@ -5,7 +5,8 @@
  */
 import {CORE_HOSTS,STATE_HOSTS} from "./vwaf-scope.js";
 import {isLocalDestination} from "./vwaf-network.js";
-export const WAF_VERSION = "2.0.0-rc.1";
+import {restrictedIdentifierSignal} from "./vwaf-structured-policy.js";
+export const WAF_VERSION = "2.0.0-rc.2";
 export const PILOT_HOSTS = STATE_HOSTS;
 export {CORE_HOSTS};
 const PATH_LIMIT = 8192;
@@ -70,7 +71,7 @@ function pathVariants(path) {
   return [...variants];
 }
 /** Pure request metadata inspection. Never changes the URL or consumes a body. */
-export function inspectWafRequest(request) {
+export function inspectWafRequest(request,{structuredMode="observe"}={}) {
   const url=new URL(request.url);
   const host=url.hostname.toLowerCase();
   const signals=[];
@@ -117,6 +118,8 @@ export function inspectWafRequest(request) {
       if(value.length>VALUE_LIMIT){push(signal("VWAF-206",15,"query_inspection_budget"));continue;}
       for(const rule of QUERY_RULES)
         if(rule.re.test(value))push(signal(rule.id,rule.score,rule.category));
+      const strict=restrictedIdentifierSignal(url,request.method.toUpperCase(),field,value,structuredMode);
+      if(strict)push(strict);
       if(["url","redirect","return","next"].includes(field)&&isLocalDestination(value))
         push(signal("VWAF-209",35,"local_destination_signal"));
     }
@@ -133,7 +136,7 @@ export function applyVynalthWaf(request,env,requestId,emit=event=>console.info("
   const enabled=String(env?.VYNALTH_WAF_HOSTS||"").split(",").map(x=>x.trim().toLowerCase());
   if(!CORE_HOSTS.includes(host)||!enabled.includes(host))return null;
   let result;
-  try { result=inspectWafRequest(request); } catch {
+  try { result=inspectWafRequest(request,{structuredMode:env.VYNALTH_WAF_STRUCTURED_MODE}); } catch {
     // This is a supplemental control; all existing authorization, device risk,
     // and upstream WAF controls still execute when inspection is unavailable.
     console.warn("[VYNALTH WAF] inspection unavailable");
