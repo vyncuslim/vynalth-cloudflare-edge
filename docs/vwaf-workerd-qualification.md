@@ -1,0 +1,7 @@
+# Local workerd and production measurement boundary
+
+The independent local runtime job uses the repository's existing Wrangler development dependency and the production compatibility date. It launches only a loopback listener with a separate configuration, no routes or bindings, and dispatches 900 ordinary in-memory fixtures (plus warmup) through the portable middleware. No requests are sent to the actual host, no secrets or real traffic are used, and the synthetic origin always returns 204. The harness is never deployed. A timer that produces unusable values fails the evidence check instead of being reported as zero latency.
+
+Cloudflare production Date.now() and performance.now() do not advance during pure CPU work. Do not treat a zero in-worker timer delta as evidence that a deployed WAF passes a CPU latency target. Cloudflare native invocation CPU time measures the entire Worker, not this middleware alone. Local workerd latency remains local evidence, even with the same compatibility date. Obtain production CPU profiling, representative coverage, and independently reviewed evidence before qualifying the production performance gate.
+
+References: https://developers.cloudflare.com/workers/runtime-apis/performance/ and https://developers.cloudflare.com/workers/observability/dev-tools/cpu-usage/. No change to production enforcement, dependencies or original acceptance corpus. No GA publication.
