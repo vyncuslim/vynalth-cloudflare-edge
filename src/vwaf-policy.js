@@ -1,9 +1,10 @@
 /** VWAF Intelligence, Identity, Rate Shield and Response state transitions. */
-export const HOSTS=Object.freeze(["vynalthai.com","search.vynalthai.com"]);
+import {CORE_HOSTS,STATE_HOSTS} from "./vwaf-scope.js";
+export const HOSTS=STATE_HOSTS;
 export const LIMITS=Object.freeze({DOC:120,IMAGE:3,SEARCH:15,SIGNUP:3,CHAT:10,LOGIN:5});
 export const WINDOW=600000, BAN=259200000, RETAIN=604800000;
-export const HARD_IDS=Object.freeze(["VWAF-101","VWAF-102","VWAF-103","VWAF-104","VWAF-105","VWAF-106","VWAF-107","VWAF-108","VWAF-109"]);
-export const IDS=Object.freeze(["VWAF-001","VWAF-002",...HARD_IDS,"VWAF-201","VWAF-202","VWAF-203","VWAF-204","VWAF-205","VWAF-206","VWAF-207","VWAF-208","VWAF-301","VWAF-302","VWAF-303","VWAF-304","VWAF-305","VWAF-306","VWAF-401","VWAF-402","VWAF-403","VWAF-501"]);
+export const HARD_IDS=Object.freeze(["VWAF-101","VWAF-102","VWAF-103","VWAF-104","VWAF-105","VWAF-106","VWAF-107","VWAF-108","VWAF-109","VWAF-110","VWAF-111"]);
+export const IDS=Object.freeze(["VWAF-001","VWAF-002",...HARD_IDS,"VWAF-201","VWAF-202","VWAF-203","VWAF-204","VWAF-205","VWAF-206","VWAF-207","VWAF-208","VWAF-209","VWAF-210","VWAF-301","VWAF-302","VWAF-303","VWAF-304","VWAF-305","VWAF-306","VWAF-401","VWAF-402","VWAF-403","VWAF-501"]);
 export const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const uniq=a=>[...new Set(a)];
 export function actorTransition(prior,input,now){
@@ -11,7 +12,10 @@ export function actorTransition(prior,input,now){
  const s={mode,kind,host,probes:[],buckets:{},blockedUntil:0,evidence:null,expiresAt:now+WINDOW};
  if(old.kind===kind&&(!old.host||old.host===host)){
   if(Number.isFinite(old.blockedUntil)&&old.blockedUntil>now)s.blockedUntil=old.blockedUntil;
-  if(old.evidence?.at>now-RETAIN)s.evidence=old.evidence;
+  if(old.evidence?.at>now-RETAIN){
+   s.evidence=old.evidence;
+   if(old.delivery?.sha256===old.evidence.sha256)s.delivery=old.delivery;
+  }
   if(old.mode===mode){
    s.probes=(Array.isArray(old.probes)?old.probes:[]).filter(x=>x.at>now-WINDOW&&x.at<=now&&UUID.test(x.id)&&Array.isArray(x.rules)).slice(-20);
    for(const k of Object.keys(LIMITS)){
@@ -66,11 +70,11 @@ export function canonicalRestriction(e,now){
  return {schema:"vwaf-restriction-v1",host:e.host,at:e.at,expiresAt:e.expiresAt,kind:"device",mode:"enforce",requestIds,rules,observations,restricted:true,blockedUntil:e.blockedUntil};
 }
 export function sanitizeEvent(e){
- if(!e||!HOSTS.includes(e.host)||!UUID.test(e.request_id||"")||!["observe","enforce"].includes(e.mode)||
+ if(!e||!CORE_HOSTS.includes(e.host)||!UUID.test(e.request_id||"")||!["observe","enforce"].includes(e.mode)||
   !["observe","block","rate_limit","restriction","candidate","honeypot"].includes(e.action))return null;
  const rule_ids=uniq(Array.isArray(e.rule_ids)?e.rule_ids.filter(x=>IDS.includes(x)):[]).slice(0,24);
  if(!rule_ids.length)return null;
- return {event:"VYNALTH_WAF_DECISION",version:"1.2.0",host:e.host,mode:e.mode,action:e.action,
+ return {event:"VYNALTH_WAF_DECISION",version:"1.3.0",host:e.host,mode:e.mode,action:e.action,
   request_id:e.request_id,rule_ids,score:Math.max(0,Math.min(100,Number.isFinite(e.score)?Math.round(e.score):0)),
   actor_kind:["device","network"].includes(e.actor_kind)?e.actor_kind:"unknown",
   ...(e.action==="restriction"&&/^[a-f0-9]{64}$/.test(e.evidence_sha256||"")?{evidence_sha256:e.evidence_sha256}:{})};
@@ -94,6 +98,19 @@ export function freshLedger(prior,now){
  const completed=(Array.isArray(archive.completed)?archive.completed:[]).filter(x=>x.at>now-RETAIN).slice(-24);
  return {seq:Number.isSafeInteger(s.seq)?s.seq:0,entries,channels,daily,archive:{pending,attempts,completed,
   dropped:Number.isSafeInteger(archive.dropped)?archive.dropped:0,nextAt:Number.isFinite(archive.nextAt)?archive.nextAt:0}};
+}
+/** A restriction remains atomically recorded on its actor even if event delivery fails. */
+export function nextActorWake(s,now){
+ const d=s?.delivery;
+ return d?.state==="pending"&&d.attempts<3&&Number.isFinite(d.nextAt)?
+  Math.min(s.expiresAt,Math.max(now+1000,d.nextAt)):s.expiresAt;
+}
+export function reserveRestrictionDelivery(s,now){
+ const d=s?.delivery;
+ if(!d||d.state!=="pending"||d.attempts>=3||d.nextAt>now||d.sha256!==s.evidence?.sha256||
+  !canonicalRestriction(s.evidence,now))return null;
+ d.attempts++;d.nextAt=now+900000;
+ return structuredClone(s.evidence);
 }
 export function reserveArchive(s,now){
  const a=s.archive;if(!a.pending.length||a.attempts.length>=12||a.nextAt>now)return null;

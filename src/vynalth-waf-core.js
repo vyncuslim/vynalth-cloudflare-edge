@@ -3,8 +3,10 @@
  * Provider-independent matching; no outbound calls, body reads, fingerprinting,
  * external rule feeds, raw request logging, or implicit authentication bypass.
  */
-export const WAF_VERSION = "1.2.0";
-export const PILOT_HOSTS = Object.freeze(["vynalthai.com", "search.vynalthai.com"]);
+import {CORE_HOSTS,STATE_HOSTS} from "./vwaf-scope.js";
+export const WAF_VERSION = "1.3.0";
+export const PILOT_HOSTS = STATE_HOSTS;
+export {CORE_HOSTS};
 const PATH_LIMIT = 8192;
 const QUERY_LIMIT = 4096;
 const QUERY_PAIRS = 32;
@@ -21,6 +23,8 @@ const EXTRA_HARD_RULES = Object.freeze([
   { id:"VWAF-107",score:100,category:"private_backup",re:/(?:^|\/)(?:\.terraform(?:\/|$)|\.git(?:\.zip|\.tar\.gz|\.bak)$|\.env~$)/i },
   { id:"VWAF-108",score:100,category:"private_system_files",re:/^\/(?:etc\/(?:passwd|shadow|gshadow)|proc\/(?:self|thread-self|[0-9]+)\/(?:cmdline|maps))(?:\/|$)/i },
   { id:"VWAF-109",score:100,category:"private_tool_credentials",re:/^\/(?:\.vscode\/sftp\.json|\.idea\/dataSources\.local\.xml|\.gitlab-runner\/config\.toml|\.config\/gcloud\/application_default_credentials\.json|\.config\/gh\/hosts\.yml)$/i },
+  { id:"VWAF-110",score:100,category:"private_cloud_credentials",re:/(?:^|\/)(?:\.vault-token|\.azure\/(?:accessTokens\.json|azureProfile\.json)|\.config\/(?:doctl\/config\.yaml|rclone\/rclone\.conf|stripe\/config\.toml)|\.gnupg\/secring\.gpg)$/i },
+  { id:"VWAF-111",score:100,category:"private_debug_artifacts",re:/^\/(?:debug\/pprof\/(?:heap|goroutine|threadcreate|mutex|block)|actuator\/(?:heapdump|logfile))(?:\/|$)/i },
 ]);
 const QUERY_RULES = Object.freeze([
   { id:"VWAF-201", score:45, category:"sql_injection_signal", re:/\bunion\s+(?:all\s+)?select\b|(?:['"]\s*(?:or|and)\s+[0-9]+\s*=\s*[0-9]+)|\b(?:sleep|benchmark)\s*\(/i },
@@ -28,9 +32,18 @@ const QUERY_RULES = Object.freeze([
   { id:"VWAF-207", score:35, category:"template_expression_signal", re:/\{\{[^{}]{1,128}\}\}|\$\{[^{}]{1,128}\}/ },
   { id:"VWAF-203", score:45, category:"file_inclusion_signal", re:/(?:^|[\\/])\.\.(?:[\\/]|$)|(?:file|php):\/\//i },
 ]);
-const STRUCTURED_PARAMS = new Set(["id","page","limit","offset","sort","order","file","path","redirect","return","next"]);
+const STRUCTURED_PARAMS = new Set(["id","page","limit","offset","sort","order","file","path","redirect","return","next","url"]);
 function signal(id, score, category, blocking=false) {
   return {id,score,category,blocking};
+}
+function normalizedDots(path){
+  const parts=[];
+  for(const segment of path.split("/")){
+    if(segment===""||segment===".")continue;
+    if(segment===".."){parts.pop();continue}
+    parts.push(segment);
+  }
+  return "/"+parts.join("/");
 }
 function pathVariants(path) {
   const variants = new Set();
@@ -40,7 +53,10 @@ function pathVariants(path) {
     variants.add(normalized);
     // Some origin routers interpret segment parameters independently of paths.
     // Only fixed sensitive-file rules can turn this normalization into a denial.
-    variants.add(normalized.replace(/;[^/]*/g,""));
+    const noParameters=normalized.replace(/;[^/]*/g,"");
+    variants.add(noParameters);
+    // Inspection only: account for canonical dot segments without rewriting requests.
+    variants.add(normalizedDots(normalized));variants.add(normalizedDots(noParameters));
     if(i===2) break;
     let decoded;
     try { decoded=decodeURIComponent(current); } catch {
@@ -58,7 +74,7 @@ export function inspectWafRequest(request) {
   const host=url.hostname.toLowerCase();
   const signals=[];
   const push=s=>{if(!signals.some(x=>x.id===s.id))signals.push(s);};
-  if(!PILOT_HOSTS.includes(host)) return {score:0,block:false,signals:[]};
+  if(!CORE_HOSTS.includes(host)) return {score:0,block:false,signals:[]};
   if(["TRACE","TRACK"].includes(request.method.toUpperCase()))
     push(signal("VWAF-001",100,"unsafe_http_method",true));
   // Framing is owned by the trusted HTTP runtime. Ambiguity is an observation,
@@ -86,13 +102,23 @@ export function inspectWafRequest(request) {
   if(url.search.length>QUERY_LIMIT) {
     push(signal("VWAF-206",15,"query_inspection_budget"));
   } else {
-    let count=0;
+    let count=0;const seen=new Set();
     for(const [key,value] of url.searchParams) {
       if(++count>QUERY_PAIRS){push(signal("VWAF-206",15,"query_inspection_budget"));break;}
-      if(!STRUCTURED_PARAMS.has(key.toLowerCase()))continue;
+      const field=key.toLowerCase();
+      if(!STRUCTURED_PARAMS.has(field))continue;
+      if(seen.has(field))push(signal("VWAF-210",20,"duplicate_structured_field"));
+      seen.add(field);
       if(value.length>VALUE_LIMIT){push(signal("VWAF-206",15,"query_inspection_budget"));continue;}
       for(const rule of QUERY_RULES)
         if(rule.re.test(value))push(signal(rule.id,rule.score,rule.category));
+      if(["url","redirect","return","next"].includes(field)){
+        try{
+          const u=new URL(value);
+          if(["file:","ftp:"].includes(u.protocol)||/^(?:localhost|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2}|169\.254(?:\.\d{1,3}){2}|\[::1\])$/i.test(u.hostname))
+            push(signal("VWAF-209",35,"local_destination_signal"));
+        }catch{}
+      }
     }
   }
   // Scores express rule evidence, not probability, attribution, or proof of intrusion.
@@ -105,7 +131,7 @@ export function applyVynalthWaf(request,env,requestId,emit=event=>console.info("
   if(mode!=="observe"&&mode!=="enforce")return null;
   const host=new URL(request.url).hostname.toLowerCase();
   const enabled=String(env?.VYNALTH_WAF_HOSTS||"").split(",").map(x=>x.trim().toLowerCase());
-  if(!PILOT_HOSTS.includes(host)||!enabled.includes(host))return null;
+  if(!CORE_HOSTS.includes(host)||!enabled.includes(host))return null;
   let result;
   try { result=inspectWafRequest(request); } catch {
     // This is a supplemental control; all existing authorization, device risk,

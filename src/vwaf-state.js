@@ -1,5 +1,5 @@
 /** Internal Durable Object: actor counters, bounded evidence ledger and alerts. */
-import {HOSTS,LIMITS,HARD_IDS,IDS,UUID,RETAIN,uniq,actorTransition,sanitizeEvent,freshLedger,reserveChannel,canonicalRestriction,reserveArchive} from "./vwaf-policy.js";
+import {HOSTS,LIMITS,HARD_IDS,IDS,UUID,RETAIN,uniq,actorTransition,sanitizeEvent,freshLedger,reserveChannel,canonicalRestriction,reserveArchive,nextActorWake,reserveRestrictionDelivery} from "./vwaf-policy.js";
 import {configuredChannels,sendDigest} from "./vwaf-alert.js";
 import {archiveRestriction} from "./vwaf-archive.js";
 const enc=new TextEncoder();
@@ -8,6 +8,20 @@ export async function evidenceDigest(value){
  return Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,"0")).join("");
 }
 const json=(value,status=200)=>Response.json(value,{status,headers:{"Cache-Control":"private, no-store"}});
+/** Durable retry to the existing private ledger; same global archive queue and quotas. */
+export async function deliverRestriction(env,evidence){
+ const record=canonicalRestriction(evidence,Date.now());
+ if(!record||!env?.SECURITY_DEVICE_RISK?.idFromName||!env?.VWAF_EVENT_BUDGET?.limit)return false;
+ try{
+  if((await env.VWAF_EVENT_BUDGET.limit({key:"restriction:"+record.host}))?.success!==true)return false;
+  const ns=env.SECURITY_DEVICE_RISK;
+  const event={host:record.host,mode:"enforce",action:"restriction",request_id:record.requestIds.at(-1),
+   rule_ids:["VWAF-402"],score:100,actor_kind:"device",evidence_sha256:evidence.sha256};
+  const r=await ns.get(ns.idFromName("vwaf:v1:ledger-v1")).fetch("https://vwaf.internal/",{
+   method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({op:"event",event,evidence:record}),signal:AbortSignal.timeout(1200)});
+  return r.ok&&(await r.json()).archiveAccepted===true;
+ }catch{return false}
+}
 export class VynalthWafState{
  constructor(state,env){this.storage=state.storage;this.env=env}
  async wake(at){const existing=await this.storage.getAlarm();if(existing===null||existing>at)await this.storage.setAlarm(at)}
@@ -30,9 +44,10 @@ export class VynalthWafState{
     // Persist evidence in the same atomic transaction as restriction state.
     if(r.decision.evidence){
      r.state.evidence={...r.state.evidence,sha256:await evidenceDigest(r.state.evidence)};
+     if(r.decision.newRestriction)r.state.delivery={sha256:r.state.evidence.sha256,state:"pending",attempts:0,nextAt:now+60000};
     }
     await txn.put("actor",r.state);
-    return {...r.decision,evidence:r.decision.evidence?r.state.evidence:null,expiresAt:r.state.expiresAt};
+    return {...r.decision,evidence:r.decision.evidence?r.state.evidence:null,expiresAt:nextActorWake(r.state,now)};
    });
    await this.wake(out.expiresAt);
    return json(out);
@@ -45,24 +60,33 @@ export class VynalthWafState{
     if(record&&record.host===event.host&&record.requestIds.includes(event.request_id)&&await evidenceDigest(record)===event.evidence_sha256)
      archive={record,sha256:event.evidence_sha256,tries:0};
    }
-   const saved=await this.storage.transaction(async txn=>{
+   const outcome=await this.storage.transaction(async txn=>{
     const s=freshLedger(await txn.get("ledger"),now);
-    if(s.entries.some(v=>v.event.request_id===event.request_id&&v.event.action===event.action&&v.event.actor_kind===event.actor_kind&&JSON.stringify(v.event.rule_ids)===JSON.stringify(event.rule_ids)))return false;
-    const record={seq:++s.seq,at:now,event};
-    s.entries.push({...record,sha256:await evidenceDigest(record)});s.entries=s.entries.slice(-128);
-    const day=new Date(now).toISOString().slice(0,10);
-    const counts=s.daily[day]||{total:0,byAction:{},byRule:{}};
-    counts.total++;counts.byAction[event.action]=(counts.byAction[event.action]||0)+1;
-    for(const id of event.rule_ids)counts.byRule[id]=(counts.byRule[id]||0)+1;
-    s.daily[day]=counts;
-    if(archive&&!s.archive.pending.some(a=>a.sha256===archive.sha256)&&!s.archive.completed.some(a=>a.sha256===archive.sha256)){
-     if(s.archive.pending.length<8)s.archive.pending.push(archive);
-     else s.archive.dropped++;
+    const duplicate=s.entries.some(v=>v.event.request_id===event.request_id&&v.event.action===event.action&&v.event.actor_kind===event.actor_kind&&JSON.stringify(v.event.rule_ids)===JSON.stringify(event.rule_ids));
+    if(!duplicate){
+     const record={seq:++s.seq,at:now,event};
+     s.entries.push({...record,sha256:await evidenceDigest(record)});s.entries=s.entries.slice(-128);
+     const day=new Date(now).toISOString().slice(0,10);
+     const counts=s.daily[day]||{total:0,byAction:{},byRule:{}};
+     counts.total++;counts.byAction[event.action]=(counts.byAction[event.action]||0)+1;
+     for(const id of event.rule_ids)counts.byRule[id]=(counts.byRule[id]||0)+1;
+     s.daily[day]=counts;
     }
-    await txn.put("ledger",s);return true;
+    let archiveAccepted=false;
+    if(archive){
+     const pending=s.archive.pending.some(a=>a.sha256===archive.sha256);
+     const completed=s.archive.completed.find(a=>a.sha256===archive.sha256);
+     if(pending||completed?.state==="archived")archiveAccepted=true;
+     // A terminal failure is not retried through a second queue entry.
+     else if(!completed){
+      if(s.archive.pending.length<8){s.archive.pending.push(archive);archiveAccepted=true}
+      else s.archive.dropped++;
+     }
+    }
+    await txn.put("ledger",s);return{saved:!duplicate,archiveAccepted};
    });
-   if(saved)await this.wake(now+(archive?60000:configuredChannels(this.env).length?900000:86400000));
-   return json({saved});
+   if(outcome.saved||outcome.archiveAccepted)await this.wake(now+(archive?60000:configuredChannels(this.env).length?900000:86400000));
+   return json(outcome);
   }
   if(x?.op==="status"){
    const s=freshLedger(await this.storage.get("ledger"),now);
@@ -81,12 +105,26 @@ export class VynalthWafState{
  async alarm(){
   const now=Date.now(),actor=await this.storage.get("actor");
   if(actor){
-   // Read and delete in one transaction; never delete a renewed record.
-   const next=await this.storage.transaction(async txn=>{
-    const s=await txn.get("actor");if(!s)return 0;
-    if(s.expiresAt<=now){await txn.delete("actor");return 0}
-    return s.expiresAt;
+   // Reserve before sending, persist attempts across restarts, never extend the ban.
+   const plan=await this.storage.transaction(async txn=>{
+    const s=await txn.get("actor");if(!s)return {next:0,job:null};
+    if(s.expiresAt<=now){await txn.delete("actor");return {next:0,job:null}}
+    const job=reserveRestrictionDelivery(s,now);
+    if(job)await txn.put("actor",s);
+    return {next:nextActorWake(s,now),job};
    });
+   let next=plan.next;
+   if(plan.job){
+    const delivered=await deliverRestriction(this.env,plan.job);
+    next=await this.storage.transaction(async txn=>{
+     const s=await txn.get("actor");if(!s)return 0;
+     if(s.delivery?.sha256===plan.job.sha256){
+      s.delivery.state=delivered?"accepted":s.delivery.attempts>=3?"exhausted":"pending";
+      await txn.put("actor",s);
+     }
+     return nextActorWake(s,Date.now());
+    });
+   }
    if(next>now)await this.wake(next);
    return;
   }

@@ -11,9 +11,15 @@ export async function archiveRestriction(env,job,now=Date.now()){
  if(bytes.length>16384||await sha(bytes)!==job.sha256)return {state:"invalid"};
  const key="vwaf/v1.2/restrictions/"+new Date(record.at).toISOString().slice(0,10)+"/"+job.sha256+".json";
  try{
-  await bucket.put(key,bytes,{httpMetadata:{contentType:"application/json"},customMetadata:{sha256:job.sha256,source:"vwaf-v1.2"}});
+  const existing=await bucket.get(key);
+  if(existing){
+   if(existing.size!==bytes.length||await sha(await existing.arrayBuffer())!==job.sha256)return {state:"invalid"};
+   return {state:"archived",key};
+  }
+  // Never overwrite an existing evidence object. A racing identical write is harmless.
+  await bucket.put(key,bytes,{onlyIf:new Headers({"If-None-Match":"*"}),httpMetadata:{contentType:"application/json"},customMetadata:{sha256:job.sha256,source:"vwaf-v1.2"}});
   const result=await bucket.get(key);
-  if(!result||result.size>16384||await sha(await result.arrayBuffer())!==job.sha256)return {state:"unconfirmed"};
+  if(!result||result.size!==bytes.length||await sha(await result.arrayBuffer())!==job.sha256)return {state:"unconfirmed"};
   return {state:"archived",key};
  }catch{return {state:"failed"}}
 }

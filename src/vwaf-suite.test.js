@@ -171,7 +171,7 @@ test("new device restrictions retain canonical per-request evidence; R2 only acc
  let s,r;for(let i=1;i<=5;i++){r=actorTransition(s,input(i),now+i);s=r.state}
  const record=canonicalRestriction(s.evidence,now+10);assert.ok(record);assert.equal(record.observations.length,5);
  const sha256=await evidenceDigest(record);let key,bytes,puts=0;
- const env={VYNALTH_WAF_ARCHIVE_ENABLED:"true",VWAF_EVIDENCE:{put:async(k,b)=>{key=k;bytes=b.slice();puts++},get:async()=>({size:bytes.length,arrayBuffer:async()=>bytes.buffer})}};
+ const env={VYNALTH_WAF_ARCHIVE_ENABLED:"true",VWAF_EVIDENCE:{put:async(k,b)=>{key=k;bytes=b.slice();puts++},get:async()=>bytes?({size:bytes.length,arrayBuffer:async()=>bytes.buffer}):null}};
  const result=await archiveRestriction(env,{record,sha256},now+10);
  assert.equal(result.state,"archived");assert.ok(key.endsWith(sha256+".json"));assert.equal(puts,1);
  assert.equal((await archiveRestriction(env,{record,sha256:"0".repeat(64)},now+10)).state,"invalid");assert.equal(puts,1);
@@ -205,4 +205,44 @@ test("ledger keeps core and content events with same correlation ID and queues o
  const restriction={host:"vynalthai.com",request_id:id(5),mode:"enforce",action:"restriction",rule_ids:["VWAF-402"],score:100,actor_kind:"device",evidence_sha256:sha256};
  assert.equal((await(await call(d,{op:"event",event:restriction,evidence:record})).json()).saved,true);
  const out=await(await call(d,{op:"status"})).json();assert.equal(out.sequence,3);assert.equal(out.archive.pending,1);
+});
+
+test("R2 verified archive is idempotent and refuses to overwrite a conflicting object",async()=>{
+ let s;for(let i=1;i<=5;i++)s=actorTransition(s,input(i),now+i).state;
+ const record=canonicalRestriction(s.evidence,now+10),sha256=await evidenceDigest(record);
+ let bytes=null,writes=0;
+ const env={VYNALTH_WAF_ARCHIVE_ENABLED:"true",VWAF_EVIDENCE:{get:async()=>bytes?{size:bytes.length,arrayBuffer:async()=>bytes.buffer}:null,
+ put:async(k,v,o)=>{assert.equal(o.onlyIf.get("If-None-Match"),"*");bytes=v.slice();writes++}}};
+ assert.equal((await archiveRestriction(env,{record,sha256},now+10)).state,"archived");
+ assert.equal((await archiveRestriction(env,{record,sha256},now+10)).state,"archived");assert.equal(writes,1);
+ bytes=new Uint8Array([1,2,3]);
+ assert.equal((await archiveRestriction(env,{record,sha256},now+10)).state,"invalid");assert.equal(writes,1);
+});
+test("restriction outbox survives dropped initial event and retries with bounded attempts",async()=>{
+ const store=fakeStorage(),ledgerStore=fakeStorage();
+ const ledger=new VynalthWafState({storage:ledgerStore},{});let calls=0;
+ const env={VWAF_EVENT_BUDGET:{limit:async()=>({success:true})},SECURITY_DEVICE_RISK:{idFromName:n=>n,get:()=>({fetch:async(url,init)=>{
+   calls++;if(calls===1)throw Error("temporary outage");return ledger.fetch(new Request(url,init))
+ }})}};
+ const actor=new VynalthWafState({storage:store},env);
+ for(let i=1;i<=5;i++)await call(actor,{op:"actor",...input(i)});
+ let s=await store.get("actor");assert.equal(s.delivery.state,"pending");assert.equal(s.delivery.attempts,0);
+ const deadline=s.blockedUntil;
+ s.delivery.nextAt=Date.now()-1;await store.put("actor",s);await actor.alarm();
+ s=await store.get("actor");assert.equal(s.delivery.attempts,1);assert.equal(s.delivery.state,"pending");
+ s.delivery.nextAt=Date.now()-1;await store.put("actor",s);await actor.alarm();
+ s=await store.get("actor");assert.equal(s.delivery.attempts,2);assert.equal(s.delivery.state,"accepted");assert.equal(s.blockedUntil,deadline);
+ const status=await(await call(ledger,{op:"status"})).json();assert.equal(status.archive.pending,1);
+});
+test("duplicate restriction delivery can enqueue after archive backpressure without double counting",async()=>{
+ const store=fakeStorage(),d=new VynalthWafState({storage:store},{});
+ let s;const t=Date.now();for(let i=1;i<=5;i++)s=actorTransition(s,input(i),t+i-10).state;
+ const record=s.evidence,sha256=await evidenceDigest(record);
+ const e={host:"vynalthai.com",request_id:id(5),mode:"enforce",action:"restriction",rule_ids:["VWAF-402"],score:100,actor_kind:"device",evidence_sha256:sha256};
+ const q=freshLedger(null,t);q.archive.pending=Array.from({length:8},(_,i)=>({record:{expiresAt:t+RETAIN},sha256:String(i).repeat(64),tries:0}));
+ await store.put("ledger",q);
+ const first=await(await call(d,{op:"event",event:e,evidence:record})).json();assert.equal(first.saved,true);assert.equal(first.archiveAccepted,false);
+ const old=await store.get("ledger");old.archive.pending=[];await store.put("ledger",old);
+ const second=await(await call(d,{op:"event",event:e,evidence:record})).json();assert.equal(second.saved,false);assert.equal(second.archiveAccepted,true);
+ const status=await(await call(d,{op:"status"})).json();assert.equal(status.sequence,1);assert.equal(status.archive.pending,1);
 });
