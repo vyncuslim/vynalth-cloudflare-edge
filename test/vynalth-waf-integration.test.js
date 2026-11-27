@@ -30,3 +30,17 @@ test("retired VWAF namespace never reaches origin even with old console credenti
   assert.equal(r.status,404);assert.equal(calls,0);assert.equal(await r.text(),"Resource unavailable.");
  }finally{globalThis.fetch=original}
 });
+
+test("real edge schema denial precedes origin; valid free text and observe mode flow onward",async()=>{
+ const original=globalThis.fetch;let calls=0;
+ globalThis.fetch=async request=>{calls++;return new Response("origin",{status:200})};
+ const make=(aspectRatio)=>{const body=JSON.stringify({prompt:"<script> example SQL tutorial",aspectRatio});return new Request("https://vynalthai.com/api/ai/image",{method:"POST",headers:{"Content-Type":"application/json","Content-Length":String(new TextEncoder().encode(body).byteLength)},body})};
+ const e={...env("enforce"),VYNALTH_WAF_CONTENT_ENABLED:"true",VYNALTH_WAF_SCHEMA_MODE:"enforce",VWAF_EVENT_BUDGET:{limit:async()=>({success:true})}};
+ try{
+  const denied=await edge.fetch(make("invalid"),e,{});
+  assert.equal(denied.status,400);assert.equal(denied.headers.get("x-vynalth-security-action"),"vwaf-schema-rejected");assert.equal(calls,0);
+  assert.equal((await denied.json()).error,"INVALID_ASPECT_RATIO");
+  assert.equal((await edge.fetch(make("16:9"),e,{})).status,200);assert.equal(calls,1);
+  assert.equal((await edge.fetch(make("invalid"),{...e,VYNALTH_WAF_SCHEMA_MODE:"observe"},{})).status,200);assert.equal(calls,2);
+ }finally{globalThis.fetch=original}
+});

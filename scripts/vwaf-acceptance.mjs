@@ -17,16 +17,17 @@ for(const host of CORE_HOSTS){
   add("benign",host,paths[n%paths.length],false,false);
  }
 }
-for(const aspectRatio of ["bad","<script>fixture</script>","1 union select fixture"])add("invalid-enum","vynalthai.com","/api/ai/image",true,true,{prompt:"example",aspectRatio});
+for(const aspectRatio of ["<script>fixture</script>","1 union select fixture"])add("invalid-enum-injection","vynalthai.com","/api/ai/image",true,true,{prompt:"example",aspectRatio});
+add("invalid-enum-control","vynalthai.com","/api/ai/image",null,true,{prompt:"example",aspectRatio:"bad"});
 for(const text of ["<script> tutorial","SQL union select example","中文搜索","Hello 🌎"]){
  add("benign-free-text","vynalthai.com","/api/web-search",false,false,{query:text});
  add("benign-prompt","vynalthai.com","/api/ai/image",false,false,{prompt:text,aspectRatio:"1:1"});
 }
-let attack=0,blocked=0,benign=0,falsePositive=0,regression=0;const reqs=cases.map(c=>new Request("https://"+c.host+c.path,{method:c.body?"POST":"GET"}));
+let attack=0,blocked=0,benign=0,falsePositive=0,contract=0,contractRejected=0,regression=0;const reqs=cases.map(c=>new Request("https://"+c.host+c.path,{method:c.body?"POST":"GET"}));
 const evaluate=(c,r)=>inspectWafRequest(r).block||(c.body&&inspectApiSchema(c.path,c.body).some(s=>s.blocking))===true;
 for(let i=0;i<cases.length;i++){
  const c=cases[i],decision=evaluate(c,reqs[i]);
- if(c.malicious){attack++;if(decision)blocked++}else{benign++;if(decision)falsePositive++}
+ if(c.malicious===true){attack++;if(decision)blocked++}else if(c.malicious===false){benign++;if(decision)falsePositive++}else{contract++;if(decision)contractRejected++}
  if(decision!==c.expect)regression++;
 }
 // Warmup then per-call synchronous CPU-ish wall time, excluding Request creation,
@@ -34,7 +35,7 @@ for(let i=0;i<cases.length;i++){
 for(let i=0;i<5000;i++)evaluate(cases[i%cases.length],reqs[i%reqs.length]);
 const samples=[];for(let i=0;i<20000;i++){const n=i%cases.length,t=performance.now();evaluate(cases[n],reqs[n]);samples.push(performance.now()-t)}
 samples.sort((a,b)=>a-b);const p95=samples[Math.ceil(samples.length*.95)-1];
-const report={suite:"vwaf-v2-rc1-synthetic",runtime:process.version,attack:{tested:attack,blocked,rate:blocked/attack},benign:{tested:benign,falsePositive,rate:falsePositive/benign},performance:{samples:samples.length,p95Ms:p95},regressions:regression,
+const report={suite:"vwaf-v2-rc1-synthetic",runtime:process.version,attack:{tested:attack,blocked,rate:blocked/attack},benign:{tested:benign,falsePositive,rate:falsePositive/benign},contract:{tested:contract,rejected:contractRejected},performance:{samples:samples.length,p95Ms:p95},regressions:regression,
  goals:{knownAttackBlock:blocked/attack>=.99,benignFalsePositive:falsePositive/benign<.001,localP95:p95<5,productionAvailability:null,independentSecurityAudit:null},
  limitations:"Synthetic selected scenarios, not real traffic, not independent corpus, no distributed load or production SLA evidence."};
 console.log("VWAF_ACCEPTANCE "+JSON.stringify(report));

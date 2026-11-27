@@ -32,7 +32,10 @@ export function inspectApiSchema(path,value){
 }
 export function schemaResponse(request,signals,mode){
  if(mode!=="enforce"||!signals.some(s=>s.blocking))return null;
- return new Response(request.method==="HEAD"?null:JSON.stringify({success:false,error:"INVALID_REQUEST_SCHEMA"}),{
+ const prompt=signals.some(s=>s.id==="VWAF-604");
+ const error=prompt?"INVALID_IMAGE_PROMPT":"INVALID_ASPECT_RATIO";
+ const message=prompt?"Describe the image in 1 to 2000 characters.":"Choose 1:1, 16:9, or 9:16.";
+ return new Response(request.method==="HEAD"?null:JSON.stringify({success:false,error,message}),{
   status:400,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"private, no-store",
    "X-Content-Type-Options":"nosniff","X-Vynalth-Security-Action":"vwaf-schema-rejected"}
  });
