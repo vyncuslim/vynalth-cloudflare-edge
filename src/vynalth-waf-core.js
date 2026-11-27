@@ -5,7 +5,7 @@
  */
 import {CORE_HOSTS,STATE_HOSTS} from "./vwaf-scope.js";
 import {isLocalDestination} from "./vwaf-network.js";
-export const WAF_VERSION = "1.4.0";
+export const WAF_VERSION = "2.0.0-rc.1";
 export const PILOT_HOSTS = STATE_HOSTS;
 export {CORE_HOSTS};
 const PATH_LIMIT = 8192;

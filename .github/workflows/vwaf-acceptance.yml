@@ -1,0 +1,30 @@
+name: VWAF acceptance
+on:
+  pull_request:
+    paths:
+      - 'src/vwaf-**'
+      - 'src/vynalth-waf-**'
+      - 'scripts/vwaf-**'
+      - '.github/workflows/vwaf-acceptance.yml'
+      - 'package.json'
+  push:
+    branches: [main]
+    paths:
+      - 'src/vwaf-**'
+      - 'src/vynalth-waf-**'
+      - 'scripts/vwaf-**'
+      - '.github/workflows/vwaf-acceptance.yml'
+      - 'package.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run vwaf:acceptance

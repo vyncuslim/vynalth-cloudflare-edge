@@ -4,7 +4,7 @@ export const HOSTS=STATE_HOSTS;
 export const LIMITS=Object.freeze({DOC:120,IMAGE:3,SEARCH:15,SIGNUP:3,CHAT:10,LOGIN:5});
 export const WINDOW=600000, BAN=259200000, RETAIN=604800000;
 export const HARD_IDS=Object.freeze(["VWAF-101","VWAF-102","VWAF-103","VWAF-104","VWAF-105","VWAF-106","VWAF-107","VWAF-108","VWAF-109","VWAF-110","VWAF-111"]);
-export const IDS=Object.freeze(["VWAF-001","VWAF-002",...HARD_IDS,"VWAF-201","VWAF-202","VWAF-203","VWAF-204","VWAF-205","VWAF-206","VWAF-207","VWAF-208","VWAF-209","VWAF-210","VWAF-211","VWAF-301","VWAF-302","VWAF-303","VWAF-304","VWAF-305","VWAF-306","VWAF-401","VWAF-402","VWAF-403","VWAF-404","VWAF-501"]);
+export const IDS=Object.freeze(["VWAF-001","VWAF-002",...HARD_IDS,"VWAF-201","VWAF-202","VWAF-203","VWAF-204","VWAF-205","VWAF-206","VWAF-207","VWAF-208","VWAF-209","VWAF-210","VWAF-211","VWAF-301","VWAF-302","VWAF-303","VWAF-304","VWAF-305","VWAF-306","VWAF-401","VWAF-402","VWAF-403","VWAF-404","VWAF-501","VWAF-601","VWAF-602","VWAF-603","VWAF-604","VWAF-605","VWAF-701"]);
 export const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const uniq=a=>[...new Set(a)];
 export function actorTransition(prior,input,now){
@@ -78,7 +78,7 @@ export function sanitizeEvent(e){
   !["observe","block","rate_limit","restriction","candidate","honeypot"].includes(e.action))return null;
  const rule_ids=uniq(Array.isArray(e.rule_ids)?e.rule_ids.filter(x=>IDS.includes(x)):[]).slice(0,24);
  if(!rule_ids.length)return null;
- return {event:"VYNALTH_WAF_DECISION",version:"1.4.0",host:e.host,mode:e.mode,action:e.action,
+ return {event:"VYNALTH_WAF_DECISION",version:"2.0.0-rc.1",host:e.host,mode:e.mode,action:e.action,
   request_id:e.request_id,rule_ids,score:Math.max(0,Math.min(100,Number.isFinite(e.score)?Math.round(e.score):0)),
   actor_kind:["device","network"].includes(e.actor_kind)?e.actor_kind:"unknown",
   ...(e.action==="restriction"&&/^[a-f0-9]{64}$/.test(e.evidence_sha256||"")?{evidence_sha256:e.evidence_sha256}:{})};
