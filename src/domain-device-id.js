@@ -101,7 +101,7 @@ async function mac(material, host, payload) {
   const key = await signingKey(material, host);
   return encodeBytes(new Uint8Array(await crypto.subtle.sign('HMAC', key, textEncoder.encode(payload))));
 }
-export async function verifyEdgeDevice(request, env, nowMs = Date.now()) {
+export async function verifyEdgeDevice(request, env, nowMs = Date.now(), { existingOnly = false } = {}) {
   const scope = edgeDeviceScope(new URL(request.url).hostname);
   const material = signingMaterial(env);
   if (!scope || !material) return { state:'disabled', deviceId:null, token:null, shouldSetCookie:false };
@@ -121,15 +121,20 @@ export async function verifyEdgeDevice(request, env, nowMs = Date.now()) {
         'HMAC', key, actual, textEncoder.encode(signed),
       )) {
         const refresh = now - issued >= REFRESH_SECONDS;
-        const token = refresh ? await signEdgeDevice(parts[1].toLowerCase(), scope.host, material, now) : raw;
+        const token = refresh && !existingOnly ? await signEdgeDevice(parts[1].toLowerCase(), scope.host, material, now) : raw;
         return { state:refresh?'rotated':'valid',deviceId:parts[1].toLowerCase(),
           token,shouldSetCookie:refresh };
       }
     }
   }
+  if(existingOnly)return {state:'invalid',deviceId:null,token:null,shouldSetCookie:false};
   const id = crypto.randomUUID().toLowerCase();
   const token = await signEdgeDevice(id, scope.host, material, Math.floor(nowMs / 1000));
   return { state:'issued',deviceId:id,token,shouldSetCookie:true };
+}
+// Inspection never creates or refreshes an identity on a probe.
+export function verifyExistingEdgeDevice(request,env,nowMs=Date.now()) {
+  return verifyEdgeDevice(request,env,nowMs,{existingOnly:true});
 }
 async function signEdgeDevice(id, host, material, nowSeconds) {
   const payload = [VERSION,id,nowSeconds].join('.');

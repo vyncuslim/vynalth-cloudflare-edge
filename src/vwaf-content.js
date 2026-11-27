@@ -38,13 +38,17 @@ export function inspectStructuredContent(value){
  }
  scan(value,0);return [...signals.values()];
 }
-export async function inspectWafContent(request){
+export function isWafContentCandidate(request){
  const u=new URL(request.url);
- if(u.hostname!=="vynalthai.com"||request.method!=="POST"||!ROUTES.has(u.pathname.replace(/\/+$/,"")))return [];
- if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type")||""))return [];
- const coding=request.headers.get("content-encoding");if(coding&&coding.toLowerCase()!=="identity")return [];
+ if(u.hostname!=="vynalthai.com"||request.method!=="POST"||!ROUTES.has(u.pathname.replace(/\/+$/,"")))return false;
+ if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type")||""))return false;
+ const coding=request.headers.get("content-encoding");if(coding&&coding.toLowerCase()!=="identity")return false;
  const raw=request.headers.get("content-length");
- if(!raw||!/^\d{1,5}$/.test(raw)||Number(raw)<1||Number(raw)>MAX_BYTES)return [];
+ return !!raw&&/^\d{1,5}$/.test(raw)&&Number(raw)>=1&&Number(raw)<=MAX_BYTES;
+}
+export async function inspectWafContent(request){
+ if(!isWafContentCandidate(request))return [];
+ const raw=request.headers.get("content-length");
  let reader,timer;
  try{
   reader=request.clone().body?.getReader();if(!reader)return [];
