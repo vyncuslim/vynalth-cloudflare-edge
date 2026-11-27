@@ -1,5 +1,5 @@
 /** Internal Durable Object: actor counters, bounded evidence ledger and alerts. */
-import {HOSTS,LIMITS,HARD_IDS,IDS,UUID,RETAIN,uniq,actorTransition,sanitizeEvent,freshLedger,reserveChannel,canonicalRestriction,reserveArchive,nextActorWake,reserveRestrictionDelivery} from "./vwaf-policy.js";
+import {HOSTS,LIMITS,HARD_IDS,IDS,UUID,RETAIN,uniq,actorTransition,sanitizeEvent,freshLedger,reserveChannel,canonicalRestriction,reserveArchive,nextActorWake,reserveRestrictionDelivery,actorReceipts} from "./vwaf-policy.js";
 import {configuredChannels,sendDigest} from "./vwaf-alert.js";
 import {archiveRestriction} from "./vwaf-archive.js";
 const enc=new TextEncoder();
@@ -8,6 +8,28 @@ export async function evidenceDigest(value){
  return Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,"0")).join("");
 }
 const json=(value,status=200)=>Response.json(value,{status,headers:{"Cache-Control":"private, no-store"}});
+async function wakeEarlier(txn,at){
+ if(!Number.isFinite(at)||at<=0)return;
+ const deadline=Math.max(Date.now()+1000,at),existing=await txn.getAlarm();
+ if(existing===null||existing>deadline)await txn.setAlarm(deadline);
+}
+function ledgerWake(s,env,now){
+ if(!s.entries.length&&!Object.keys(s.daily).length&&!s.archive.pending.length&&!s.archive.completed.length&&
+  !s.archive.attempts.length&&!s.restrictionSeen.length)return 0;
+ let at=now+86400000;
+ for(const name of configuredChannels(env)){
+  const c=s.channels[name];
+  if(c.cursor<s.seq&&s.entries.some(x=>x.seq>c.cursor)){
+   const quota=c.attempts.length>=8?c.attempts[0]+86400000:0;
+   at=Math.min(at,Math.max(now+900000,c.nextAt,quota));
+  }
+ }
+ if(s.archive.pending.length&&env?.VYNALTH_WAF_ARCHIVE_ENABLED==="true"&&env?.VWAF_EVIDENCE){
+  const a=s.archive,quota=a.attempts.length>=12?a.attempts[0]+86400000:0;
+  at=Math.min(at,Math.max(now+60000,a.nextAt,quota));
+ }
+ return at;
+}
 /** Durable retry to the existing private ledger; same global archive queue and quotas. */
 export async function deliverRestriction(env,evidence){
  const record=canonicalRestriction(evidence,Date.now());
@@ -24,7 +46,6 @@ export async function deliverRestriction(env,evidence){
 }
 export class VynalthWafState{
  constructor(state,env){this.storage=state.storage;this.env=env}
- async wake(at){const existing=await this.storage.getAlarm();if(existing===null||existing>at)await this.storage.setAlarm(at)}
  async fetch(request){
   if(request.method!=="POST")return json({error:"method"},405);
   // Only Worker binding calls reach this object, never a public route.
@@ -40,17 +61,30 @@ export class VynalthWafState{
      !["observe","enforce"].includes(x.mode)||!(x.category===null||Object.hasOwn(LIMITS,x.category))||
      !Array.isArray(x.rules)||x.rules.length>HARD_IDS.length||x.rules.some(r=>!HARD_IDS.includes(r)))return json({error:"input"},400);
    const out=await this.storage.transaction(async txn=>{
-    const old=await txn.get("actor"),r=actorTransition(old,x,now);
+    const old=await txn.get("actor"),at=Math.max(Date.now(),Number.isFinite(old?.lastSeen)?old.lastSeen:0);
+    const receipts=actorReceipts(old,x,at),receipt=receipts.find(v=>v.id===x.id);
+    if(receipt){
+     if(receipt.category!==x.category||JSON.stringify(receipt.rules)!==JSON.stringify(x.rules))return {conflict:true};
+     // Replay of the same internal operation returns its existing decision,
+     // without extending a rate window, ban or evidence.
+     await wakeEarlier(txn,nextActorWake(old,at));
+     return {...receipt.decision,evidence:receipt.evidenceHash&&old.evidence?.sha256===receipt.evidenceHash?old.evidence:null,replayed:true};
+    }
+    const r=actorTransition(old,x,at);
+    r.state.lastSeen=at;
     // Persist evidence in the same atomic transaction as restriction state.
     if(r.decision.evidence){
      r.state.evidence={...r.state.evidence,sha256:await evidenceDigest(r.state.evidence)};
-     if(r.decision.newRestriction)r.state.delivery={sha256:r.state.evidence.sha256,state:"pending",attempts:0,nextAt:now+60000};
+     if(r.decision.newRestriction)r.state.delivery={sha256:r.state.evidence.sha256,state:"pending",attempts:0,nextAt:at+60000};
     }
+    const {evidence,...decision}=r.decision;
+    r.state.receipts=[...receipts,{id:x.id,at,category:x.category,rules:x.rules,decision,
+     evidenceHash:evidence?r.state.evidence.sha256:null}].slice(-128);
     await txn.put("actor",r.state);
-    return {...r.decision,evidence:r.decision.evidence?r.state.evidence:null,expiresAt:nextActorWake(r.state,now)};
+    await wakeEarlier(txn,nextActorWake(r.state,at));
+    return {...decision,evidence:evidence?r.state.evidence:null};
    });
-   await this.wake(out.expiresAt);
-   return json(out);
+   return out.conflict?json({error:"operation_conflict"},409):json(out);
   }
   if(x?.op==="event"){
    const event=sanitizeEvent(x.event);if(!event)return json({error:"event"},400);
@@ -60,9 +94,15 @@ export class VynalthWafState{
     if(record&&record.host===event.host&&record.requestIds.includes(event.request_id)&&await evidenceDigest(record)===event.evidence_sha256)
      archive={record,sha256:event.evidence_sha256,tries:0};
    }
+   if(event.action==="restriction"&&!archive)return json({error:"evidence"},400);
    const outcome=await this.storage.transaction(async txn=>{
     const s=freshLedger(await txn.get("ledger"),now);
-    const duplicate=s.entries.some(v=>v.event.request_id===event.request_id&&v.event.action===event.action&&v.event.actor_kind===event.actor_kind&&JSON.stringify(v.event.rule_ids)===JSON.stringify(event.rule_ids));
+    const alreadyRecorded=archive&&(s.restrictionSeen.some(v=>v.sha256===archive.sha256)||
+      s.archive.pending.some(v=>v.sha256===archive.sha256)||s.archive.completed.some(v=>v.sha256===archive.sha256));
+    const duplicate=!!alreadyRecorded||s.entries.some(v=>v.event.request_id===event.request_id&&v.event.action===event.action&&v.event.actor_kind===event.actor_kind&&JSON.stringify(v.event.rule_ids)===JSON.stringify(event.rule_ids));
+    if(archive&&!s.restrictionSeen.some(v=>v.sha256===archive.sha256)){
+     s.restrictionSeen.push({sha256:archive.sha256,at:now});s.restrictionSeen=s.restrictionSeen.slice(-64);
+    }
     if(!duplicate){
      const record={seq:++s.seq,at:now,event};
      s.entries.push({...record,sha256:await evidenceDigest(record)});s.entries=s.entries.slice(-128);
@@ -83,9 +123,11 @@ export class VynalthWafState{
       else s.archive.dropped++;
      }
     }
-    await txn.put("ledger",s);return{saved:!duplicate,archiveAccepted};
+    await txn.put("ledger",s);
+    // Commit the pending work and its wake-up together.
+    await wakeEarlier(txn,ledgerWake(s,this.env,now));
+    return{saved:!duplicate,archiveAccepted};
    });
-   if(outcome.saved||outcome.archiveAccepted)await this.wake(now+(archive?60000:configuredChannels(this.env).length?900000:86400000));
    return json(outcome);
   }
   if(x?.op==="status"){
@@ -111,21 +153,20 @@ export class VynalthWafState{
     if(s.expiresAt<=now){await txn.delete("actor");return {next:0,job:null}}
     const job=reserveRestrictionDelivery(s,now);
     if(job)await txn.put("actor",s);
-    return {next:nextActorWake(s,now),job};
+    const next=nextActorWake(s,now);await wakeEarlier(txn,next);
+    return {next,job};
    });
-   let next=plan.next;
    if(plan.job){
     const delivered=await deliverRestriction(this.env,plan.job);
-    next=await this.storage.transaction(async txn=>{
+    await this.storage.transaction(async txn=>{
      const s=await txn.get("actor");if(!s)return 0;
      if(s.delivery?.sha256===plan.job.sha256){
       s.delivery.state=delivered?"accepted":s.delivery.attempts>=3?"exhausted":"pending";
       await txn.put("actor",s);
      }
-     return nextActorWake(s,Date.now());
+     await wakeEarlier(txn,nextActorWake(s,Date.now()));
     });
    }
-   if(next>now)await this.wake(next);
    return;
   }
   const channels=configuredChannels(this.env);
@@ -140,7 +181,7 @@ export class VynalthWafState{
      rules:uniq(recent.flatMap(x=>x.event.rule_ids)).slice(0,24)});
    }
    const archive=this.env?.VYNALTH_WAF_ARCHIVE_ENABLED==="true"&&this.env?.VWAF_EVIDENCE?reserveArchive(s,now):null;
-   await txn.put("ledger",s);return {jobs,archive};
+   await txn.put("ledger",s);await wakeEarlier(txn,ledgerWake(s,this.env,now));return {jobs,archive};
   });
   if(plan.archive){
    const result=await archiveRestriction(this.env,plan.archive,Date.now());
@@ -150,7 +191,7 @@ export class VynalthWafState{
      a.pending=a.pending.filter(v=>v.sha256!==j.sha256);
      a.completed.push({sha256:j.sha256,at:Date.now(),state:result.state,key:result.key||null});a.completed=a.completed.slice(-24);
     }
-    await txn.put("ledger",s);
+    await txn.put("ledger",s);await wakeEarlier(txn,ledgerWake(s,this.env,Date.now()));
    });
   }
   for(const job of plan.jobs){
@@ -159,21 +200,13 @@ export class VynalthWafState{
     const s=freshLedger(await txn.get("ledger"),Date.now()),c=s.channels[job.name];
     c.last=result.state;if(result.state==="sent")c.cursor=Math.max(c.cursor,job.sequence);
     if(Number.isFinite(result.nextAt))c.nextAt=Math.max(c.nextAt,result.nextAt);
-    await txn.put("ledger",s);
+    await txn.put("ledger",s);await wakeEarlier(txn,ledgerWake(s,this.env,Date.now()));
    });
   }
-  const s=freshLedger(await this.storage.get("ledger"),Date.now());
-  if(s.entries.length||Object.keys(s.daily).length||s.archive.pending.length||s.archive.completed.length||s.archive.attempts.length){
-   let at=Date.now()+86400000;
-   for(const name of channels){const c=s.channels[name];if(c.cursor<s.seq&&s.entries.some(x=>x.seq>c.cursor)){
-     const quota=c.attempts.length>=8?c.attempts[0]+86400000:0;
-     at=Math.min(at,Math.max(Date.now()+900000,c.nextAt,quota));
-   }}
-   if(s.archive.pending.length&&this.env?.VYNALTH_WAF_ARCHIVE_ENABLED==="true"&&this.env?.VWAF_EVIDENCE){
-    const a=s.archive,quota=a.attempts.length>=12?a.attempts[0]+86400000:0;
-    at=Math.min(at,Math.max(Date.now()+60000,a.nextAt,quota));
-   }
-   await this.wake(at);
-  }
+  // Re-evaluate durable work after external I/O, without replacing an earlier alarm.
+  await this.storage.transaction(async txn=>{
+   const now=Date.now(),s=freshLedger(await txn.get("ledger"),now);
+   await txn.put("ledger",s);await wakeEarlier(txn,ledgerWake(s,this.env,now));
+  });
  }
 }

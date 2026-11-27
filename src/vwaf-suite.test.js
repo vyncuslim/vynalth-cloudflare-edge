@@ -180,7 +180,7 @@ test("new device restrictions retain canonical per-request evidence; R2 only acc
  assert.equal((await archiveRestriction({}, {record,sha256},now+10)).state,"not_configured");
 });
 test("archive attempts are reserved before writing, capped globally",()=>{
- const s=freshLedger(null,now);s.archive.pending=[{record:{expiresAt:now+RETAIN},sha256:"0".repeat(64),tries:0}];
+ const s=freshLedger(null,now);s.archive.pending=Array.from({length:5},(_,i)=>({record:{expiresAt:now+RETAIN},sha256:String(i).repeat(64),tries:0}));
  for(let i=0;i<12;i++)assert.ok(reserveArchive(s,now+i*900000));
  assert.equal(reserveArchive(s,now+12*900000),null);
 });
@@ -245,4 +245,47 @@ test("duplicate restriction delivery can enqueue after archive backpressure with
  const old=await store.get("ledger");old.archive.pending=[];await store.put("ledger",old);
  const second=await(await call(d,{op:"event",event:e,evidence:record})).json();assert.equal(second.saved,false);assert.equal(second.archiveAccepted,true);
  const status=await(await call(d,{op:"status"})).json();assert.equal(status.sequence,1);assert.equal(status.archive.pending,1);
+});
+
+test("internal retries do not consume extra rate slots or extend bans",async()=>{
+ const store=fakeStorage(),d=new VynalthWafState({storage:store},{});
+ for(let i=0;i<5;i++){
+  const r=await(await call(d,{op:"actor",...input(1,{category:"IMAGE",rules:[]})})).json();
+  assert.equal(r.rateExceeded,false);if(i>0)assert.equal(r.replayed,true);
+ }
+ const s=await store.get("actor");assert.equal(s.buckets.IMAGE.hits.length,1);
+ assert.equal((await call(d,{op:"actor",...input(1,{category:"SEARCH",rules:[]})})).status,409);
+ for(let i=2;i<=3;i++)await call(d,{op:"actor",...input(i,{category:"IMAGE",rules:[]})});
+ const r=await(await call(d,{op:"actor",...input(4,{category:"IMAGE",rules:[]})})).json();assert.equal(r.rateExceeded,true);
+ assert.equal((await(await call(d,{op:"actor",...input(4,{category:"IMAGE",rules:[]})})).json()).replayed,true);
+});
+test("restriction evidence and scheduled work commit in the same storage transaction",async()=>{
+ const store=fakeStorage();let inTransaction=false;const original=store.transaction,alarm=store.setAlarm;
+ store.transaction=async fn=>original(async txn=>{inTransaction=true;try{return await fn(txn)}finally{inTransaction=false}});
+ store.setAlarm=async at=>{assert.equal(inTransaction,true);return alarm(at)};
+ const d=new VynalthWafState({storage:store},{});
+ for(let i=1;i<=5;i++)await call(d,{op:"actor",...input(i)});
+ const s=await store.get("actor");assert.ok(s.evidence.sha256);assert.ok((await store.getAlarm())<=s.delivery.nextAt+1000);
+});
+test("single-category bursts are observed once and never become automatic bans",()=>{
+ let s,r,bursts=0;
+ for(let i=1;i<=20;i++){r=actorTransition(s,input(i,{rules:["VWAF-101"]}),now+i);s=r.state;if(r.decision.burst)bursts++}
+ assert.equal(bursts,1);assert.equal(s.blockedUntil,0);
+});
+test("exhausted R2 attempt is never restarted after interrupted final write",()=>{
+ const s=freshLedger(null,now);
+ s.archive.pending=[{record:{expiresAt:now+RETAIN},sha256:"a".repeat(64),tries:3}];
+ assert.equal(reserveArchive(s,now),null);assert.equal(s.archive.pending.length,0);
+ assert.equal(s.archive.completed[0].state,"unconfirmed");
+});
+test("critical evidence dedup survives eviction from recent events",async()=>{
+ const store=fakeStorage(),d=new VynalthWafState({storage:store},{});
+ let s;const t=Date.now();for(let i=1;i<=5;i++)s=actorTransition(s,input(i),t+i-10).state;
+ const record=s.evidence,sha256=await evidenceDigest(record);
+ const event={host:"vynalthai.com",request_id:id(5),mode:"enforce",action:"restriction",rule_ids:["VWAF-402"],score:100,actor_kind:"device",evidence_sha256:sha256};
+ assert.equal((await(await call(d,{op:"event",event,evidence:record})).json()).saved,true);
+ const ledger=await store.get("ledger");ledger.entries=[];await store.put("ledger",ledger);
+ const r=await(await call(d,{op:"event",event,evidence:record})).json();assert.equal(r.saved,false);assert.equal(r.archiveAccepted,true);
+ assert.equal((await store.get("ledger")).seq,1);
+ assert.equal((await call(d,{op:"event",event,evidence:{...record,at:0}})).status,400);
 });

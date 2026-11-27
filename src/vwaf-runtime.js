@@ -5,6 +5,7 @@ import {classifySiteRequest} from "./site-abuse-policy.js";
 import {verifyExistingEdgeDevice} from "./domain-device-id.js";
 import {classifyNetworkAttribution} from "./axiom-honeypot.js";
 import {HARD_IDS,UUID,sanitizeEvent} from "./vwaf-policy.js";
+import {canonicalNetworkAddress} from "./vwaf-network.js";
 const enc=new TextEncoder();
 export function rollout(request,env){
  const mode=env?.VYNALTH_WAF_MODE,host=new URL(request.url).hostname;
@@ -17,7 +18,7 @@ async function digestActor(env,host,kind,value){
  const sig=await crypto.subtle.sign("HMAC",key,enc.encode("vwaf-actor-v1|"+host+"|"+kind+"|"+value));
  return Array.from(new Uint8Array(sig),x=>x.toString(16).padStart(2,"0")).join("");
 }
-export async function verifiedActors(request,env,verify=verifyExistingEdgeDevice){
+export async function verifiedActors(request,env,verify=verifyExistingEdgeDevice,{deviceOnly=false}={}){
  const host=new URL(request.url).hostname,actors=[];
  const cookie=request.headers.get("cookie")||"";
  if(cookie.length<=8192&&/(?:^|;\s*)__Host-vyn_edge_device=/.test(cookie)){
@@ -25,10 +26,10 @@ export async function verifiedActors(request,env,verify=verifyExistingEdgeDevice
     const key=await digestActor(env,host,"device",d.deviceId);if(key)actors.push({kind:"device",key});
   }}catch{}
  }
- try{
-  const net=classifyNetworkAttribution(request);
-  if(net.attribution==="cloudflare_edge_observed"&&net.ip&&request.cf?.botManagement?.verifiedBot!==true){
-   const key=await digestActor(env,host,"network",net.ip);if(key)actors.push({kind:"network",key});
+ if(!deviceOnly)try{
+  const net=classifyNetworkAttribution(request),ip=canonicalNetworkAddress(net.ip);
+  if(net.attribution==="cloudflare_edge_observed"&&ip&&ip!=="2a06:98c0:3600::103"&&request.cf?.botManagement?.verifiedBot!==true){
+   const key=await digestActor(env,host,"network",ip);if(key)actors.push({kind:"network",key});
   }
  }catch{}
  return actors;
@@ -74,6 +75,12 @@ export function restrictionScope(request){
  return /^\/api(?:\/|$)/.test(p)||["GET","HEAD"].includes(request.method)&&(request.headers.get("accept")||"").includes("text/html");
 }
 const ENFORCED_RATE_CATEGORIES=new Set(["DOC","IMAGE","SEARCH","SIGNUP"]);
+// Only the Search host issues this exact signed cookie; shape is not validation.
+function eligibleDeviceStatus(request){
+ if(new URL(request.url).hostname!=="search.vynalthai.com"||!restrictionScope(request))return false;
+ const cookie=request.headers.get("cookie")||"";
+ return cookie.length<=8192&&/(?:^|;\s*)__Host-vyn_edge_device=e1\.[0-9a-f-]{36}\.\d{10}\.[A-Za-z0-9_-]{43}(?:;|$)/i.test(cookie);
+}
 export async function enforceVynalthWaf(request,env,ctx,id){
  const mode=rollout(request,env);if(!mode)return null;
  const host=new URL(request.url).hostname;let event=null;
@@ -83,15 +90,19 @@ export async function enforceVynalthWaf(request,env,ctx,id){
  // Expanded core-only hosts never allocate actor state or inspect bodies.
  if(!PILOT_HOSTS.includes(host))return hardDenial;
  const category=rateCategory(request);
- const checkDevice=restrictionScope(request)&&/(?:^|;\s*)__Host-vyn_edge_device=/.test(request.headers.get("cookie")||"");
+ const checkDevice=eligibleDeviceStatus(request);
  const stateEnabled=["observe","enforce"].includes(env.VYNALTH_WAF_STATE_MODE);
  const actorMode=mode==="enforce"&&env.VYNALTH_WAF_STATE_MODE==="enforce"?"enforce":"observe";
  let restriction=null,rate=null;
- if(stateEnabled&&(category||hardRules.length||checkDevice)&&await budget(env,"VWAF_STATE_BUDGET",host)){
+ const regular=stateEnabled&&(category||hardRules.length||checkDevice)&&await budget(env,"VWAF_STATE_BUDGET",host);
+ // Reserved, separately limited read-only lane checks a signed Search device
+ // even when routine network/rate work is saturated. No state write in this lane.
+ const priority=!regular&&stateEnabled&&checkDevice&&!hardDenial&&await budget(env,"VWAF_STATE_BUDGET","device-status:"+host);
+ if(regular||priority){
   try{
-   const actors=(await verifiedActors(request,env)).filter(a=>category||hardRules.length||a.kind==="device");
+   const actors=(await verifiedActors(request,env,verifyExistingEdgeDevice,{deviceOnly:priority})).filter(a=>category||hardRules.length||a.kind==="device");
    // Independent device and network results: one unavailable actor cannot hide another's denial.
-   const results=await Promise.allSettled(actors.map(actor=>stateCall(env,"actor-v1:"+actor.key,!category&&!hardRules.length?
+   const results=await Promise.allSettled(actors.map(actor=>stateCall(env,"actor-v1:"+actor.key,priority||!category&&!hardRules.length?
     {op:"actor-status",host,kind:actor.kind}:{op:"actor",host,mode:actorMode,kind:actor.kind,id,category,rules:hardRules})));
    for(let i=0;i<results.length;i++){
     const result=results[i],actor=actors[i];
@@ -100,7 +111,8 @@ export async function enforceVynalthWaf(request,env,ctx,id){
     if(r.candidate)recordEvent(env,ctx,{host,mode:actorMode,action:r.newRestriction?"restriction":"candidate",request_id:id,
      rule_ids:[r.newRestriction?"VWAF-402":"VWAF-403"],score:100,actor_kind:actor.kind,
      evidence_sha256:r.evidence?.sha256},r.newRestriction?r.evidence:null);
-    const rateEnforce=actorMode==="enforce"&&ENFORCED_RATE_CATEGORIES.has(category);
+    if(r.burst)recordEvent(env,ctx,{host,mode:actorMode,action:"observe",request_id:id,rule_ids:["VWAF-404"],score:80,actor_kind:actor.kind});
+    const rateEnforce=!priority&&actorMode==="enforce"&&ENFORCED_RATE_CATEGORIES.has(category);
     if(r.newRate)recordEvent(env,ctx,{host,mode:actorMode,action:rateEnforce?"rate_limit":"observe",request_id:id,rule_ids:["VWAF-401"],score:40,actor_kind:actor.kind});
     if(actorMode==="enforce"&&actor.kind==="device"&&Number.isFinite(r.blockedUntil)&&r.blockedUntil>Date.now())restriction=deny(403,request,Math.ceil((r.blockedUntil-Date.now())/1000));
     if(rateEnforce&&r.rateExceeded===true){

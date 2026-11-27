@@ -12,7 +12,7 @@ export function configuredChannels(env){
 export async function sendDigest(channel,env,digest,fetchImpl=fetch,now=Date.now()){
  if(!configuredChannels(env).includes(channel))return{state:"not_configured"};
  const msg="Vynalth WAF: "+digest.count+" recorded security decisions. Mode: "+digest.mode+
-  ". Latest rules: "+digest.rules.join(", ")+". Intrusion not verified. Review the private VWAF console.";
+  ". Latest rules: "+digest.rules.join(", ")+". Intrusion not verified. Review the authorized private security logs.";
  let url,headers={"Content-Type":"application/json"},body;
  if(channel==="ntfy"){
   url="https://ntfy.sh/"+encodeURIComponent(env.VWAF_NTFY_TOPIC);
@@ -21,7 +21,7 @@ export async function sendDigest(channel,env,digest,fetchImpl=fetch,now=Date.now
   url="https://api.telegram.org/bot"+env.VWAF_TELEGRAM_BOT_TOKEN+"/sendMessage";
   body=JSON.stringify({chat_id:env.VWAF_TELEGRAM_CHAT_ID,text:msg,disable_web_page_preview:true});
  }else{url=AXIOM;headers.Authorization="Bearer "+env.VWAF_AXIOM_INGEST_TOKEN;
-  body=JSON.stringify([{event:"VYNALTH_WAF_DIGEST",_time:new Date(now).toISOString(),version:"1.3.0",count:digest.count,
+  body=JSON.stringify([{event:"VYNALTH_WAF_DIGEST",_time:new Date(now).toISOString(),version:"1.4.0",count:digest.count,
    mode:digest.mode,rule_ids:digest.rules,sequence:digest.sequence,intrusion_verified:false}]);}
  try{
   const r=await fetchImpl(url,{method:"POST",headers,body,redirect:"error",signal:AbortSignal.timeout(4500)});
