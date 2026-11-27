@@ -7,6 +7,7 @@ on:
       - 'scripts/vwaf-**'
       - '.github/workflows/vwaf-acceptance.yml'
       - 'package.json'
+      - 'docs/vwaf-ga-checklist.json'
   push:
     branches: [main]
     paths:
@@ -15,6 +16,7 @@ on:
       - 'scripts/vwaf-**'
       - '.github/workflows/vwaf-acceptance.yml'
       - 'package.json'
+      - 'docs/vwaf-ga-checklist.json'
   workflow_dispatch:
 permissions:
   contents: read
@@ -27,4 +29,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm run vwaf:acceptance
+      - name: Preserve original synthetic acceptance evidence
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run vwaf:acceptance | tee "${RUNNER_TEMP}/vwaf-acceptance.log"
+      - name: Verify GA gate behavior
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/vwaf-check-ga-command.mjs | tee "${RUNNER_TEMP}/vwaf-ga-check.log"
+      - name: Bounded portable middleware benchmark (offline)
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/vwaf-portable-load.mjs | tee "${RUNNER_TEMP}/vwaf-portable-load.log"
+      - name: Retain candidate evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vwaf-qualification-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vwaf-acceptance.log
+            ${{ runner.temp }}/vwaf-ga-check.log
+            ${{ runner.temp }}/vwaf-portable-load.log
+          retention-days: 45
+          if-no-files-found: error

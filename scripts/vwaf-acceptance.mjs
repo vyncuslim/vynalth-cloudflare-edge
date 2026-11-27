@@ -46,4 +46,4 @@ const report={gaChecklist,suite:"vwaf-v2-rc2-original-corpus",structuredMode,mis
 console.log("VWAF_ACCEPTANCE "+JSON.stringify(report));
 if(regression||falsePositive)process.exitCode=1;
 // Formal release intentionally refuses unverified production and audit gates.
-if(process.argv.includes("--release")&&Object.values(report.goals).some(x=>x!==true))process.exitCode=2;
+if(!process.exitCode&&process.argv.includes("--release")&&Object.values(report.goals).some(x=>x!==true))process.exitCode=2;

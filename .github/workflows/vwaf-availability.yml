@@ -24,4 +24,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node scripts/vwaf-availability.mjs
+      - name: Collect fixed safe public probe evidence
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/vwaf-availability.mjs | tee "${RUNNER_TEMP}/vwaf-availability.log"
+      - name: Preserve successful and failed observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vwaf-availability-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vwaf-availability.log
+          retention-days: 45
+          if-no-files-found: error

@@ -1,0 +1,7 @@
+# GA qualification evidence collection
+
+The acceptance workflow now retains exact-candidate logs for 45 days, verifies that the GA command exits 2 on an unmet gate (and does not mask regression exit 1), and executes an isolated portable-middleware benchmark with 1, 4 and 8 concurrent lanes, 800 ordinary synthetic requests per scenario. The benchmark never sends traffic to production or opens a socket. Reported latency is local wall-clock middleware latency, not production inspection latency; the production-performance gate remains open.
+
+The existing scheduled public availability workflow retains point observations and failures for 45 days once merged to main. Runner schedule delays, missed jobs and missing artifacts are missing evidence, never successful observations. GitHub 15-minute samples are supplementary; 60-second Cloudflare Health Checks and independent end-to-end evidence require separate export and review. No 30-day claim follows from enabling monitoring.
+
+The offline release command is checked for correct exit status. This is not administrative protection of tags/releases and does not confer GA approval. Original attack and benign fixtures remain unchanged. Independent human security review, representative independently labeled holdout and actual production qualification must still be obtained. No production traffic policy or deployment configuration is modified by this change.
