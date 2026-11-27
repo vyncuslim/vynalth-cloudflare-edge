@@ -57,7 +57,7 @@ jobs:
             tail -n 40 "${RUNNER_TEMP}/vwaf-workerd-startup.log"
             exit 1
           fi
-          curl --noproxy '*' --max-time 30 -fsS http://127.0.0.1:18765/benchmark > "${RUNNER_TEMP}/vwaf-workerd.json"
+          node scripts/vwaf-workerd-client.mjs "${RUNNER_TEMP}/vwaf-workerd.json"
           node scripts/vwaf-verify-workerd-report.mjs "${RUNNER_TEMP}/vwaf-workerd.json"
       - name: Retain local runtime report
         if: always()
