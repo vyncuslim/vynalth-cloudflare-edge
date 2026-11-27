@@ -28,12 +28,14 @@ const EXTRA_HARD_RULES = Object.freeze([
   { id:"VWAF-110",score:100,category:"private_cloud_credentials",re:/(?:^|\/)(?:\.vault-token|\.azure\/(?:accessTokens\.json|azureProfile\.json)|\.config\/(?:doctl\/config\.yaml|rclone\/rclone\.conf|stripe\/config\.toml)|\.gnupg\/secring\.gpg)$/i },
   { id:"VWAF-111",score:100,category:"private_debug_artifacts",re:/^\/(?:debug\/pprof\/(?:heap|goroutine|threadcreate|mutex|block)|actuator\/(?:heapdump|logfile))(?:\/|$)/i },
 ]);
+const ALL_HARD_RULES=Object.freeze([...HARD_RULES,...EXTRA_HARD_RULES]);
 const QUERY_RULES = Object.freeze([
   { id:"VWAF-201", score:45, category:"sql_injection_signal", re:/\bunion\s+(?:all\s+)?select\b|(?:['"]\s*(?:or|and)\s+[0-9]+\s*=\s*[0-9]+)|\b(?:sleep|benchmark)\s*\(/i },
   { id:"VWAF-202", score:45, category:"script_injection_signal", re:/<\s*script(?:\s|>|\/)|\bon(?:error|load)\s*=|javascript\s*:/i },
   { id:"VWAF-207", score:35, category:"template_expression_signal", re:/\{\{[^{}]{1,128}\}\}|\$\{[^{}]{1,128}\}/ },
   { id:"VWAF-203", score:45, category:"file_inclusion_signal", re:/(?:^|[\\/])\.\.(?:[\\/]|$)|(?:file|php):\/\//i },
 ]);
+const DESTINATION_PARAMS=new Set(["url","redirect","return","next"]);
 const STRUCTURED_PARAMS = new Set(["id","page","limit","offset","sort","order","file","path","redirect","return","next","url"]);
 function signal(id, score, category, blocking=false) {
   return {id,score,category,blocking};
@@ -47,7 +49,11 @@ function normalizedDots(path){
   }
   return "/"+parts.join("/");
 }
-function pathVariants(path) {
+export function pathVariants(path) {
+  // The normalizer cannot change these already-canonical paths. Preserve the
+  // full conservative normalization pipeline for all other input.
+  if(path==="/"||(path.startsWith("/")&&!path.endsWith("/")&&
+    !/[%;\\]/.test(path)&&!path.includes("//")&&!/(?:^|\/)\.{1,2}(?:\/|$)/.test(path)))return [path];
   const variants = new Set();
   let current=path;
   for(let i=0;i<3;i++) {
@@ -74,10 +80,11 @@ function pathVariants(path) {
 export function inspectWafRequest(request,{structuredMode="observe"}={}) {
   const url=new URL(request.url);
   const host=url.hostname.toLowerCase();
+  const method=request.method.toUpperCase();
   const signals=[];
   const push=s=>{if(!signals.some(x=>x.id===s.id))signals.push(s);};
   if(!CORE_HOSTS.includes(host)) return {score:0,block:false,signals:[]};
-  if(["TRACE","TRACK"].includes(request.method.toUpperCase()))
+  if(method==="TRACE"||method==="TRACK")
     push(signal("VWAF-001",100,"unsafe_http_method",true));
   // Framing is owned by the trusted HTTP runtime. Ambiguity is an observation,
   // not a claim that a request-smuggling attempt reached an origin parser.
@@ -98,7 +105,7 @@ export function inspectWafRequest(request,{structuredMode="observe"}={}) {
       push(signal("VWAF-002",100,"invalid_path_control",true));
     if(variants.some(p=>/(?:^|\/)\.\.(?:\/|$)/.test(p)))
       push(signal("VWAF-205",60,"path_traversal_signal"));
-    for(const rule of [...HARD_RULES,...EXTRA_HARD_RULES]) {
+    for(const rule of ALL_HARD_RULES) {
       if(rule.hosts&&!rule.hosts.includes(host))continue;
       if(variants.some(p=>rule.re.test(p)))push(signal(rule.id,rule.score,rule.category,true));
     }
@@ -118,9 +125,9 @@ export function inspectWafRequest(request,{structuredMode="observe"}={}) {
       if(value.length>VALUE_LIMIT){push(signal("VWAF-206",15,"query_inspection_budget"));continue;}
       for(const rule of QUERY_RULES)
         if(rule.re.test(value))push(signal(rule.id,rule.score,rule.category));
-      const strict=restrictedIdentifierSignal(url,request.method.toUpperCase(),field,value,structuredMode);
+      const strict=restrictedIdentifierSignal(url,method,field,value,structuredMode);
       if(strict)push(strict);
-      if(["url","redirect","return","next"].includes(field)&&isLocalDestination(value))
+      if(DESTINATION_PARAMS.has(field)&&isLocalDestination(value))
         push(signal("VWAF-209",35,"local_destination_signal"));
     }
   }
