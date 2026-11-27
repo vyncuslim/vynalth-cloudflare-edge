@@ -4,7 +4,8 @@
  * external rule feeds, raw request logging, or implicit authentication bypass.
  */
 import {CORE_HOSTS,STATE_HOSTS} from "./vwaf-scope.js";
-export const WAF_VERSION = "1.3.0";
+import {isLocalDestination} from "./vwaf-network.js";
+export const WAF_VERSION = "1.4.0";
 export const PILOT_HOSTS = STATE_HOSTS;
 export {CORE_HOSTS};
 const PATH_LIMIT = 8192;
@@ -83,9 +84,13 @@ export function inspectWafRequest(request) {
   const encoding=request.headers?.get("transfer-encoding");
   if((length!=null&&!/^\d{1,16}$/.test(length))||(length!=null&&encoding))
     push(signal("VWAF-208",35,"http_framing_signal"));
-  // Very large inputs are observed, not silently truncated and hard-blocked.
+  // An oversized path is outside the deterministic inspection contract.
+  // Reject it on reviewed hosts without classifying it as malicious or ban evidence.
+  const overrides=["x-http-method-override","x-method-override","x-http-method"];
+  if(overrides.some(h=>/^(?:TRACE|TRACK|CONNECT|DELETE|PUT|PATCH)$/i.test((request.headers?.get(h)||"").trim())))
+    push(signal("VWAF-211",25,"method_override_signal"));
   if(url.pathname.length>PATH_LIMIT) {
-    push(signal("VWAF-204",15,"path_inspection_budget"));
+    push(signal("VWAF-204",0,"path_inspection_budget",true));
   } else {
     const variants=pathVariants(url.pathname);
     if(variants.some(p=>/[\x00\r\n]/.test(p)))
@@ -112,13 +117,8 @@ export function inspectWafRequest(request) {
       if(value.length>VALUE_LIMIT){push(signal("VWAF-206",15,"query_inspection_budget"));continue;}
       for(const rule of QUERY_RULES)
         if(rule.re.test(value))push(signal(rule.id,rule.score,rule.category));
-      if(["url","redirect","return","next"].includes(field)){
-        try{
-          const u=new URL(value);
-          if(["file:","ftp:"].includes(u.protocol)||/^(?:localhost|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2}|169\.254(?:\.\d{1,3}){2}|\[::1\])$/i.test(u.hostname))
-            push(signal("VWAF-209",35,"local_destination_signal"));
-        }catch{}
-      }
+      if(["url","redirect","return","next"].includes(field)&&isLocalDestination(value))
+        push(signal("VWAF-209",35,"local_destination_signal"));
     }
   }
   // Scores express rule evidence, not probability, attribution, or proof of intrusion.
@@ -149,9 +149,10 @@ export function applyVynalthWaf(request,env,requestId,emit=event=>console.info("
     request_id:typeof requestId==="string"&&/^[a-f0-9-]{36}$/i.test(requestId)?requestId:null};
   try{emit(event);}catch{/* Telemetry failure never changes the decision. */}
   if(action!=="block")return null;
-  return new Response(request.method==="HEAD"?null:"Request blocked by Vynalth WAF.",{
-    status:403,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"private, no-store",
+  const oversized=result.signals.some(x=>x.id==="VWAF-204");
+  return new Response(request.method==="HEAD"?null:oversized?"Request path too long.":"Request blocked by Vynalth WAF.",{
+    status:oversized?414:403,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"private, no-store",
       "X-Content-Type-Options":"nosniff","X-Robots-Tag":"noindex, nofollow",
-      "X-Vynalth-Security-Action":"block-vynalth-waf"}
+      "X-Vynalth-Security-Action":oversized?"vwaf-path-too-long":"block-vynalth-waf"}
   });
 }

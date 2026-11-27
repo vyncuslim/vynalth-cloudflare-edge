@@ -2,6 +2,7 @@
  * VWAF Core content inspection. Observation only. No forwarding, persistence,
  * or logging of input. Small explicitly framed JSON on known routes only.
  */
+import {isLocalDestination} from "./vwaf-network.js";
 const MAX_BYTES=8192, MAX_FIELDS=32, MAX_VALUE=512;
 // Never clone login/signup bodies: they may carry credentials.
 const ROUTES=new Set(["/api/web-search","/api/ai/image"]);
@@ -27,13 +28,8 @@ export function inspectStructuredContent(value){
    if(!FIELDS.has(k)||typeof v!=="string")continue;
    if(v.length>MAX_VALUE){add(hit("VWAF-304","content_budget",10));continue}
    for(const [id,category,re] of RULES)if(re.test(v))add(hit(id,category));
-   if(["url","redirect","return","next"].includes(k)){
-    try{
-     const u=new URL(v);
-     if(["file:","ftp:"].includes(u.protocol)||/^(?:localhost|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2}|169\.254(?:\.\d{1,3}){2}|\[::1\]|\[f[cd][0-9a-f:]*\]|\[fe[89ab][0-9a-f:]*\])$/i.test(u.hostname))
-      add(hit("VWAF-306","local_destination_signal"));
-    }catch{}
-   }
+   if(["url","redirect","return","next"].includes(k)&&isLocalDestination(v))
+    add(hit("VWAF-306","local_destination_signal"));
   }
  }
  scan(value,0);return [...signals.values()];

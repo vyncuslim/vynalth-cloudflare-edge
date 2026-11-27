@@ -58,10 +58,10 @@ test("encoded traversal is observation only without a hard rule",()=>{
   const r=req("/docs/a%2f..%2fb");const d=inspectWafRequest(r);
   assert.ok(d.signals.some(s=>s.id==="VWAF-205"));assert.equal(d.block,false);
 });
-test("oversize queries and paths are bounded and advisory",()=>{
+test("oversize queries are advisory; oversized paths are rejected",()=>{
   const a=inspectWafRequest(req("/search?q="+"a".repeat(5000)));
   assert.ok(a.signals.some(s=>s.id==="VWAF-206"));assert.equal(a.block,false);
-  const b=inspectWafRequest(req("/"+"a".repeat(9000)));assert.ok(b.signals.some(s=>s.id==="VWAF-204"));assert.equal(b.block,false);
+  const b=inspectWafRequest(req("/"+"a".repeat(9000)));assert.ok(b.signals.some(s=>s.id==="VWAF-204"));assert.equal(b.block,true);
 });
 test("unknown mode, absent host and unrecognized host all remain off",()=>{
   for(const e of [{},config("invalid"),{VYNALTH_WAF_MODE:"enforce",VYNALTH_WAF_HOSTS:""}])
