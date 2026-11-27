@@ -1,0 +1,126 @@
+{
+  "schema": "vwaf-ga-checklist-v1",
+  "release": "2.0.0",
+  "policy": "Qualification is separate from implementation. Only independently reviewed evidence can support a qualified status. This ledger is not itself proof of a control or authorization to publish.",
+  "gates": [
+    {
+      "id": "engine",
+      "status": "implemented",
+      "requirement": "Exact candidate regression and independent holdout tests; demonstrate detection at the runtime boundary.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "network-ipv4-ipv6",
+      "status": "implemented",
+      "requirement": "Trusted address handling, dual-stack enforcement, canonicalization and verified deployment evidence.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "owasp-top10",
+      "status": "partial",
+      "requirement": "Versioned OWASP coverage matrix including application-owned controls, reviewed tests, and residual risk closure; WAF alone cannot establish full coverage.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "distributed-rate-limit",
+      "status": "partial",
+      "requirement": "Approved route coverage, concurrency and multi-region consistency, bounded recovery and load evidence.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "sqli-xss",
+      "status": "partial",
+      "requirement": "Reviewed structured contracts and application parameterization/output encoding; representative independent prevention and benign tests.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "api-schema",
+      "status": "partial",
+      "requirement": "Versioned route inventory and reviewed schemas; negative/positive regression and deployment evidence.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "body-inspection",
+      "status": "partial",
+      "requirement": "Bounded parsing, streaming, malformed input handling, content-type coverage and runtime latency evidence.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "device-risk",
+      "status": "partial",
+      "requirement": "Authorized privacy-preserving signals, verified trust boundary and tested false-positive, expiry and appeal behavior.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "intel-refresh",
+      "status": "partial",
+      "requirement": "Approved signed feed, persisted atomic sequence/manifest, scheduled ingestion, expiry and advisory-only runtime integration evidence.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "auto-containment",
+      "status": "partial",
+      "requirement": "Approved containment/expiry/recovery and rollback tests, including legitimate shared-address traffic, with production verification.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "honeypot",
+      "status": "implemented",
+      "requirement": "Isolated decoy verification, no real credentials, no unauthorized egress, reviewed production evidence.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "evidence-integrity",
+      "status": "implemented",
+      "requirement": "Integrity, retention, access and deletion verification with redacted audit evidence.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "real-time-notification",
+      "status": "implemented",
+      "requirement": "Delivery, deduplication, authentication, rate bounds and recovery evidence on approved notification channels.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "production-performance",
+      "status": "partial",
+      "requirement": "Approved bounded load test in isolated representative environment, runtime P95 <5 ms with remote state separately measured, no production disruption.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "independent-human-audit",
+      "status": "blocked",
+      "requirement": "Independent human reviewer, defined scope and exact candidate/deployment, findings and remediation/retest; zero known unfixed critical findings.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "cross-cloud",
+      "status": "partial",
+      "requirement": "Actual independent provider deployment, parity, distributed state/evidence and rollback verification; portable runtime CI alone is insufficient.",
+      "evidence": [],
+      "review": null
+    },
+    {
+      "id": "production-availability",
+      "status": "blocked",
+      "requirement": "At least 30 days of independent end-to-end SLI observations with missing samples accounted for; >=99.99% and reviewed measurement scope.",
+      "evidence": [],
+      "review": null
+    }
+  ]
+}

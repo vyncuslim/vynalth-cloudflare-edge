@@ -1,0 +1,51 @@
+name: VWAF portable runtime qualification
+on:
+  pull_request:
+    paths:
+      - 'src/vwaf-**'
+      - 'src/vynalth-waf-**'
+      - 'scripts/vwaf-portable-smoke.mjs'
+      - '.github/workflows/vwaf-portable-runtimes.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/vwaf-**'
+      - 'src/vynalth-waf-**'
+      - 'scripts/vwaf-portable-smoke.mjs'
+      - '.github/workflows/vwaf-portable-runtimes.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test src/vwaf-intel-refresh.test.js
+      - run: node scripts/vwaf-portable-smoke.mjs
+  deno:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno run --no-prompt scripts/vwaf-portable-smoke.mjs
+  bun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - run: bun scripts/vwaf-portable-smoke.mjs
