@@ -7,7 +7,7 @@ test("availability probes use fixed destinations, no redirects, verify content n
   return url.endsWith("/health")?Response.json({status:"ok",privateFixture:"DO_NOT_LOG"}):new Response("<html>Vynalth Search</html>",{headers:{"content-type":"text/html"}});
  });
  assert.equal(r.healthy,true);assert.ok(!JSON.stringify(r).includes("DO_NOT_LOG"));
- const bad=await checkAvailability(async url=>url.endsWith("/health")?Response.json({status:"degraded"}):new Response("<html>error</html>",{headers:{"content-type":"text/html"}));
+ const bad=await checkAvailability(async url=>url.endsWith("/health")?Response.json({status:"degraded"}):new Response("<html>error</html>",{headers:{"content-type":"text/html"}}));
  assert.equal(bad.healthy,false);assert.ok(bad.results.every(x=>x.reason==="unexpected_body"));
 });
 test("availability errors are explicitly recorded and no follow-on destination is fetched",async()=>{
