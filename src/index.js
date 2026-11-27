@@ -27,7 +27,9 @@ import { applyVpnPageGradient } from "./vpn-page-gradient.js";
 import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./domain-device-federation.js";
 import { checkFederatedDeviceAccess } from "./global-device-policy.js";
 import { enforceSiteAbuse } from "./site-abuse-policy.js";
-import { applyVynalthWaf } from "./vynalth-waf-core.js";
+import { enforceVynalthWaf } from "./vwaf-runtime.js";
+import { isWafConsolePath, handleWafConsole } from "./vwaf-console.js";
+export { VynalthWafState } from "./vwaf-state.js";
 export { SecurityDeviceRisk } from "./site-abuse-policy.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
@@ -180,7 +182,7 @@ export default {
     if (siteAbuseDenial) return observedResponse(siteAbuseDenial, request, incomingUrl, requestId, rootDomain);
 
     // First-party request inspection; observation-first and host-scoped.
-    const ownWafDenial = applyVynalthWaf(request, env, requestId);
+    const ownWafDenial = await enforceVynalthWaf(request, env, ctx, requestId);
     if (ownWafDenial) return observedResponse(ownWafDenial, request, incomingUrl, requestId, rootDomain);
 
     // Immediately deny WordPress installation endpoint probes on every
@@ -339,6 +341,13 @@ export default {
     const federatedDenial = await checkFederatedDeviceAccess(request, env, incomingUrl);
     if (federatedDenial) {
       return observedResponse(federatedDenial, request, incomingUrl, requestId, rootDomain);
+    }
+
+    // Read-only VWAF operator console: independent credential, existing IP/device/school gates.
+    if (isWafConsolePath(incomingUrl)) {
+      const schoolDenial = await checkSchoolPolicy(request,env,rootDomain,ctx);
+      if (schoolDenial) return observedResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
+      return observedResponse(await handleWafConsole(request,env,incomingUrl),request,incomingUrl,requestId,rootDomain);
     }
 
     // Owner's 10-minute access portal is served by the Worker before the GPS

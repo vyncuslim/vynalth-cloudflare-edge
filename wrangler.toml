@@ -21,6 +21,10 @@ SECURITY_SITE_ABUSE_HOSTS = "search.vynalthai.com,vynalthai.com"
 # First-party Vynalth WAF Core: observe before enabling deterministic denies.
 VYNALTH_WAF_MODE = "observe"
 VYNALTH_WAF_HOSTS = "vynalthai.com,search.vynalthai.com"
+VYNALTH_WAF_CONTENT_ENABLED = "true"
+VYNALTH_WAF_STATE_MODE = "observe"
+VYNALTH_WAF_CONSOLE_ENABLED = "true"
+VYNALTH_WAF_ALERTS_ENABLED = "false"
 # Explicit operator-approved, narrow suspicious-probe event forwarding.
 # Never send IP, cookies, request body or query strings. Sender is async,
 # non-blocking, and automatically fails closed when the secret is absent.
@@ -212,3 +216,27 @@ class_name = "SecurityDeviceRisk"
 [[migrations]]
 tag = "security-device-risk-v1"
 new_sqlite_classes = ["SecurityDeviceRisk"]
+
+
+# VWAF private state and bounded per-colo admission controls; no route changes.
+[[durable_objects.bindings]]
+name = "VWAF_STATE"
+class_name = "VynalthWafState"
+
+[[migrations]]
+tag = "vwaf-state-v1"
+new_sqlite_classes = ["VynalthWafState"]
+
+[[ratelimits]]
+name = "VWAF_STATE_BUDGET"
+namespace_id = "892611205"
+[ratelimits.simple]
+limit = 600
+period = 60
+
+[[ratelimits]]
+name = "VWAF_EVENT_BUDGET"
+namespace_id = "892611206"
+[ratelimits.simple]
+limit = 120
+period = 60
