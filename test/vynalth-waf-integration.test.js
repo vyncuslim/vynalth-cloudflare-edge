@@ -21,3 +21,12 @@ test("observe mode and public traffic preserve origin flow",async()=>{
     assert.equal(calls,2);
   }finally{globalThis.fetch=original;}
 });
+
+test("retired VWAF namespace never reaches origin even with old console credentials",async()=>{
+ const original=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;return new Response("origin")};
+ try{
+  const r=await edge.fetch(new Request("https://vynalthai.com/__ops/vwaf/api/status",{headers:{Authorization:"Bearer "+"A".repeat(43)}}),
+   {...env("enforce"),VYNALTH_WAF_HONEYPOT_ENABLED:"true",VYNALTH_WAF_CONSOLE_ENABLED:"true",VWAF_CONSOLE_TOKEN:"A".repeat(43)},{});
+  assert.equal(r.status,404);assert.equal(calls,0);assert.equal(await r.text(),"Resource unavailable.");
+ }finally{globalThis.fetch=original}
+});

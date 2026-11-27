@@ -28,7 +28,7 @@ import { handleDomainDeviceFederation, verifyFederationServiceRelay } from "./do
 import { checkFederatedDeviceAccess } from "./global-device-policy.js";
 import { enforceSiteAbuse } from "./site-abuse-policy.js";
 import { enforceVynalthWaf } from "./vwaf-runtime.js";
-import { isWafConsolePath, handleWafConsole } from "./vwaf-console.js";
+import { handleWafHoneypot } from "./vwaf-honeypot.js";
 export { SecurityDeviceRisk } from "./site-abuse-policy.js";
 import { schoolGuard, coveredHost } from "./school/policy.js";
 import { adminApi } from "./school/admin-api.js";
@@ -167,6 +167,11 @@ export default {
     if (!rootDomain) {
       return new Response("Not Found", { status: 404 });
     }
+
+    // Retired VWAF console: isolated static decoy. Never forwards to an origin,
+    // reads credentials, returns real state, or invokes legacy raw request logging.
+    const vwafDecoy=handleWafHoneypot(request,env,incomingUrl,ctx,requestId);
+    if(vwafDecoy)return edgeResponse(vwafDecoy,request,incomingUrl,requestId,rootDomain);
 
     // Vercel Log Drains terminate at Cloudflare, not the Vercel origin.
     // Never create a log of this drain request itself: that would cause
@@ -340,13 +345,6 @@ export default {
     const federatedDenial = await checkFederatedDeviceAccess(request, env, incomingUrl);
     if (federatedDenial) {
       return observedResponse(federatedDenial, request, incomingUrl, requestId, rootDomain);
-    }
-
-    // Read-only VWAF operator console: independent credential, existing IP/device/school gates.
-    if (isWafConsolePath(incomingUrl)) {
-      const schoolDenial = await checkSchoolPolicy(request,env,rootDomain,ctx);
-      if (schoolDenial) return observedResponse(schoolDenial,request,incomingUrl,requestId,rootDomain);
-      return observedResponse(await handleWafConsole(request,env,incomingUrl),request,incomingUrl,requestId,rootDomain);
     }
 
     // Owner's 10-minute access portal is served by the Worker before the GPS
