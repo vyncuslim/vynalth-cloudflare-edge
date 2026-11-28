@@ -16,10 +16,16 @@ export function inspectApiSchema(path,value){
   // Source-verified: only action=navigate invokes safeUrl(body.url).
   // The backend must still validate every resolved address and actual egress.
   // A syntactic edge check never substitutes for authorization or DNS checks.
-  if(own("action")&&value.action==="navigate"&&own("url")&&typeof value.url==="string"&&value.url.length<=8192){
+  if(own("action")&&value.action==="navigate"){
+   // Backend safeUrl at CONTRACT_REVISION rejects nonstring, oversized,
+   // malformed, non-HTTP(S), and credential-bearing URLs before navigation.
+   // Scope to this exact operation; other URLs remain advisory.
+   const invalid=()=>[sig("VWAF-607","browser_invalid_url_contract",true,0)];
+   if(!own("url")||typeof value.url!=="string"||value.url.length>2048)return invalid();
    let target;
-   try{target=new URL(value.url)}catch{return result}
-   if(["http:","https:"].includes(target.protocol)&&isLocalDestinationUrl(target))
+   try{target=new URL(value.url)}catch{return invalid()}
+   if(!["http:","https:"].includes(target.protocol)||target.username||target.password)return invalid();
+   if(isLocalDestinationUrl(target))
     result.push(sig("VWAF-606","browser_private_destination_contract",true,0));
   }
   return result;
@@ -46,9 +52,10 @@ export function inspectApiSchema(path,value){
 export function schemaResponse(request,signals,mode){
  if(mode!=="enforce"||!signals.some(s=>s.blocking))return null;
  const privateTarget=signals.some(s=>s.id==="VWAF-606");
+ const invalidUrl=signals.some(s=>s.id==="VWAF-607");
  const prompt=signals.some(s=>s.id==="VWAF-604");
- const error=privateTarget?"PRIVATE_BROWSER_TARGET":prompt?"INVALID_IMAGE_PROMPT":"INVALID_ASPECT_RATIO";
- const message=privateTarget?"Private or local network targets are not allowed.":prompt?"Describe the image in 1 to 2000 characters.":"Choose 1:1, 16:9, or 9:16.";
+ const error=privateTarget?"PRIVATE_BROWSER_TARGET":invalidUrl?"INVALID_BROWSER_URL":prompt?"INVALID_IMAGE_PROMPT":"INVALID_ASPECT_RATIO";
+ const message=privateTarget?"Private or local network targets are not allowed.":invalidUrl?"Provide a valid HTTP or HTTPS URL.":prompt?"Describe the image in 1 to 2000 characters.":"Choose 1:1, 16:9, or 9:16.";
  return new Response(request.method==="HEAD"?null:JSON.stringify({success:false,error,message}),{
   status:privateTarget?403:400,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"private, no-store",
    "X-Content-Type-Options":"nosniff","X-Vynalth-Security-Action":"vwaf-schema-rejected"}
