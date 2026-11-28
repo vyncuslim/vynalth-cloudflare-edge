@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {generateKeyPairSync,createHash,sign} from "node:crypto";
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {verifyReleaseBundle,readReleaseEvidence} from "../scripts/vwaf-ga-evidence-input.mjs";
@@ -41,4 +41,11 @@ test("revoked, expired or mismatched trust is rejected",t=>{
 test("absence or partial configuration does not qualify",()=>{
  assert.equal(readReleaseEvidence({env:{}}),null);
  assert.throws(()=>readReleaseEvidence({env:{VWAF_GA_BUNDLE_DIR:"/example"}}),/Incomplete/);
+});
+
+test("a symlink in the evidence artifact slot is rejected even if target bytes match",t=>{
+ const f=fixture(t),target=join(f.dir,"alternate");
+ writeFileSync(target,"Synthetic test-only evidence, never a real audit.");
+ rmSync(f.artifact);symlinkSync(target,f.artifact);
+ assert.throws(()=>verifyReleaseBundle(f.args));
 });
