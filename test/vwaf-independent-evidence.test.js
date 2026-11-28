@@ -1,0 +1,16 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {generateKeyPairSync,createHash,sign} from "node:crypto";
+import {verifyIndependentEvidence} from "../scripts/vwaf-independent-evidence.mjs";
+import {REQUIRED_GATE_IDS} from "../scripts/vwaf-ga-checklist.mjs";
+const {publicKey,privateKey}=generateKeyPairSync("ed25519");
+const now=Date.UTC(2026,10,28),candidate="a".repeat(40);
+const trust={reviewerId:"test-only",publicKeyPem:publicKey.export({type:"spki",format:"pem"}),keySha256:createHash("sha256").update(publicKey.export({type:"spki",format:"der"})).digest("hex")};
+const evidence={url:"https://example.invalid/test-only",sha256:"b".repeat(64)};
+function fixture(){return {schema:"vwaf-independent-evidence-v1",release:"2.0.0",candidate,deployment:"test-deployment",scope:"test-scope",reviewerId:"test-only",issuedAt:now-1,expiresAt:now+1000,controls:REQUIRED_GATE_IDS.map(id=>({id,qualified:true,evidence:[evidence]})),attack:{independent:true,representative:true,blocked:990,tested:1000,evidence},benign:{independent:true,representative:true,falsePositive:0,tested:4000,evidence},performance:{deployed:true,samples:1000,p95Ms:4.9,evidence},availability:{independent:true,endToEnd:true,start:now-1-30*86400000,end:now-1,intervalMs:60000,healthy:43200,unhealthy:0,missing:0,evidence},audit:{independentHuman:true,completed:true,unfixedCritical:0,evidence}};}
+function args(m=fixture()){const payload=Buffer.from(JSON.stringify(m));return {payload,signature:sign(null,payload,privateKey),trust,expectedCandidate:candidate,expectedDeployment:"test-deployment",expectedScope:"test-scope",now};}
+test("authenticated synthetic fixture never authorizes release",()=>{const r=verifyIndependentEvidence(args());assert.equal(r.allAttestedThresholdsMet,true);assert.equal(r.releaseAuthorized,false);});
+test("tampering, wrong trust, wrong scope and expired evidence reject",()=>{const a=args();assert.throws(()=>verifyIndependentEvidence({...a,payload:Buffer.concat([a.payload,Buffer.from(" ")])}));assert.throws(()=>verifyIndependentEvidence({...a,trust:{...trust,keySha256:"0".repeat(64)}}));assert.throws(()=>verifyIndependentEvidence({...a,expectedScope:"other"}));assert.throws(()=>verifyIndependentEvidence({...a,now:now+1001}));});
+test("missing or duplicate controls reject",()=>{const m=fixture();m.controls.pop();assert.throws(()=>verifyIndependentEvidence(args(m)));m.controls.push(m.controls[0]);assert.throws(()=>verifyIndependentEvidence(args(m)));});
+test("unmet metrics remain false",()=>{const m=fixture();m.attack.blocked=989;m.benign.falsePositive=4;m.performance.p95Ms=5;m.availability.healthy--;m.availability.missing++;m.audit.unfixedCritical=1;m.controls[0].qualified=false;const r=verifyIndependentEvidence(args(m));for(const k of ["independentAttackHoldout","representativeBenignFalsePositive","productionInspectionP95","productionAvailability","zeroKnownUnfixedCritical","all17AttestedQualified"])assert.equal(r.goals[k],false);assert.equal(r.allAttestedThresholdsMet,false);});
+test("incomplete availability and invalid counts reject",()=>{const m=fixture();m.availability.start+=60000;assert.throws(()=>verifyIndependentEvidence(args(m)));const n=fixture();n.attack.blocked=1001;assert.throws(()=>verifyIndependentEvidence(args(n)));});
