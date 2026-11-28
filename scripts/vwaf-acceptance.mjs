@@ -7,6 +7,7 @@ import {performance} from "node:perf_hooks";
 import {inspectWafRequest,CORE_HOSTS} from "../src/vynalth-waf-core.js";
 import {readFileSync} from "node:fs";
 import {readGaChecklist} from "./vwaf-ga-checklist.mjs";
+import {readReleaseEvidence} from "./vwaf-ga-evidence-input.mjs";
 import {inspectApiSchema} from "../src/vwaf-schema.js";
 const config=readFileSync(new URL("../wrangler.toml",import.meta.url),"utf8");
 const structuredMode=config.match(/^VYNALTH_WAF_STRUCTURED_MODE = "(observe|enforce)"$/m)?.[1]||"observe";
@@ -39,9 +40,14 @@ for(let i=0;i<cases.length;i++){
 for(let i=0;i<5000;i++)evaluate(cases[i%cases.length],reqs[i%reqs.length]);
 const samples=[];for(let i=0;i<20000;i++){const n=i%cases.length,t=performance.now();evaluate(cases[n],reqs[n]);samples.push(performance.now()-t)}
 samples.sort((a,b)=>a-b);const p95=samples[Math.ceil(samples.length*.95)-1];
-const gaChecklist=readGaChecklist();
-const report={gaChecklist,suite:"vwaf-v2-rc2-original-corpus",structuredMode,missedByClass,runtime:process.version,attack:{tested:attack,blocked,rate:blocked/attack},benign:{tested:benign,falsePositive,rate:falsePositive/benign},contract:{tested:contract,rejected:contractRejected},performance:{samples:samples.length,p95Ms:p95},regressions:regression,
- goals:{knownAttackBlock:blocked/attack>=.99,benignFalsePositive:falsePositive/benign<.001,localP95:p95<5,independentAttackHoldout:null,representativeBenignFalsePositive:null,productionInspectionP95:null,productionAvailability:null,independentSecurityAudit:null,zeroKnownUnfixedCritical:null,all17RecordedQualified:gaChecklist.allRecordedQualified},
+let verified=null,evidenceStatus={state:"not-configured"};
+if(process.argv.includes("--release")){
+ try{verified=readReleaseEvidence();if(verified)evidenceStatus=verified.summary;}
+ catch{evidenceStatus={state:"rejected",reason:"Missing, invalid, untrusted, expired or mismatched qualification evidence"};}
+}
+const gaChecklist=verified?.qualification??readGaChecklist();
+const report={gaChecklist,evidenceStatus,suite:"vwaf-v2-rc2-original-corpus",structuredMode,missedByClass,runtime:process.version,attack:{tested:attack,blocked,rate:blocked/attack},benign:{tested:benign,falsePositive,rate:falsePositive/benign},contract:{tested:contract,rejected:contractRejected},performance:{samples:samples.length,p95Ms:p95},regressions:regression,
+ goals:{knownAttackBlock:blocked/attack>=.99,benignFalsePositive:falsePositive/benign<.001,localP95:p95<5,independentAttackHoldout:verified?.goals.independentAttackHoldout??null,representativeBenignFalsePositive:verified?.goals.representativeBenignFalsePositive??null,productionInspectionP95:verified?.goals.productionInspectionP95??null,productionAvailability:verified?.goals.productionAvailability??null,independentSecurityAudit:verified?.goals.independentSecurityAudit??null,zeroKnownUnfixedCritical:verified?.goals.zeroKnownUnfixedCritical??null,all17RecordedQualified:gaChecklist.allRecordedQualified&&verified?.goals.all17AttestedQualified===true},
  limitations:"Synthetic selected scenarios, not real traffic, not independent corpus, no distributed load or production SLA evidence."};
 console.log("VWAF_ACCEPTANCE "+JSON.stringify(report));
 if(regression||falsePositive)process.exitCode=1;
