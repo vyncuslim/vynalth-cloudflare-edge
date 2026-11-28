@@ -4,7 +4,7 @@
  */
 import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
-import {readFileSync,lstatSync,realpathSync} from "node:fs";
+import {constants,openSync,fstatSync,readSync,closeSync,lstatSync,realpathSync} from "node:fs";
 import {join,relative,isAbsolute,sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {verifyIndependentEvidence} from "./vwaf-independent-evidence.mjs";
@@ -15,9 +15,24 @@ const check=(ok,msg)=>{if(!ok)throw Error(msg);};
 const parse=b=>JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(b));
 const inside=(root,path)=>{const p=relative(root,path);return p===""||(!isAbsolute(p)&&p!==".."&&!p.startsWith(".."+sep));};
 function readBounded(path,max){
- const s=lstatSync(path);
- check(s.isFile()&&!s.isSymbolicLink()&&s.size>0&&s.size<=max,"Missing, nonregular or oversized evidence file");
- const b=readFileSync(path);check(b.length===s.size&&b.length<=max,"Evidence changed while reading");return b;
+ // Open once and validate/read the same descriptor, not a separately checked path.
+ // Protected parent directories remain an operator requirement.
+ check(typeof constants.O_NOFOLLOW==="number"&&typeof constants.O_NONBLOCK==="number","Required safe file-open flags unavailable");
+ const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{
+  const s=fstatSync(fd);
+  check(s.isFile()&&s.size>0&&s.size<=max,"Missing, nonregular or oversized evidence file");
+  const b=Buffer.alloc(s.size);let offset=0;
+  while(offset<b.length){
+   const n=readSync(fd,b,offset,b.length-offset,null);
+   check(n>0,"Evidence truncated while reading");offset+=n;
+  }
+  const extra=Buffer.alloc(1);
+  check(readSync(fd,extra,0,1,null)===0,"Evidence grew while reading");
+  const after=fstatSync(fd);
+  check(after.size===s.size&&after.mtimeMs===s.mtimeMs&&after.ctimeMs===s.ctimeMs,"Evidence changed while reading");
+  return b;
+ }finally{closeSync(fd);}
 }
 export function verifyReleaseBundle({bundleDir,trust,candidate,now=Date.now()}){
  check(trust?.schema==="vwaf-release-trust-v1"&&trust.approved===true&&trust.revoked===false&&trust.candidate===candidate&&
